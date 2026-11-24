@@ -216,3 +216,20 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# shape-form-proton: regenerable experiment artifacts (checkpoints, per-event
+# arrays, run logs, JSON results) and the local data cache.
+shape-form-proton/**/*.pt
+shape-form-proton/**/*.npz
+shape-form-proton/**/*.npy
+shape-form-proton/**/*.log
+shape-form-proton/**/*.err
+shape-form-proton/**/*.json
+shape-form-proton/cache/
+
+# Data files (CSV and Parquet) anywhere in the repo, e.g. shape-form-original/data/
+*.csv
+*.parquet
+
+# Archives
+*.rar

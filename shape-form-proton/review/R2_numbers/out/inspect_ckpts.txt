@@ -1,0 +1,32 @@
+slab chosen keys: ['state', 'val_nll', 'test_nll', 'n_params', 'formula', 'class'] class ProtonShape n_params 86
+  state keys: ['coef', 'lnp0', 'lnp_s', 'mask', 'ZZ', 'RR', 'LOG_VOL', 'v0', 'vs']
+  n1: keys ['state', 'val_nll', 'n_params', 'lateral', 'deg'] deg {'degree': 1, 'degrees': {'logit_tr': 2}} n_params 37 val 18.182608 same_as_chosen False
+  n2: keys ['state', 'val_nll', 'n_params', 'lateral', 'deg'] deg {'degree': 2} n_params 46 val 18.179792 same_as_chosen False
+  n3: keys ['state', 'val_nll', 'n_params', 'lateral', 'deg'] deg {'degree': 3} n_params 56 val 18.177626 same_as_chosen False
+  n4: keys ['state', 'val_nll', 'n_params', 'lateral', 'deg'] deg {'degree': 4} n_params 66 val 18.176624 same_as_chosen False
+  n5: keys ['state', 'val_nll', 'n_params', 'lateral', 'deg'] deg {'degree': 5} n_params 76 val 18.176130 same_as_chosen False
+  n6: keys ['state', 'val_nll', 'n_params', 'lateral', 'deg'] deg {'degree': 6} n_params 86 val 18.175802 same_as_chosen True
+  snapshot n1 identical state to current: True
+  snapshot n2 identical state to current: True
+  snapshot n3 identical state to current: True
+  snapshot chosen n_params 56 test 18.172637939453125 val 18.17762565612793
+  current chosen n_params 86 test 18.17091178894043 val 18.17580223083496
+stdacc chosen keys: ['state', 'val_nll', 'test_nll', 'n_params', 'formula', 'class'] class WithAcceptance n_params 86
+  state keys: ['logA', 'base.coef', 'base.lnp0', 'base.lnp_s', 'base.mask', 'base.ZZ', 'base.RR', 'base.LOG_VOL', 'base.v0', 'base.vs']
+  n1: keys ['state', 'val_nll', 'n_params', 'lateral', 'deg'] deg {'degree': 1, 'degrees': {'logit_tr': 2}} n_params 37 val 18.209949 same_as_chosen False
+  n2: keys ['state', 'val_nll', 'n_params', 'lateral', 'deg'] deg {'degree': 2} n_params 46 val 18.206858 same_as_chosen False
+  n3: keys ['state', 'val_nll', 'n_params', 'lateral', 'deg'] deg {'degree': 3} n_params 56 val 18.204990 same_as_chosen False
+  n4: keys ['state', 'val_nll', 'n_params', 'lateral', 'deg'] deg {'degree': 4} n_params 66 val 18.204264 same_as_chosen False
+  n5: keys ['state', 'val_nll', 'n_params', 'lateral', 'deg'] deg {'degree': 5} n_params 76 val 18.203838 same_as_chosen False
+  n6: keys ['state', 'val_nll', 'n_params', 'lateral', 'deg'] deg {'degree': 6} n_params 86 val 18.203602 same_as_chosen True
+  snapshot n1 identical state to current: True
+  snapshot n2 identical state to current: True
+  snapshot n3 identical state to current: True
+  snapshot chosen n_params 56 test 18.20051383972168 val 18.20499038696289
+  current chosen n_params 86 test 18.199485778808594 val 18.203601837158203
+ref_std_gflash_acc_n6 ['state', 'val_nll', 'test_nll', 'n_params', 'formula', 'class'] GFlashAcc 45 val 18.239681243896484 test 18.233463287353516
+   state keys: ['logA', 'base.coef', 'base.slope', 'base.lnp0', 'base.lnp_s']
+ref_slab_gflash_n6 ['state', 'val_nll', 'test_nll', 'n_params', 'formula', 'class'] GFlashRef 45 val 18.207794189453125 test 18.200664520263672
+   state keys: ['base.coef', 'base.slope', 'base.lnp0', 'base.lnp_s']
+ref_slab_mlp_L3xH16 ['state', 'val_nll', 'test_nll', 'n_params', 'formula', 'class'] MLPRef 881 val 18.167503356933594 test 18.16242027282715
+   state keys: ['base.static', 'base.mlp.0.weight', 'base.mlp.0.bias', 'base.mlp.2.weight', 'base.mlp.2.bias', 'base.mlp.4.weight', 'base.mlp.4.bias', 'base.mlp.6.weight', 'base.mlp.6.bias']

@@ -1,0 +1,28 @@
+[project]
+name = "particle-physics-models"
+version = "0.1.0"
+description = "Voxel-wise A/B energy-fraction segmentation of overlapping calorimeter showers"
+requires-python = ">=3.11"
+dependencies = [
+    "ipykernel>=7.4.0",
+    "matplotlib>=3.8",
+    "nbformat>=5.11.1",
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "plotly>=5.20",
+    "pyarrow>=26.0.1",
+    "pysr>=2.7.3",
+    "scipy>=1.17.1",
+    "torch>=2.4",
+]
+
+[dependency-groups]
+dev = [
+    "pyflakes>=3.2",
+]
+
+[tool.uv]
+package = false
+
+[tool.hatch.build.targets.wheel]
+packages = ["segmentation"]
