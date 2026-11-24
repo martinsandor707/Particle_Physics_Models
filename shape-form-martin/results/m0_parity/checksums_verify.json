@@ -1,0 +1,40 @@
+{
+ "files": {
+  "added": [],
+  "changed": [],
+  "n_now": 1997,
+  "n_recorded": 1997,
+  "removed": []
+ },
+ "manifest": "checksums.json",
+ "moved": {
+  "shape-form-original/05_mlp_pion_copy.ipynb": {
+   "dest_exists": true,
+   "dest_sha256_equal": false,
+   "old_path_exists": false
+  },
+  "shape-form-original/common.py": {
+   "dest_exists": true,
+   "dest_sha256_equal": true,
+   "old_path_exists": false
+  }
+ },
+ "pycache_info_only": {
+  "added": [],
+  "changed": [],
+  "removed": []
+ },
+ "stat_only": {
+  "added": [],
+  "changed": [],
+  "n_recorded": 2,
+  "removed": []
+ },
+ "status": "PASS",
+ "symlinks": {
+  "added": [],
+  "changed": [],
+  "removed": []
+ },
+ "verified_utc": "2026-11-24T16:24:59+00:00"
+}

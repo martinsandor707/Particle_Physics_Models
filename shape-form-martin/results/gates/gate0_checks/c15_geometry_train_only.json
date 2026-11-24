@@ -1,0 +1,34 @@
+{
+ "all_rows": {
+  "layer": 20.5,
+  "cell": 48.59999999999991,
+  "z_back": 4882.15
+ },
+ "train_events_only": {
+  "layer": 20.5,
+  "cell": 48.59999999999991,
+  "z_back": 4882.15
+ },
+ "val_events_only": {
+  "layer": 20.5,
+  "cell": 48.59999999999991,
+  "z_back": 4882.15
+ },
+ "test_events_only": {
+  "layer": 20.5,
+  "cell": 48.59999999999991,
+  "z_back": 4882.15
+ },
+ "train_only_equals_all": true,
+ "all_equal": true,
+ "layers": {
+  "n_distinct_z": 60,
+  "z_first": 3662.4,
+  "z_last": 4871.9,
+  "pitch_min_max": [
+   20.499999999999545,
+   20.5
+  ],
+  "depth_first_centre_to_back_mm": 1219.7499999999995
+ }
+}

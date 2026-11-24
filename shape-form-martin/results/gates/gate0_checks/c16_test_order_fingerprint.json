@@ -1,0 +1,63 @@
+{
+ "per_bin_new_minus_base_std": {
+  "max_abs_diff_ours_vs_stored": 0.0,
+  "identical_to_float_repr": true,
+  "control_shift_by_one_max_abs_diff": 0.06106625869870186,
+  "control_random_permutation_max_abs_diff": 0.05613862909376621,
+  "control_one_swapped_neighbour_pair_max_abs_diff": 4.014652222394943e-05,
+  "stored_first3": [
+   -0.08072515577077866,
+   -0.03531745821237564,
+   -0.026910830289125443
+  ],
+  "ours_first3": [
+   -0.08072515577077866,
+   -0.03531745821237564,
+   -0.026910830289125443
+  ]
+ },
+ "per_bin_new_minus_base_slab": {
+  "max_abs_diff_ours_vs_stored": 0.0,
+  "identical_to_float_repr": true,
+  "control_shift_by_one_max_abs_diff": 0.04696073941886425,
+  "control_random_permutation_max_abs_diff": 0.054574983194470406,
+  "control_one_swapped_neighbour_pair_max_abs_diff": 1.3783574104309082e-06,
+  "stored_first3": [
+   -0.06383486837148666,
+   -0.025315020233392715,
+   -0.01802932284772396
+  ],
+  "ours_first3": [
+   -0.06383486837148666,
+   -0.025315020233392715,
+   -0.01802932284772396
+  ]
+ },
+ "n_events": {
+  "npz": 14956,
+  "ours": 14956,
+  "stored_json": 14956
+ },
+ "bin_counts_ours": [
+  712,
+  749,
+  749,
+  749,
+  750,
+  750,
+  750,
+  749,
+  750,
+  750,
+  750,
+  750,
+  750,
+  749,
+  750,
+  750,
+  750,
+  749,
+  750,
+  750
+ ]
+}

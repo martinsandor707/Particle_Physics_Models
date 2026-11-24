@@ -1,0 +1,18 @@
+# Local, regenerable state
+cache/
+__pycache__/
+.julia*/
+
+# Large per-event arrays and checkpoints stay local
+results/**/*.pt
+results/**/*.npy
+results/**/*.npz
+
+# The repo root ignores *.csv globally; result tables in results/ are tracked.
+!results/**/*.csv
+
+# The repo root ignores *.log globally; the test-access log is evidence for Gate 2c and must be tracked.
+!results/test_access.log
+
+# Gate-0 working copy of the checksum manifest (regenerable)
+results/gates/gate0_checks/protected/

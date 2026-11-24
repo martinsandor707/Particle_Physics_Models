@@ -42,7 +42,7 @@ particles.
 |---|---|
 | [report_en.pdf](report_en.pdf) | The 3-page team report (12 November 2026): methods, results and conclusions of the first stage. |
 | [shape-form-original/](shape-form-original/) | The first-stage notebooks, with saved outputs. `00_common` holds the shared code; `01` GFlash formula; `02` envelope hull; `03` drop hull; `04` cylinder formula (muon); `05` MLP + distillation; `06` CNN + distillation; `07` summary. Most exist once per particle. |
-| [shape-form-original/common.py](shape-form-original/common.py) | Importable version of `00_common.ipynb` (added locally, see section 7). |
+| [shape-form-martin/common.py](shape-form-martin/common.py) | Importable version of `00_common.ipynb` (added locally, see section 7). |
 | [shape-form-proton/](shape-form-proton/) | The follow-up study: Hungarian `README.md` (also as PDF), `LAB_GUIDE.md`, the formula code (`particle_shape.py`, `proton_shape.py`), the experiment harness (`shapelab.py`, `families.py`, `envlab.py`), `scripts/`, per-topic experiment folders in `lanes/`, independent checks in `review/`, and all results and checkpoints in `results/`. |
 | `shape-form-codes.rar` | An archive of the first-stage notebooks. |
 | `pyproject.toml`, `uv.lock` | Python environment (managed with `uv`): PyTorch, pandas, pyarrow, PySR, matplotlib, plotly, scipy. |
@@ -206,12 +206,13 @@ Where the weights are:
   likelihood). The weights sit under the key `"state"`.
 - The report's own checkpoints are not in this repository.
 
-Loading the pion network with `common.py`, run from `shape-form-original/` (checked on 24 November 2026: it reproduces
+Loading the pion network with `common.py`, run from `shape-form-martin/` (checked on 24 November 2026: it reproduces
 the test NLL of 18.1208):
 
 ```python
 import torch, common
-common.configure(data_dir="data/", out_dir="results")
+common.configure(data_dir="../shape-form-original/data/", out_dir="results",
+                 file_pattern="{particle}_standalone_N100000_M0_20GeV_reg_balanced_s1_v3.parquet")
 net = common.FieldModel(hidden=32, n_layers=4).to(common.DEVICE)
 net.load_state_dict(torch.load("../shape-form-proton/results/particles/pion/mlp_std.pt",
                                map_location=common.DEVICE, weights_only=False)["state"])
@@ -308,9 +309,11 @@ on test showers. Means over the 20 momentum bins.
 - **Local results.** `shape-form-original/results/pion/` holds a partial rerun of the MLP width search: three finished
   candidates and one interrupted.
 - **Local additions.**
-  - `common.py`: the shared notebook as an importable module. Settings go through `common.configure(...)`; it can also
-    read Parquet. On synthetic data it gives bit-identical results to the notebook.
-  - `05_mlp_pion_copy.ipynb`: a copy of the pion MLP notebook that imports `common.py`.
+  - `shape-form-martin/common.py` (moved from `shape-form-original/`): the shared notebook as an importable module.
+    Settings go through `common.configure(...)`; it can also read Parquet. On synthetic data it gives bit-identical
+    results to the notebook.
+  - `shape-form-martin/05_mlp_pion_copy.ipynb` (moved from `shape-form-original/`): a copy of the pion MLP notebook that
+    imports `common.py`.
 - **Follow-up study.** Its results and checkpoints are included (145 MB), but its scripts contain absolute paths of the
   machine they were written on and its data cache is absent. It will not run here without adapting those paths and
   rebuilding the cache from the CSV files of all four particles.

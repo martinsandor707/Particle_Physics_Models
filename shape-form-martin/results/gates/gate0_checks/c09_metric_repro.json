@@ -1,0 +1,70 @@
+{
+ "device": "cuda",
+ "torch": "2.14.0+cu130",
+ "mlp": {
+  "runs": 8,
+  "per_event_spread_max": 2.6702880859375e-05,
+  "per_event_spread_mean": 4.888170937630644e-06,
+  "events_with_any_difference": 12359,
+  "n_events": 14950,
+  "events_differing_run0_vs_run1": 7720,
+  "max_abs_diff_run0_vs_run1": 2.47955322265625e-05,
+  "mean_min": 18.117856743726442,
+  "mean_max": 18.117856820594508,
+  "mean_spread": 7.686806569040527e-08,
+  "float32_mean_values": [
+   18.117855072021484
+  ],
+  "relative_per_event_spread_max": 1.5126651127994375e-06,
+  "deterministic_runs_bit_identical": true,
+  "sfm_metric_equals_common_bitwise_deterministic": true,
+  "sfm_metric_no_grad_equals_bitwise": true,
+  "sfm_metric_K16_equals_common_bitwise": true,
+  "chunk16_vs_unchunked_max_abs_diff_deterministic": 1.33514404296875e-05,
+  "deterministic_vs_default_max_abs_diff": 2.6702880859375e-05,
+  "deterministic_mean": 18.117856801839974,
+  "sfm_metric_default_mode_vs_common": {
+   "max_abs_diff": 2.288818359375e-05,
+   "mean_diff": 7.163720784777383e-08,
+   "max_rel": 1.321478787622501e-06
+  }
+ },
+ "formula": {
+  "runs": 8,
+  "per_event_spread_max": 2.86102294921875e-05,
+  "per_event_spread_mean": 4.855127238908341e-06,
+  "events_with_any_difference": 12422,
+  "n_events": 14950,
+  "events_differing_run0_vs_run1": 7709,
+  "max_abs_diff_run0_vs_run1": 2.6702880859375e-05,
+  "mean_min": 18.12006065815189,
+  "mean_max": 18.120060711225936,
+  "mean_spread": 5.3074046491019544e-08,
+  "float32_mean_values": [
+   18.120059967041016
+  ],
+  "relative_per_event_spread_max": 1.4363585438197083e-06,
+  "deterministic_runs_bit_identical": true,
+  "sfm_metric_equals_common_bitwise_deterministic": true,
+  "sfm_metric_no_grad_equals_bitwise": true,
+  "sfm_metric_K16_equals_common_bitwise": true,
+  "chunk16_vs_unchunked_max_abs_diff_deterministic": 9.5367431640625e-06,
+  "deterministic_vs_default_max_abs_diff": 2.6702880859375e-05,
+  "deterministic_mean": 18.120060710332865,
+  "sfm_metric_default_mode_vs_common": {
+   "max_abs_diff": 2.47955322265625e-05,
+   "mean_diff": -3.125755284542224e-09,
+   "max_rel": 1.341021720322493e-06
+  }
+ },
+ "test_nll_multi_equals_separate_common_calls_bitwise": true,
+ "first_batch_two_runs": {
+  "per_hit_terms_identical": true,
+  "log_mass_identical": true,
+  "nll_identical": false,
+  "nll_max_abs_diff": 1.52587890625e-05,
+  "hits_in_batch": 34749,
+  "ulp_at_18": 1.9073486328125e-06,
+  "max_abs(float32 index_add - float64 sum of the same float32 terms)": 1.5343456968963665e-05
+ }
+}
