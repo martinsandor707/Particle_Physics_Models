@@ -1,0 +1,15 @@
+{
+ "K": 1024,
+ "chunk": 64,
+ "seed": 12345,
+ "batch": 128,
+ "bulk": {
+  "z_cut": 1150.0,
+  "drop_rings": 1,
+  "renormalise": true,
+  "short": "raise"
+ },
+ "stratum": "zb >= 1221.0",
+ "val_fingerprint": "731a199763cc31c498986574083e95c9c6c61e09d83f69b294cee13cf07858a7",
+ "n_events": 14950
+}

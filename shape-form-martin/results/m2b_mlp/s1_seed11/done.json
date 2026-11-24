@@ -1,0 +1,66 @@
+{
+ "name": "s1_seed11",
+ "stage": "m2b_mlp",
+ "seed": 11,
+ "recipe": {
+  "model": "common.FieldModel(hidden=32, n_layers=4, n_freq=4)",
+  "trainer": "common.fit (unmodified)",
+  "epochs": 60,
+  "lr": 0.003,
+  "smooth": 0.0001,
+  "patience": 15,
+  "batch": 32,
+  "k_train": 16,
+  "k_val_selection": 16,
+  "min_improvement": 0.0001,
+  "seeding": "common.configure(batch=32) first (re-seeds with common.SEED=1), then random/numpy/torch seeded with s immediately before the model is built; common.SEED = s during common.fit (its shuffle generator is seeded with common.SEED + start_epoch), restored afterwards"
+ },
+ "stage1": {
+  "epochs_run": 31,
+  "best_epoch": 15,
+  "best_val_k16": 18.127788543701172,
+  "last_val_k16": 18.12787437438965,
+  "early_stopped": true,
+  "init_state_sha16": "14648552d1c121a1",
+  "skipped_loss": 0,
+  "skipped_grad": 0,
+  "epochs_with_record": 31,
+  "mean_train_seconds_per_epoch": 11.311247248803415
+ },
+ "model": "/home/martin/projects/uni/PhD/Particle_Physics_Models/shape-form-martin/results/m2b_mlp/s1_seed11/model.pt",
+ "model_sha256": "d8f6e94d04b89e5bca1d9473b547ab61f57cef962e9e56884363a15fc84d907c",
+ "val_mean": 18.120037538981357,
+ "vs_mlp": {
+  "mean": 0.0021807560872872138,
+  "se": 0.0003165455821978892,
+  "z": 6.8892324200054995,
+  "n": 14950
+ },
+ "vs_formula": {
+  "mean": -2.3098310897980247e-05,
+  "se": 0.0003754099765152486,
+  "z": -0.06152822871781626,
+  "n": 14950
+ },
+ "registry_timestamp": "2026-11-24T22:25:32+00:00",
+ "resources": {
+  "segments": [
+   {
+    "resumed_from_epoch": null,
+    "checkpoint_done_at_start": false,
+    "fit": {
+     "seconds": 377.95986890792847,
+     "peak_alloc_mb": 550.3232421875,
+     "peak_reserved_mb": 738.0
+    },
+    "evaluate": {
+     "seconds": 1.5101845264434814,
+     "peak_alloc_mb": 549.73876953125,
+     "peak_reserved_mb": 738.0
+    },
+    "finished_utc": "2026-11-24T22:25:32.890709+00:00"
+   }
+  ]
+ },
+ "finished_utc": "2026-11-24T22:25:32+00:00"
+}

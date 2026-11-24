@@ -1,0 +1,680 @@
+{
+ "created_utc": "2026-11-24T23:16:53+00:00",
+ "metric": "common.test_nll (unmodified), K=64, CUDA generator seed 12345, batch 128, inside sfm.metric.deterministic()",
+ "units": "nat per event",
+ "table": [
+  {
+   "name": "s1_seed11",
+   "k": 3841,
+   "val_mean": 18.120037538981357,
+   "vs_mlp": {
+    "mean": 0.0021807560872872138,
+    "se": 0.0003165455821978892,
+    "z": 6.8892324200054995,
+    "n": 14950
+   },
+   "vs_formula": {
+    "mean": -2.3098310897980247e-05,
+    "se": 0.0003754099765152486,
+    "z": -0.06152822871781626,
+    "n": 14950
+   },
+   "seed": 11,
+   "checkpoint": "/home/martin/projects/uni/PhD/Particle_Physics_Models/shape-form-martin/results/m2b_mlp/s1_seed11/model.pt",
+   "timestamp": "2026-11-24T22:25:32+00:00",
+   "vs_b0_mean": {
+    "mean": 0.002061832325913037,
+    "se": 0.0003201679848986373,
+    "z": 6.439845403549006
+   },
+   "stage1": {
+    "epochs_run": 31,
+    "best_epoch": 15,
+    "best_val_k16": 18.127788543701172,
+    "early_stopped": true,
+    "skipped_loss": 0,
+    "skipped_grad": 0,
+    "epochs_with_record": 31,
+    "mean_train_seconds_per_epoch": 11.311247248803415
+   },
+   "resources": {
+    "segments": 1,
+    "fit_seconds_sum": 377.95986890792847,
+    "eval_seconds_sum": 1.5101845264434814,
+    "peak_alloc_mb_fit": 550.3232421875,
+    "peak_alloc_mb_eval": 549.73876953125,
+    "resumed": [
+     null
+    ]
+   }
+  },
+  {
+   "name": "s1_seed12",
+   "k": 3841,
+   "val_mean": 18.119781949288868,
+   "vs_mlp": {
+    "mean": 0.0019251663947982532,
+    "se": 0.00029388473843983896,
+    "z": 6.5507532137207365,
+    "n": 14950
+   },
+   "vs_formula": {
+    "mean": -0.0002786880033869408,
+    "se": 0.0003884578382763378,
+    "z": -0.7174214957884055,
+    "n": 14950
+   },
+   "seed": 12,
+   "checkpoint": "/home/martin/projects/uni/PhD/Particle_Physics_Models/shape-form-martin/results/m2b_mlp/s1_seed12/model.pt",
+   "timestamp": "2026-11-24T22:38:19+00:00",
+   "vs_b0_mean": {
+    "mean": 0.0018062426334240764,
+    "se": 0.00029551034001923165,
+    "z": 6.112282342832834
+   },
+   "stage1": {
+    "epochs_run": 36,
+    "best_epoch": 20,
+    "best_val_k16": 18.127578735351562,
+    "early_stopped": true,
+    "skipped_loss": 0,
+    "skipped_grad": 0,
+    "epochs_with_record": 36,
+    "mean_train_seconds_per_epoch": 11.655744824144575
+   },
+   "resources": {
+    "segments": 1,
+    "fit_seconds_sum": 451.25324034690857,
+    "eval_seconds_sum": 1.516233205795288,
+    "peak_alloc_mb_fit": 550.32275390625,
+    "peak_alloc_mb_eval": 549.73876953125,
+    "resumed": [
+     null
+    ]
+   }
+  },
+  {
+   "name": "s1_seed13",
+   "k": 3841,
+   "val_mean": 18.119757058899538,
+   "vs_mlp": {
+    "mean": 0.0019002760054674436,
+    "se": 0.0002601319222407449,
+    "z": 7.305047335593017,
+    "n": 14950
+   },
+   "vs_formula": {
+    "mean": -0.00030357839271775056,
+    "se": 0.00035937702404320213,
+    "z": -0.8447351177387906,
+    "n": 14950
+   },
+   "seed": 13,
+   "checkpoint": "/home/martin/projects/uni/PhD/Particle_Physics_Models/shape-form-martin/results/m2b_mlp/s1_seed13/model.pt",
+   "timestamp": "2026-11-24T22:47:45+00:00",
+   "vs_b0_mean": {
+    "mean": 0.0017813522440932666,
+    "se": 0.00026607015000827645,
+    "z": 6.695047317550862
+   },
+   "stage1": {
+    "epochs_run": 46,
+    "best_epoch": 30,
+    "best_val_k16": 18.12703514099121,
+    "early_stopped": true,
+    "skipped_loss": 0,
+    "skipped_grad": 0,
+    "epochs_with_record": 46,
+    "mean_train_seconds_per_epoch": 11.321479709252067
+   },
+   "resources": {
+    "segments": 1,
+    "fit_seconds_sum": 560.4981701374054,
+    "eval_seconds_sum": 1.51092529296875,
+    "peak_alloc_mb_fit": 550.42138671875,
+    "peak_alloc_mb_eval": 549.83837890625,
+    "resumed": [
+     null
+    ]
+   }
+  },
+  {
+   "name": "s1_seed14",
+   "k": 3841,
+   "val_mean": 18.11911380735927,
+   "vs_mlp": {
+    "mean": 0.0012570244651973048,
+    "se": 0.00023154548777155578,
+    "z": 5.4288445751855585,
+    "n": 14950
+   },
+   "vs_formula": {
+    "mean": -0.0009468299329878894,
+    "se": 0.00035016795274518724,
+    "z": -2.703930858221299,
+    "n": 14950
+   },
+   "seed": 14,
+   "checkpoint": "/home/martin/projects/uni/PhD/Particle_Physics_Models/shape-form-martin/results/m2b_mlp/s1_seed14/model.pt",
+   "timestamp": "2026-11-24T22:59:42+00:00",
+   "vs_b0_mean": {
+    "mean": 0.0011381007038231278,
+    "se": 0.00023989714865006612,
+    "z": 4.744119345425218
+   },
+   "stage1": {
+    "epochs_run": 58,
+    "best_epoch": 42,
+    "best_val_k16": 18.126901626586914,
+    "early_stopped": true,
+    "skipped_loss": 0,
+    "skipped_grad": 0,
+    "epochs_with_record": 58,
+    "mean_train_seconds_per_epoch": 11.401555768374738
+   },
+   "resources": {
+    "segments": 1,
+    "fit_seconds_sum": 711.5243027210236,
+    "eval_seconds_sum": 1.5058917999267578,
+    "peak_alloc_mb_fit": 550.4404296875,
+    "peak_alloc_mb_eval": 549.83837890625,
+    "resumed": [
+     null
+    ]
+   }
+  },
+  {
+   "name": "s1_seed15",
+   "k": 3841,
+   "val_mean": 18.121150568065836,
+   "vs_mlp": {
+    "mean": 0.003293785171763953,
+    "se": 0.00041905121592657847,
+    "z": 7.86010169301371,
+    "n": 14950
+   },
+   "vs_formula": {
+    "mean": 0.0010899307735787586,
+    "se": 0.00048210386113048734,
+    "z": 2.2607800133004026,
+    "n": 14950
+   },
+   "seed": 15,
+   "checkpoint": "/home/martin/projects/uni/PhD/Particle_Physics_Models/shape-form-martin/results/m2b_mlp/s1_seed15/model.pt",
+   "timestamp": "2026-11-24T23:04:11+00:00",
+   "vs_b0_mean": {
+    "mean": 0.0031748614103897757,
+    "se": 0.000427169610061229,
+    "z": 7.432320407658921
+   },
+   "stage1": {
+    "epochs_run": 22,
+    "best_epoch": 6,
+    "best_val_k16": 18.12918472290039,
+    "early_stopped": true,
+    "skipped_loss": 0,
+    "skipped_grad": 0,
+    "epochs_with_record": 22,
+    "mean_train_seconds_per_epoch": 11.124292492866516
+   },
+   "resources": {
+    "segments": 1,
+    "fit_seconds_sum": 263.6446032524109,
+    "eval_seconds_sum": 1.4917805194854736,
+    "peak_alloc_mb_fit": 550.44189453125,
+    "peak_alloc_mb_eval": 549.83837890625,
+    "resumed": [
+     null
+    ]
+   }
+  },
+  {
+   "name": "s2_seed11",
+   "k": 3841,
+   "val_mean": 18.118039065077152,
+   "vs_mlp": {
+    "mean": 0.00018228218308260607,
+    "se": 0.0001727751446605654,
+    "z": 1.0550254982608651,
+    "n": 14950
+   },
+   "vs_formula": {
+    "mean": -0.002021572215102588,
+    "se": 0.00027823011185010185,
+    "z": -7.265828280267962,
+    "n": 14950
+   },
+   "seed": 11,
+   "checkpoint": "/home/martin/projects/uni/PhD/Particle_Physics_Models/shape-form-martin/results/m2b_mlp/s2_seed11/model.pt",
+   "timestamp": "2026-11-24T23:09:20+00:00",
+   "vs_b0_mean": {
+    "mean": 6.335842170842913e-05,
+    "se": 0.00018213142209146465,
+    "z": 0.34787199803782975
+   },
+   "stage2": {
+    "step": 6000,
+    "selected_step": 5000,
+    "selected_val": 18.12584827799462,
+    "best_val": 18.12584827799462,
+    "final_val": 18.12586545102174,
+    "skipped_loss": 0,
+    "skipped_grad": 0,
+    "resumed_from": null,
+    "seconds": 237.6546666622162
+   },
+   "resources": {
+    "segments": 1,
+    "fit_seconds_sum": 238.18121814727783,
+    "eval_seconds_sum": 16.053654193878174,
+    "peak_alloc_mb_fit": 1621.26171875,
+    "peak_alloc_mb_eval": 1337.4169921875,
+    "resumed": [
+     null
+    ]
+   },
+   "guards": {
+    "val_mean_k1024": 18.11579879269552,
+    "n_stratum": 14784,
+    "n_short": 166,
+    "n_bulk_nan": 0,
+    "bulk_mean": 18.042537689208984,
+    "gk_vs_mlp": {
+     "mean": 0.00020232471733986335,
+     "se": 0.0001719317938967365,
+     "z": 1.1767731421529928,
+     "n": 14950
+    },
+    "gk_vs_formula": {
+     "mean": -0.001965165090401436,
+     "se": 0.0002692158685388486,
+     "z": -7.299588620341142,
+     "n": 14950
+    },
+    "gk_persist_mlp": {
+     "passed": false,
+     "resolved": false,
+     "fraction": 1.1099533367349155
+    },
+    "bulk_vs_mlp": {
+     "mean": 0.00020303109507540087,
+     "se": 0.00016893376768305785,
+     "z": 1.2018384356188285,
+     "n": 14784
+    },
+    "bulk_vs_formula": {
+     "mean": -0.0016799461402934352,
+     "se": 0.000262946456004796,
+     "z": -6.388928627594029,
+     "n": 14784
+    },
+    "report_on_stratum_vs_mlp": {
+     "mean": 0.0002092884216473732,
+     "se": 0.0001695548048552932,
+     "z": 1.234340848234827,
+     "n": 14784
+    },
+    "report_on_short_vs_mlp": {
+     "mean": -0.0022228999310229198,
+     "se": 0.0037603490843102095,
+     "z": -0.5911419076217718,
+     "n": 166
+    },
+    "bulk_persist_mlp": {
+     "passed": false,
+     "resolved": false,
+     "fraction": 0.9701018980279988
+    },
+    "mass": {
+     "total": {
+      "mean": 0.9999999827833618,
+      "max": 1.0000003304509244
+     },
+     "last_ring": {
+      "mean": 0.0025550603610821755,
+      "max": 0.002675679119826779
+     },
+     "first_z": {
+      "mean": 3.781620085672403e-05,
+      "max": 5.422546591217222e-05
+     },
+     "last_z": {
+      "mean": 5.586383276304968e-05,
+      "max": 7.081721430002848e-05
+     },
+     "inside_zb": {
+      "mean": 0.9968995062676445,
+      "max": 1.000000313548051
+     },
+     "beyond_zb": {
+      "mean": 0.0031004765157171855,
+      "max": 0.973148008976506
+     },
+     "outside_bulk": {
+      "mean": 0.017507907924128773,
+      "max": 0.9732499173310264
+     },
+     "mask:abar_le_0.01": {
+      "mean": 4.395385717474396e-07,
+      "max": 1.2530773969854753e-06
+     }
+    }
+   }
+  },
+  {
+   "name": "s2_seed12",
+   "k": 3841,
+   "val_mean": 18.118186059077846,
+   "vs_mlp": {
+    "mean": 0.0003292761837758348,
+    "se": 0.00016996112188822084,
+    "z": 1.9373617926127336,
+    "n": 14950
+   },
+   "vs_formula": {
+    "mean": -0.0018745782144093594,
+    "se": 0.0003114963228604348,
+    "z": -6.0179786303585345,
+    "n": 14950
+   },
+   "seed": 12,
+   "checkpoint": "/home/martin/projects/uni/PhD/Particle_Physics_Models/shape-form-martin/results/m2b_mlp/s2_seed12/model.pt",
+   "timestamp": "2026-11-24T23:13:34+00:00",
+   "vs_b0_mean": {
+    "mean": 0.00021035242240165786,
+    "se": 0.0001740728123229367,
+    "z": 1.2084162919791053
+   },
+   "stage2": {
+    "step": 6000,
+    "selected_step": 3000,
+    "selected_val": 18.125833604933824,
+    "best_val": 18.125833604933824,
+    "final_val": 18.125909987612314,
+    "skipped_loss": 0,
+    "skipped_grad": 0,
+    "resumed_from": null,
+    "seconds": 237.65049266815186
+   },
+   "resources": {
+    "segments": 1,
+    "fit_seconds_sum": 237.67840266227722,
+    "eval_seconds_sum": 16.096375703811646,
+    "peak_alloc_mb_fit": 1621.36865234375,
+    "peak_alloc_mb_eval": 1337.5166015625,
+    "resumed": [
+     null
+    ]
+   },
+   "guards": {
+    "val_mean_k1024": 18.11595198009325,
+    "n_stratum": 14784,
+    "n_short": 166,
+    "n_bulk_nan": 0,
+    "bulk_mean": 18.042695999145508,
+    "gk_vs_mlp": {
+     "mean": 0.0003555121150702537,
+     "se": 0.00017245174972909015,
+     "z": 2.061516427805104,
+     "n": 14950
+    },
+    "gk_vs_formula": {
+     "mean": -0.0018119776926710455,
+     "se": 0.00030592296954853497,
+     "z": -5.9229867418751425,
+     "n": 14950
+    },
+    "gk_persist_mlp": {
+     "passed": false,
+     "resolved": true,
+     "fraction": 1.0796775855258327
+    },
+    "bulk_vs_mlp": {
+     "mean": 0.00036017364495760434,
+     "se": 0.0001681151859341825,
+     "z": 2.1424218339122154,
+     "n": 14784
+    },
+    "bulk_vs_formula": {
+     "mean": -0.0015228035904112317,
+     "se": 0.00029449189950080167,
+     "z": -5.170952386101494,
+     "n": 14784
+    },
+    "report_on_stratum_vs_mlp": {
+     "mean": 0.00039104704474989986,
+     "se": 0.0001677948617634466,
+     "z": 2.3305066713019444,
+     "n": 14784
+    },
+    "report_on_short_vs_mlp": {
+     "mean": -0.005172051579119211,
+     "se": 0.0032951599488131493,
+     "z": -1.5695904476449105,
+     "n": 166
+    },
+    "bulk_persist_mlp": {
+     "passed": false,
+     "resolved": false,
+     "fraction": 0.9210493974911866
+    },
+    "mass": {
+     "total": {
+      "mean": 0.9999999837517028,
+      "max": 1.0000003290969752
+     },
+     "last_ring": {
+      "mean": 0.00261980770466738,
+      "max": 0.0027366844920565896
+     },
+     "first_z": {
+      "mean": 3.5162607117209086e-05,
+      "max": 3.897859166923322e-05
+     },
+     "last_z": {
+      "mean": 4.7712492665431224e-05,
+      "max": 6.205452320572629e-05
+     },
+     "inside_zb": {
+      "mean": 0.9968392214826767,
+      "max": 1.0000003290969754
+     },
+     "beyond_zb": {
+      "mean": 0.003160762269026009,
+      "max": 0.9729098598008281
+     },
+     "outside_bulk": {
+      "mean": 0.017962849529445806,
+      "max": 0.9730136297711666
+     },
+     "mask:abar_le_0.01": {
+      "mean": 3.55735299273687e-07,
+      "max": 4.0867171583550355e-07
+     }
+    }
+   }
+  },
+  {
+   "name": "b0_seed0",
+   "k": 3841,
+   "val_mean": 18.117975706655447,
+   "vs_mlp": {
+    "mean": 0.00011892376137417695,
+    "se": 4.178753835191432e-05,
+    "z": 2.8459145014156824,
+    "n": 14950
+   },
+   "vs_formula": {
+    "mean": -0.002084930636811017,
+    "se": 0.00029881742047146596,
+    "z": -6.977272722324791,
+    "n": 14950
+   },
+   "seed": 0,
+   "checkpoint": "/home/martin/projects/uni/PhD/Particle_Physics_Models/shape-form-martin/results/m2b_mlp/b0_seed0/model.pt",
+   "timestamp": "2026-11-24T22:17:42+00:00",
+   "vs_b0_mean": {
+    "mean": 0.0,
+    "se": 0.0,
+    "z": 0.0
+   },
+   "stage2": {
+    "step": 6000,
+    "selected_step": 3250,
+    "selected_val": 18.125655653644166,
+    "best_val": 18.125655653644166,
+    "final_val": 18.125679230323204,
+    "skipped_loss": 0,
+    "skipped_grad": 0,
+    "resumed_from": null,
+    "seconds": 237.84769654273987
+   },
+   "resources": {
+    "segments": 1,
+    "fit_seconds_sum": 238.38665127754211,
+    "eval_seconds_sum": 42.78429579734802,
+    "peak_alloc_mb_fit": 1621.29638671875,
+    "peak_alloc_mb_eval": 1337.7978515625,
+    "resumed": [
+     null
+    ]
+   },
+   "guards": {
+    "val_mean_k1024": 18.115737990184773,
+    "n_stratum": 14784,
+    "n_short": 166,
+    "n_bulk_nan": 0,
+    "bulk_mean": 18.04244041442871,
+    "gk_vs_mlp": {
+     "mean": 0.00014152220659032714,
+     "se": 4.092061328812843e-05,
+     "z": 3.458457613864366,
+     "n": 14950
+    },
+    "gk_vs_formula": {
+     "mean": -0.002025967601150972,
+     "se": 0.0002907088363554291,
+     "z": -6.969060956489003,
+     "n": 14950
+    },
+    "gk_persist_mlp": {
+     "passed": false,
+     "resolved": true,
+     "fraction": 1.1900246423004344
+    },
+    "bulk_vs_mlp": {
+     "mean": 0.00010645905614415289,
+     "se": 3.999542986237679e-05,
+     "z": 2.661780521186437,
+     "n": 14784
+    },
+    "bulk_vs_formula": {
+     "mean": -0.001776518179224683,
+     "se": 0.0002807902541236769,
+     "z": -6.326851281819053,
+     "n": 14784
+    },
+    "report_on_stratum_vs_mlp": {
+     "mean": 0.00010746607790777694,
+     "se": 4.169997385484248e-05,
+     "z": 2.577125786262268,
+     "n": 14784
+    },
+    "report_on_short_vs_mlp": {
+     "mean": 0.001139347811779344,
+     "se": 0.0006054883047522363,
+     "z": 1.88170077413066,
+     "n": 166
+    },
+    "bulk_persist_mlp": {
+     "passed": false,
+     "resolved": true,
+     "fraction": 0.9906293987532676
+    },
+    "mass": {
+     "total": {
+      "mean": 0.9999999841270969,
+      "max": 1.0000003177749097
+     },
+     "last_ring": {
+      "mean": 0.002594914623378448,
+      "max": 0.002823187792926497
+     },
+     "first_z": {
+      "mean": 2.7015878798047033e-05,
+      "max": 2.8726398555292023e-05
+     },
+     "last_z": {
+      "mean": 5.752813901201895e-05,
+      "max": 8.171734944010267e-05
+     },
+     "inside_zb": {
+      "mean": 0.9968860570148448,
+      "max": 1.0000003177749097
+     },
+     "beyond_zb": {
+      "mean": 0.0031139271122522746,
+      "max": 0.9738589751708066
+     },
+     "outside_bulk": {
+      "mean": 0.017611067790805315,
+      "max": 0.9739462585205222
+     },
+     "mask:abar_le_0.01": {
+      "mean": 4.5734432186795286e-08,
+      "max": 1.1684164210817773e-07
+     }
+    }
+   }
+  }
+ ],
+ "b0_scatter": {
+  "names": [
+   "b0_seed0"
+  ],
+  "val_means": [
+   18.117975706655447
+  ],
+  "sd_over_seeds": null,
+  "range": 0.0,
+  "pairwise": {},
+  "vs_mlp": {
+   "b0_seed0": {
+    "mean": 0.00011892376137417695,
+    "se": 4.178753835191432e-05,
+    "z": 2.8459145014156824,
+    "n": 14950
+   }
+  }
+ },
+ "s1_scatter": {
+  "val_means": [
+   18.120037538981357,
+   18.119781949288868,
+   18.119757058899538,
+   18.11911380735927,
+   18.121150568065836
+  ],
+  "sd_over_seeds": 0.00074364958355441
+ },
+ "s2_scatter": {
+  "val_means": [
+   18.118039065077152,
+   18.118186059077846
+  ],
+  "sd_over_seeds": 0.00010394045468459358
+ },
+ "finetune_gain_s2_minus_s1": {
+  "11": {
+   "mean": -0.0019984739042046076,
+   "se": 0.00026433435360338607,
+   "z": -7.560401729709216
+  },
+  "12": {
+   "mean": -0.0015958902110224185,
+   "se": 0.0002717881975531809,
+   "z": -5.871815720438523
+  }
+ },
+ "ensemble_scaling": null
+}

@@ -1,0 +1,19 @@
+{
+ "segments": [
+  {
+   "resumed_from_epoch": null,
+   "checkpoint_done_at_start": false,
+   "fit": {
+    "seconds": 711.5243027210236,
+    "peak_alloc_mb": 550.4404296875,
+    "peak_reserved_mb": 730.0
+   },
+   "evaluate": {
+    "seconds": 1.5058917999267578,
+    "peak_alloc_mb": 549.83837890625,
+    "peak_reserved_mb": 730.0
+   },
+   "finished_utc": "2026-11-24T22:59:42.196706+00:00"
+  }
+ ]
+}

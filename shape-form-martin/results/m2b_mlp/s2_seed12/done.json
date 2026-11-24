@@ -1,0 +1,49 @@
+{
+ "name": "s2_seed12",
+ "stage": "m2b_mlp",
+ "config": "/home/martin/projects/uni/PhD/Particle_Physics_Models/shape-form-martin/configs/m2b/s2_seed12.toml",
+ "run_hash": "b1aab8a012d31448",
+ "fit": {
+  "name": "s2_seed12",
+  "config_hash": "ea9b267bfe0ff7f8",
+  "step": 6000,
+  "skipped_loss": 0,
+  "skipped_grad": 0,
+  "selection": "best_val",
+  "selected_step": 3000,
+  "selected_val": 18.125833604933824,
+  "final_val": 18.125909987612314,
+  "final_val_ema": null,
+  "best_val": 18.125833604933824,
+  "best_step": 3000,
+  "has_ema": false,
+  "resumed_from": null,
+  "seconds": 237.65049266815186,
+  "out_dir": "/home/martin/projects/uni/PhD/Particle_Physics_Models/shape-form-martin/results/m2b_mlp/s2_seed12",
+  "model_path": "/home/martin/projects/uni/PhD/Particle_Physics_Models/shape-form-martin/results/m2b_mlp/s2_seed12/model.pt"
+ },
+ "registered": true,
+ "val_mean": 18.118186059077846,
+ "seconds": 253.87111616134644,
+ "resources": {
+  "segments": [
+   {
+    "resumed_from_step": null,
+    "fit": {
+     "seconds": 237.67840266227722,
+     "peak_alloc_mb": 1621.36865234375,
+     "peak_reserved_mb": 1740.0
+    },
+    "fit_seconds_total_in_run": 237.65049266815186,
+    "evaluate": {
+     "seconds": 16.096375703811646,
+     "peak_alloc_mb": 1337.5166015625,
+     "peak_reserved_mb": 4374.0
+    },
+    "guards": true,
+    "finished_utc": "2026-11-24T23:13:48.944408+00:00"
+   }
+  ]
+ },
+ "finished_utc": "2026-11-24T23:13:48+00:00"
+}

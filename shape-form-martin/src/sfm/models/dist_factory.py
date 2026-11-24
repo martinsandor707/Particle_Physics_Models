@@ -1,0 +1,634 @@
+"""Track A (M2A) model factories: the ``component`` and ``mixture`` factories of AUDIT.md section 4.1, the two extra
+acceptance templates ``back_corrected`` / ``full_box`` and the last-ring wrapper of rung A12.
+
+Importing this module registers two factories in ``sfm.models.FACTORIES`` (thin wrappers, no new mathematics):
+
+    component(variant, provider, shower_long, shower_long_kw, shower_lat, far, det_halo, template, start, ...)
+        -> sfm.families.build_variant(variant, core, logA, ...) with core, logA = load_legacy_core()
+    mixture(K, long, long_kw, lat, depth, order, fine, template, provider, target, ...)
+        -> sfm.families.MixtureModel(...) with a PolyProvider (degree 3; 0 for the c{k}_lat_* shape rows)
+
+Providers (AUDIT 4.1 "Providers")
+    "poly"   PolyProvider: legacy degrees; new depth-profile rows degree 3, new radial-shape rows degree 0 (the rule of
+             ``build_variant``), ``degrees`` overrides single rows (A6b: sh_rk degree 0). ``start`` = a finished run
+             ("<stage>/<name>") whose provider coefficients are copied BY NAME into the new PolyProvider; rows that
+             do not exist there keep the family defaults.
+    "net"    ParamNet(names_net = momentum-dependent names minus radial-shape names, names_const = legacy-constant
+             names + radial-shape names, width 16, depth 2, tanh, v0/vs of the polynomial provider), fit_to(the
+             polynomial provider of ``net_from`` (a finished poly run; None = the model's own legacy provider),
+             default_lnp(48), steps=2000, lbfgs_iter=500), then ``model.set_provider(net)``.
+             With ``net_from`` the whole fitted poly model is rebuilt first (``load_run``), so trainable scalars that
+             live outside the provider (the detector-halo L and R of A9) start at their fitted values as well.
+             Literal-reading note: the audit lists the radial shape names under names_const while they also belong to
+             ``model.momentum_dependent``; a name cannot be both, so they are removed from names_net.
+             For the MixtureModel, which has no legacy split, names_net = rows of polynomial degree > 0 and
+             names_const = the c{k}_lat_* rows (degree 0 in the poly version).
+
+Initialisations (run only when the context does not ask to skip them, i.e. not when weights are loaded right after)
+    init="shower_long"  ``init_shower_long(model, reference=load_run(init_ref))`` with its defaults (A4, A5, A4t, A5h,
+                        A6*): KL matching of the new shower depth profile to the reference's depth marginal
+    init="target"       mixture only: ``init_from_target(model, target=ref.core_map, names=model.names,
+                        model_fn=model.core_map, steps=init_steps, n_search=init_search)`` with ref = load_run(init_ref)
+    init="none"         nothing beyond the coefficient copy
+    In every case ``model.init_info`` records ``kl_map`` = mean over ``default_lnp(48)`` of KL(P_ref || P_model), the
+    reference being the model the new one was started from (the start / init / net_from run, or the legacy formula
+    itself for runs that start from the legacy coefficients), plus the KL trail of the initialiser.
+
+Acceptance templates (``acceptance_template``)
+    "stored", "front", "front_back"  -> ``sfm.models.field.acceptance_template`` (existing files)
+    "back_corrected" = mean_e A_front^back / mean_e 1[z' < zb_e]
+    "full_box"       = mean_e A_front^back^side / mean_e 1[z' < zb_e]
+    (AUDIT 4.1 "Template definitions"), event means over the TRAINING events. ``compute_templates`` evaluates them
+    with ``acceptances`` / ``exit_depth``, ported from ``results/m1_audit/checks/c_side.py::acceptances`` and
+    ``::exit_depth`` (M1-d reviewer code; geometry: box |X|, |Y| <= 54 cells = 2624.4 mm, front face half a layer in
+    front of the first-layer centre, back face at z_back, straight line from the global origin; 2 x 2 sub-points per
+    cell and 24 azimuth nodes). 1[z' < zb_e] is averaged over the same two z sub-points per cell. The results are
+    stored once in ``results/m2a_dist/templates/`` (``scripts/run_m2a.py templates``) and read from there.
+
+Last-ring wrapper (rung A12): ``LastRing(base)`` adds one trainable scalar (start 0) to the log-probabilities of
+ring 31 and renormalises: log P' = log_softmax(log P + d 1[ring = 31]).
+"""
+from __future__ import annotations
+
+import json
+import math
+from pathlib import Path
+from typing import Optional, Sequence
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+from .. import paths
+from . import FACTORIES, BuildContext, load_run, register
+from .field import C as _C
+from .field import acceptance_template as _field_acceptance_template
+from .paramnet import ParamNet
+
+__all__ = ["TEMPLATE_DIR", "NEW_TEMPLATES", "acceptance_template", "acceptances", "exit_depth", "compute_templates",
+           "LastRing", "radial_shape_names", "net_name_split", "make_paramnet", "copy_coefficients_by_name",
+           "kl_map", "legacy_core", "THETA_FILE"]
+
+STAGE = "m2a_dist"
+TEMPLATE_DIR = paths.RESULTS_DIR / STAGE / "templates"
+THETA_FILE = TEMPLATE_DIR / "train_theta.npy"
+NEW_TEMPLATES = ("back_corrected", "full_box")
+
+# geometry of results/m1_audit/checks/c_side.py
+Z_BACK, X_E, LAYER = 4882.15, 54 * 48.6, 20.5
+NSUB, NPHI = 2, 24
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# geometry (ported from results/m1_audit/checks/c_side.py)
+# ----------------------------------------------------------------------------------------------------------------------
+def exit_depth(theta, phi, z0):
+    """Depth along the shower axis at which the axis crosses |X| = X_E or |Y| = X_E (inf if never).
+    Port of ``results/m1_audit/checks/c_side.py::exit_depth`` (unchanged). Returns (z_exit, X0, Y0)."""
+    theta, phi, z0 = (np.asarray(a, dtype=np.float64) for a in (theta, phi, z0))
+    rho0 = z0 * np.tan(theta)
+    X0, Y0 = rho0 * np.cos(phi), rho0 * np.sin(phi)
+    cx, cy = np.sin(theta) * np.cos(phi), np.sin(theta) * np.sin(phi)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        tx = np.where(np.abs(cx) > 1e-12, (X_E - np.sign(cx) * X0) / np.abs(cx), np.inf)
+        ty = np.where(np.abs(cy) > 1e-12, (X_E - np.sign(cy) * Y0) / np.abs(cy), np.inf)
+    return np.minimum(tx, ty), X0, Y0
+
+
+@torch.no_grad()
+def acceptances(b, X0, Y0, zbcos, nsub: int = NSUB, nphi: int = NPHI) -> dict:
+    """dict of A (B, N_Z, N_R): 'front', 'fb', 'side', 'all', 'front_side', and 'below_zb' (the fraction of the
+    cell's z sub-points with z' < zb_e; no azimuth dependence).
+
+    Port of ``results/m1_audit/checks/c_side.py::acceptances`` with the device taken from the batch instead of a
+    module constant, ``nsub`` / ``nphi`` as arguments and the extra 'below_zb' entry. ``b`` is a
+    ``Showers.batch`` (needs R, lnp, zb), X0, Y0 the transverse position of the shower origin in the global frame,
+    zbcos = zb cos(theta) the depth of the back face below the shower origin (all tensors (B,))."""
+    dev = b.R.device
+    ze, re, dz = _C.Z_EDGES.to(dev), _C.R_EDGES.to(dev), float(_C.DZ)
+    k = (torch.arange(nsub, device=dev, dtype=torch.float32) + 0.5) / nsub
+    zs = (ze[:-1, None] + dz * k).reshape(-1)                                                   # (N_Z * nsub,)
+    rs = torch.sqrt(re[:-1, None] ** 2 + (re[1:, None] ** 2 - re[:-1, None] ** 2) * k).reshape(-1)
+    al = (torch.arange(nphi, device=dev, dtype=torch.float32) + 0.5) / nphi * 2 * math.pi
+    R = b.R                                                                                     # global -> shower
+    ca, sa = torch.cos(al), torch.sin(al)
+    B = len(b.lnp)
+    gx = (R[:, 0, 0, None, None, None] * rs[None, None, :, None] * ca + R[:, 1, 0, None, None, None] * rs[None, None, :, None] * sa
+          + R[:, 2, 0, None, None, None] * zs[None, :, None, None])                             # (B, Z, Rr, A)
+    gy = (R[:, 0, 1, None, None, None] * rs[None, None, :, None] * ca + R[:, 1, 1, None, None, None] * rs[None, None, :, None] * sa
+          + R[:, 2, 1, None, None, None] * zs[None, :, None, None])
+    gz = (R[:, 0, 2, None, None, None] * rs[None, None, :, None] * ca + R[:, 1, 2, None, None, None] * rs[None, None, :, None] * sa
+          + R[:, 2, 2, None, None, None] * zs[None, :, None, None])
+    front = gz >= -LAYER / 2
+    back = gz <= zbcos[:, None, None, None]
+    side = ((X0[:, None, None, None] + gx).abs() <= X_E) & ((Y0[:, None, None, None] + gy).abs() <= X_E)
+
+    def red(m):
+        return m.float().mean(3).reshape(B, _C.N_Z, nsub, _C.N_R, nsub).mean((2, 4))
+    out = {"front": red(front), "fb": red(front & back), "side": red(side), "all": red(front & back & side),
+           "front_side": red(front & side)}
+    below = (zs[None, :] < b.zb[:, None]).float().reshape(B, _C.N_Z, nsub).mean(2)            # (B, N_Z)
+    out["below_zb"] = below[:, :, None].expand(B, _C.N_Z, _C.N_R)
+    return out
+
+
+@torch.no_grad()
+def compute_templates(train, theta, phi, device=None, batch: int = 32, log=print) -> dict:
+    """Event means over ``train`` (a ``common.Showers`` of the TRAINING split; theta, phi its per-event angles) of the
+    acceptances above, and the two new templates. Returns numpy float64 arrays (N_Z, N_R) keyed by
+    'front', 'fb', 'side', 'all', 'front_side', 'below_zb', 'back_corrected', 'full_box'."""
+    device = device or _C.DEVICE
+    zb = train.ev["zb"].detach().cpu().numpy().astype(np.float64)
+    th, ph = np.asarray(theta, dtype=np.float64), np.asarray(phi, dtype=np.float64)
+    z0 = Z_BACK - zb * np.cos(th)
+    _, X0, Y0 = exit_depth(th, ph, z0)
+    sh = train.to(device)
+    X0t = torch.tensor(X0, dtype=torch.float32, device=device)
+    Y0t = torch.tensor(Y0, dtype=torch.float32, device=device)
+    zbc = torch.tensor(zb * np.cos(th), dtype=torch.float32, device=device)
+    names = ("front", "fb", "side", "all", "front_side", "below_zb")
+    acc = {n: torch.zeros(_C.N_Z, _C.N_R, dtype=torch.float64, device=device) for n in names}
+    N = len(sh)
+    idx_all = torch.arange(N, device=device)
+    for s in range(0, N, batch):
+        idx = idx_all[s:s + batch]
+        A = acceptances(sh.batch(idx), X0t[idx], Y0t[idx], zbc[idx])
+        for n in names:
+            acc[n] += A[n].double().sum(0)
+        if log and (s // batch) % 500 == 0:
+            log(f"  templates: {s}/{N} events")
+    out = {n: (acc[n] / N).cpu().numpy() for n in names}
+    den = out["below_zb"]
+    if not (den > 0).all():
+        raise RuntimeError("mean_e 1[z' < zb_e] is zero in some cells: the template ratio is undefined there")
+    out["back_corrected"] = out["fb"] / den
+    out["full_box"] = out["all"] / den
+    return out
+
+
+def acceptance_template(kind: str = "stored", device=None) -> torch.Tensor:
+    """Acceptance template (N_Z, N_R): the existing kinds of ``sfm.models.field.acceptance_template`` and the two new
+    ones (``NEW_TEMPLATES``), read from ``TEMPLATE_DIR`` (written by ``scripts/run_m2a.py templates``)."""
+    device = device or _C.DEVICE
+    if kind not in NEW_TEMPLATES:
+        return _field_acceptance_template(kind, device)
+    f = TEMPLATE_DIR / f"{kind}.pt"
+    if not f.exists():
+        raise FileNotFoundError(f"{f} missing: run `uv run python -B shape-form-martin/scripts/run_m2a.py templates`")
+    A = torch.load(f, map_location=device, weights_only=False)
+    if A.shape != (_C.N_Z, _C.N_R) or not torch.isfinite(A).all():
+        raise ValueError(f"template {kind}: bad shape {tuple(A.shape)} or non-finite values")
+    return A.float()
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# last-ring wrapper (A12)
+# ----------------------------------------------------------------------------------------------------------------------
+class LastRing(nn.Module):
+    """log P' = log_softmax(log P_base + d 1[ring = N_R - 1]); d is one trainable scalar starting at ``init`` (0)."""
+
+    def __init__(self, base: nn.Module, init: float = 0.0):
+        super().__init__()
+        self.base = base
+        self.log_f_last = nn.Parameter(torch.tensor(float(init)))
+
+    def forward(self, lnp):
+        out = self.base(lnp)
+        add = torch.zeros(out.shape[-1], device=out.device, dtype=out.dtype)
+        add = add + F.one_hot(torch.tensor(out.shape[-1] - 1, device=out.device), out.shape[-1]).to(out.dtype) * self.log_f_last
+        B = out.shape[0]
+        return F.log_softmax((out + add).reshape(B, -1), 1).reshape(out.shape)
+
+    def n_params(self) -> int:
+        return int(self.base.n_params()) + 1
+
+    @property
+    def provider(self):
+        return self.base.provider
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# helpers
+# ----------------------------------------------------------------------------------------------------------------------
+_CORE = {}
+
+
+def legacy_core():
+    """(core, logA) of the final pion formula on the CPU (``sfm.families.load_legacy_core``), cached."""
+    if "core" not in _CORE:
+        from ..families import load_legacy_core
+        _CORE["core"] = load_legacy_core("cpu")
+    return _CORE["core"]
+
+
+def radial_shape_names(model) -> list:
+    """Raw names of the shape parameters of the radial families (shower cross-section of a ComponentModel; the
+    c{k}_lat_* rows of a MixtureModel)."""
+    from ..families.components import ComponentModel, MixtureModel
+    base = model.base if isinstance(model, LastRing) else model
+    if isinstance(base, ComponentModel):
+        return [t.shape_prefix + n for t in base.sh_lat.terms for n, _ in t.family.SHAPES]
+    if isinstance(base, MixtureModel):
+        return [n for n in base.names if "_lat_" in n]
+    raise TypeError(f"radial_shape_names: unsupported model {type(base).__name__}")
+
+
+def net_name_split(model) -> tuple:
+    """(names_net, names_const) of the ParamNet provider (module docstring)."""
+    from ..families.components import ComponentModel, MixtureModel
+    base = model.base if isinstance(model, LastRing) else model
+    shapes = radial_shape_names(base)
+    if isinstance(base, ComponentModel):
+        net = [n for n in base.momentum_dependent if n not in shapes]
+        const = list(base.legacy_constant) + [n for n in shapes if n not in base.legacy_constant]
+    elif isinstance(base, MixtureModel):
+        deg = base.provider.deg
+        net = [n for n in base.names if deg[n] > 0 and n not in shapes]
+        const = [n for n in base.names if n not in net]
+    else:
+        raise TypeError(f"net_name_split: unsupported model {type(base).__name__}")
+    if sorted(net + const) != sorted(base.names):
+        raise RuntimeError("net_name_split: the split does not cover the model's names exactly")
+    return net, const
+
+
+def make_paramnet(model, poly, lnp_grid=None, steps: int = 2000, lbfgs_iter: int = 500, fit: bool = True,
+                  log=None) -> tuple:
+    """ParamNet for ``model`` (names from ``net_name_split``), v0/vs/mass of ``poly``; fitted to ``poly`` unless
+    ``fit`` is False. Returns (net, fit report or None). Seed the global RNG before calling."""
+    from ..families.components import default_lnp
+    names_net, names_const = net_name_split(model)
+    dev = poly.coef.device
+    net = ParamNet(names_net, names_const, width=16, depth=2, activation="tanh", v0=float(poly.v0),
+                   vs=float(poly.vs), mass=float(poly.mass)).to(dev)
+    with torch.no_grad():                                        # the exact float32 buffers of the provider
+        net.v0.copy_(poly.v0)
+        net.vs.copy_(poly.vs)
+        net.mass.copy_(poly.mass)
+    rep = None
+    if fit:
+        grid = default_lnp(48, device=dev) if lnp_grid is None else lnp_grid
+        degenerate = _degenerate_net_columns(net, poly, grid)
+        if not degenerate:
+            rep = net.fit_to(poly, grid, steps=steps, lbfgs_iter=lbfgs_iter, log=log)
+            rep["fit_to_workaround"] = False
+        else:
+            # WORKAROUND for a bug in sfm.models.paramnet.ParamNet.fit_to (not patched here): with weights=None it
+            # divides every target column by its variance whenever var > 0. A column that is constant in momentum
+            # (e.g. logit_dh, a degree-0 row that the audit's names_net places among the net outputs) has a variance
+            # of float32 rounding (~1e-15) and then receives a weight ~1e15: the other columns are not fitted
+            # (rms errors ~1 on the shower parameters) and the L-BFGS polish overflows ("value cannot be converted
+            # to type float without overflow"). Replica of fit_to with one change - a column whose variance is below
+            # 1e-12 * max(1, mean^2) counts as constant (weight 1/G, as fit_to does for var == 0) - and the L-BFGS
+            # chunks guarded. Used only when such a column exists; otherwise fit_to itself runs.
+            rep = _fit_to_robust(net, poly, grid, steps=steps, lbfgs_iter=lbfgs_iter)
+            rep["fit_to_workaround"] = f"constant net target columns {degenerate}: robust replica of fit_to used"
+    return net, rep
+
+
+def _fit_target(net, poly, lnp_grid):
+    dev = net.v0.device
+    lnp_grid = torch.as_tensor(lnp_grid, dtype=torch.float32, device=dev).reshape(-1)
+    with torch.no_grad():
+        full = poly(lnp_grid).to(dev, torch.float32)
+    idx = torch.tensor([poly.names.index(n) for n in net.names], device=dev)
+    return lnp_grid, full.index_select(1, idx)
+
+
+def _degenerate_net_columns(net, poly, lnp_grid) -> list:
+    _, target = _fit_target(net, poly, lnp_grid)
+    w = torch.ones_like(target)                                    # the float operations of fit_to (weights=None)
+    w = w / w.sum(0, keepdim=True)
+    mean = (w * target).sum(0)
+    var = (w * (target - mean) ** 2).sum(0)
+    bad = (var > 0) & (var <= 1e-12 * torch.clamp(mean * mean, min=1.0))
+    return [n for j, n in enumerate(net.names) if n in net.names_net and bool(bad[j])]
+
+
+def _fit_to_robust(net, poly, lnp_grid, steps: int = 2000, lr: float = 1e-2, lbfgs_iter: int = 500) -> dict:
+    """``ParamNet.fit_to(poly, lnp_grid, weights=None, steps, lr, lbfgs_iter)`` line by line, except for the
+    variance floor of the column normalisation and the guarded L-BFGS chunks (see ``make_paramnet``)."""
+    lnp_grid, target = _fit_target(net, poly, lnp_grid)
+    dev = net.v0.device
+    G, P = target.shape
+    w = torch.ones(G, P, device=dev)
+    w = w / w.sum(0, keepdim=True)
+    mean = (w * target).sum(0)
+    var = (w * (target - mean) ** 2).sum(0)
+    w = w / torch.where(var > 1e-12 * torch.clamp(mean * mean, min=1.0), var, torch.ones_like(var))
+    col = {n: j for j, n in enumerate(net.names)}
+    with torch.no_grad():
+        for n in net.names_const:
+            net.const[n].copy_(mean[col[n]])
+        last = net.mlp[-1]
+        last.weight.zero_()
+        last.bias.copy_(mean[[col[n] for n in net.names_net]])
+    net_cols = torch.tensor([col[n] for n in net.names_net], device=dev, dtype=torch.long)
+    xg = net.x(lnp_grid)[:, None]
+    tw, tt = w.index_select(1, net_cols), target.index_select(1, net_cols)
+
+    def objective():
+        return (tw * (net.mlp(xg) - tt) ** 2).sum()
+
+    net.train()
+    if steps > 0:
+        opt = torch.optim.Adam(net.mlp.parameters(), lr=lr)
+        sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=int(steps), eta_min=lr * 0.05)
+        for _ in range(int(steps)):
+            loss = objective()
+            opt.zero_grad(set_to_none=True)
+            loss.backward()
+            opt.step()
+            sched.step()
+    chunks_ok, before = 0, None
+    if lbfgs_iter > 0:
+        saved = {k: v.detach().clone() for k, v in net.mlp.state_dict().items()}
+        with torch.no_grad():
+            before = float(objective())
+        opt2 = torch.optim.LBFGS(net.mlp.parameters(), lr=1.0, max_iter=min(100, int(lbfgs_iter)), history_size=50,
+                                 line_search_fn="strong_wolfe", tolerance_grad=1e-12, tolerance_change=1e-15)
+
+        def closure():
+            opt2.zero_grad(set_to_none=True)
+            loss = objective()
+            loss.backward()
+            return loss
+
+        for _ in range(math.ceil(int(lbfgs_iter) / 100)):
+            last_ok = {k: v.detach().clone() for k, v in net.mlp.state_dict().items()}
+            try:
+                opt2.step(closure)
+                with torch.no_grad():
+                    ok = math.isfinite(float(objective()))
+            except RuntimeError:
+                ok = False
+            if not ok:
+                net.mlp.load_state_dict(last_ok)
+                break
+            chunks_ok += 1
+        with torch.no_grad():
+            after = float(objective())
+        if not (math.isfinite(after) and after <= before):
+            net.mlp.load_state_dict(saved)
+    with torch.no_grad():
+        err = net(lnp_grid) - target
+        wn = w / w.sum(0, keepdim=True)
+        rms = torch.sqrt((wn * err ** 2).sum(0))
+        mx = err.abs().max(0).values
+        final = float((w * err ** 2).sum())
+    return {"rms": {n: float(rms[j]) for j, n in enumerate(net.names)},
+            "max_abs": {n: float(mx[j]) for j, n in enumerate(net.names)},
+            "loss": final if math.isfinite(final) else float("nan"), "lbfgs_before": before,
+            "lbfgs_chunks_ok": chunks_ok}
+
+
+@torch.no_grad()
+def copy_coefficients_by_name(dst, src) -> list:
+    """Copy the polynomial coefficients of every name present in both PolyProviders (up to the destination row's
+    degree; higher source coefficients are dropped, missing ones are zero). Returns the names copied."""
+    done = []
+    for i, n in enumerate(dst.names):
+        if n not in src.names:
+            continue
+        j = src.names.index(n)
+        d = dst.deg[n]
+        row = (src.coef[j] * src.mask[j]).to(dst.coef.device, dst.coef.dtype)
+        dst.coef[i].zero_()
+        m = min(d + 1, row.numel())
+        dst.coef[i, :m] = row[:m]
+        done.append(n)
+    return done
+
+
+@torch.no_grad()
+def kl_map(reference, model, lnp=None) -> float:
+    """Mean over ``default_lnp(48)`` of KL(P_reference || P_model) (full maps, acceptance included)."""
+    from ..families.components import default_lnp, kl_div
+    dev = next(iter(model.buffers())).device
+    lnp = default_lnp(48, device=dev) if lnp is None else lnp
+    was_r, was_m = reference.training, model.training
+    reference.eval()
+    model.eval()
+    out = float(kl_div(reference(lnp), model(lnp)).mean())
+    reference.train(was_r)
+    model.train(was_m)
+    return out
+
+
+def _legacy_reference(device):
+    """The legacy formula's map as a model (legacy_centre with the legacy coefficients and the stored template)."""
+    from ..families import build_variant
+    core, logA = legacy_core()
+    return build_variant("legacy_centre", core, logA).to(device).eval()
+
+
+def _poly_for_component(model, core, degrees: Optional[dict]):
+    """PolyProvider copied from the legacy fit with the degree rule of ``build_variant`` plus overrides."""
+    from ..families.params import PolyProvider
+    deg = {n: (0 if "_lat" in n or n.startswith("lat") or n in ("logit_dh",) else int(core.degree))
+           for n in model.new_names}
+    for n, d in (degrees or {}).items():
+        if n not in model.names:
+            raise KeyError(f"degrees: '{n}' is not a raw parameter of this model")
+        if n not in model.new_names:
+            raise KeyError(f"degrees: '{n}' is a legacy row; its degree is fixed by the legacy fit")
+        deg[n] = int(d)
+    return PolyProvider.from_legacy(core, names=model.names, defaults=model.defaults, degrees=deg)
+
+
+def _theta_train():
+    if not THETA_FILE.exists():
+        raise FileNotFoundError(f"{THETA_FILE} missing: run `uv run python -B shape-form-martin/scripts/run_m2a.py "
+                                "templates` (stores the training events' theta for the detector-frame halo)")
+    return np.load(THETA_FILE)
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# factories
+# ----------------------------------------------------------------------------------------------------------------------
+@register("component")
+def component(ctx: BuildContext, variant: str = "survival_exact", provider: str = "poly", shower_long="plateau",
+              shower_long_kw: Optional[dict] = None, shower_lat=None, lat_family_kw: Optional[list] = None,
+              far: bool = True, det_halo: bool = False, template: str = "stored", start: Optional[str] = None,
+              degrees: Optional[dict] = None, coef_shift: Optional[dict] = None, logit_dh_from_far: bool = False,
+              init: str = "none", init_ref: Optional[str] = None, net_from: Optional[str] = None,
+              last_ring: bool = False):
+    """ComponentModel of AUDIT 4.1 (module docstring). Keyword arguments beyond the audit's list:
+    lat_family_kw      ``family_kw`` of ``legacy_shower_lateral`` (A7l), used with a tuple ``shower_lat``
+    degrees            polynomial degrees of new rows (A6b: {"sh_rk": 0})
+    coef_shift         {name: added to the constant coefficient after the start copy} (A7l: log_lam += ln 20)
+    logit_dh_from_far  A9r: logit_dh = logit(mean over the training events of sigmoid(logit_far(p))) of ``start``
+    init, init_ref     "none" | "shower_long" (reference run ``init_ref``, default ``start``)
+    net_from           provider="net": the finished poly run to fit the ParamNet to (None = legacy provider)
+    last_ring          wrap in ``LastRing`` (A12)
+    """
+    from ..families import build_variant
+    from ..families.components import init_shower_long
+    from ..families.lateral import legacy_shower_lateral
+    from ..families.halo_det import DetHalo
+    dev = ctx.device
+    info = {"provider": provider, "start": start, "init": init}
+
+    if provider == "net" and net_from is not None:
+        # the fitted poly model (all its trainable scalars), then the provider replaced by a ParamNet fitted to it
+        model = load_run(net_from, BuildContext(device=dev, train=ctx.train, seed=ctx.seed, log=ctx.log,
+                                                skip_init=True, results_dir=ctx.results_dir)).train()
+        base = model.base if isinstance(model, LastRing) else model
+        poly = base.provider
+        net, rep = make_paramnet(base, poly, fit=not ctx.skip_init, log=None)
+        ref = None
+        if not ctx.skip_init:
+            import copy
+            ref = copy.deepcopy(model).eval()
+        base.set_provider(net)
+        info.update({"net_from": net_from, "fit_to": _fit_report(rep)})
+        if ref is not None:
+            info["kl_ref"] = net_from
+            info["kl_map"] = kl_map(ref, model)
+        model.init_info = info
+        return model.to(dev)
+
+    core, logA0 = legacy_core()
+    A = acceptance_template(template, "cpu")
+    logA = torch.log(A.clamp_min(1e-6)) if template != "stored" else logA0
+    info["template"] = template
+    if isinstance(shower_lat, (list, tuple)) and lat_family_kw is not None:
+        shower_lat = legacy_shower_lateral(tuple(shower_lat), family_kw=[dict(k) for k in lat_family_kw])
+    elif isinstance(shower_lat, list):
+        shower_lat = tuple(shower_lat)
+    halo = DetHalo.from_samples(_theta_train()) if det_halo else None
+    kw = dict(shower_long=shower_long, shower_long_kw=shower_long_kw, shower_lat=shower_lat, far=far, det_halo=halo)
+    # build the structure once without a provider to learn its names, then the provider with the degree rule
+    from ..families.components import ComponentModel, VARIANTS
+    from ..families.cellint import Grid
+    from .. import legacy as _legacy
+    cfg = dict(VARIANTS[variant])
+    cfg.update(kw)
+    grid = Grid.from_common(_legacy.C)
+    shell = ComponentModel(None, logA, grid=grid, **cfg)
+    poly = _poly_for_component(shell, core, degrees)
+    model = build_variant(variant, core, logA, grid=grid, provider=poly, **kw)
+    model = model.to(dev)
+    poly = model.provider
+    if provider not in ("poly", "net"):
+        raise ValueError("provider must be 'poly' or 'net'")
+
+    ref = None
+    if not ctx.skip_init:
+        if start is not None:
+            src = load_run(start, BuildContext(device=dev, train=ctx.train, seed=ctx.seed, log=ctx.log,
+                                               skip_init=True, results_dir=ctx.results_dir)).eval()
+            src_base = src.base if isinstance(src, LastRing) else src
+            info["copied"] = len(copy_coefficients_by_name(poly, src_base.provider))
+            info["not_copied"] = [n for n in poly.names if n not in src_base.provider.names]
+            ref = src
+            if logit_dh_from_far:
+                if ctx.train is None:
+                    raise ValueError("logit_dh_from_far needs the training set in the build context")
+                with torch.no_grad():
+                    lnp = ctx.train.ev["lnp"].to(dev)
+                    raw = src_base.provider(lnp)[:, src_base.provider.names.index("logit_far")]
+                    wbar = float(torch.sigmoid(raw.double()).mean())
+                    poly.coef[poly.index("logit_dh")].zero_()
+                    poly.coef[poly.index("logit_dh"), 0] = math.log(wbar / (1 - wbar))
+                info["logit_dh_init"] = {"mean_far_weight": wbar, "logit": math.log(wbar / (1 - wbar))}
+        else:
+            ref = _legacy_reference(dev)
+        for n, v in (coef_shift or {}).items():
+            with torch.no_grad():
+                poly.coef[poly.index(n), 0] += float(v)
+        info["coef_shift"] = coef_shift
+        if init == "shower_long":
+            rname = init_ref or start
+            rmod = ref if rname == start else load_run(rname, BuildContext(device=dev, train=ctx.train, seed=ctx.seed,
+                                                                             log=ctx.log, skip_init=True,
+                                                                             results_dir=ctx.results_dir)).eval()
+            res = init_shower_long(model, rmod)
+            info["init_shower_long"] = res
+        elif init != "none":
+            raise ValueError("component: init must be 'none' or 'shower_long'")
+
+    if last_ring:
+        model = LastRing(model).to(dev)
+    if provider == "net":                         # net_from is None: fit to the model's own (legacy) provider
+        base = model.base if isinstance(model, LastRing) else model
+        net, rep = make_paramnet(base, base.provider, fit=not ctx.skip_init)
+        base.set_provider(net)
+        info.update({"net_from": None, "fit_to": _fit_report(rep)})
+    if ref is not None:
+        info["kl_ref"] = start or "legacy formula (legacy_centre, legacy coefficients, stored template)"
+        info["kl_map"] = kl_map(ref, model)
+    model.init_info = info
+    return model.to(dev)
+
+
+@register("mixture")
+def mixture(ctx: BuildContext, K: int = 3, long="emg", long_kw: Optional[dict] = None, lat="burr",
+            lat_kw: Optional[dict] = None, depth: str = "linear", order: bool = True, fine: bool = True,
+            template: str = "stored", provider: str = "poly", init: str = "target", init_ref: Optional[str] = None,
+            init_steps: Sequence[int] = (1500, 1500), init_search: int = 400, net_from: Optional[str] = None):
+    """MixtureModel of AUDIT 4.1 (A10 and its exploratory variants). The PolyProvider has degree 3 for every row and
+    degree 0 for the c{k}_lat_* shape rows, starts at the family defaults (v0, vs, mass of the legacy fit), and is
+    moved onto the map of ``init_ref`` by ``init_from_target`` on the core maps (before the acceptance)."""
+    from ..families.components import MixtureModel, init_from_target
+    from ..families.cellint import Grid
+    from ..families.params import PolyProvider
+    from .. import legacy as _legacy
+    dev = ctx.device
+    info = {"provider": provider, "init": init, "init_ref": init_ref, "template": template}
+    if provider == "net":
+        if net_from is None:
+            raise ValueError("mixture with provider='net' needs net_from (the fitted poly run)")
+        model = load_run(net_from, BuildContext(device=dev, train=ctx.train, seed=ctx.seed, log=ctx.log,
+                                                skip_init=True, results_dir=ctx.results_dir)).train()
+        poly = model.provider
+        net, rep = make_paramnet(model, poly, fit=not ctx.skip_init)
+        ref = None
+        if not ctx.skip_init:
+            import copy
+            ref = copy.deepcopy(model).eval()
+        model.set_provider(net)
+        info.update({"net_from": net_from, "fit_to": _fit_report(rep)})
+        if ref is not None:
+            info["kl_ref"] = net_from
+            info["kl_map"] = kl_map(ref, model)
+        model.init_info = info
+        return model.to(dev)
+
+    core, logA0 = legacy_core()
+    A = acceptance_template(template, "cpu")
+    logA = torch.log(A.clamp_min(1e-6)) if template != "stored" else logA0
+    mm = MixtureModel(None, K=int(K), long=long, lat=lat, logA=logA, order=order, depth=depth, long_kw=long_kw,
+                      lat_kw=lat_kw, fine=fine, grid=Grid.from_common(_legacy.C))
+    deg = {n: (0 if "_lat_" in n else 3) for n in mm.names}
+    poly = PolyProvider(mm.names, deg, mm.defaults, v0=float(core.v0), vs=float(core.vs), mass=float(core.mass))
+    with torch.no_grad():
+        poly.v0.copy_(core.v0.detach().cpu())
+        poly.vs.copy_(core.vs.detach().cpu())
+        poly.mass.copy_(core.mass.detach().cpu())
+    mm.set_provider(poly)
+    mm = mm.to(dev)
+    if not ctx.skip_init and init == "target":
+        if init_ref is None:
+            raise ValueError("mixture: init='target' needs init_ref (the finished run whose map is the target)")
+        ref = load_run(init_ref, BuildContext(device=dev, train=ctx.train, seed=ctx.seed, log=ctx.log, skip_init=True,
+                                              results_dir=ctx.results_dir)).eval()
+        res = init_from_target(mm, target=ref.core_map, names=mm.names, model_fn=mm.core_map,
+                               steps=tuple(int(s) for s in init_steps), n_search=int(init_search), seed=0)
+        info["init_from_target"] = res
+        info["kl_ref"] = init_ref
+        info["kl_map"] = kl_map(ref, mm)
+    elif init not in ("target", "none"):
+        raise ValueError("mixture: init must be 'target' or 'none'")
+    mm.init_info = info
+    return mm
+
+
+def _fit_report(rep):
+    if rep is None:
+        return None
+    rms = rep["rms"]
+    return {"loss": rep["loss"], "rms_max": max(rms.values()) if rms else None,
+            "rms_max_name": max(rms, key=rms.get) if rms else None,
+            "fit_to_workaround": rep.get("fit_to_workaround", False)}

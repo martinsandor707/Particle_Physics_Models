@@ -417,3 +417,110 @@ access, or as an abort-on-fail first step of `final_test.py`) is the user's deci
 
 **Correction (M1 audit).** The periods of the MLP's sin/cos depth features are 1650/k mm = 1650, 825, 550, 412.5 mm, not
 3300/1650/1100/825 mm as written in §4 (D9) and §7 (Stage 2 checks); the corrected values apply.
+
+## 14. Milestone 1 outcome and the pre-registered run lists (24 Nov 2026)
+
+Milestone 1 is closed (`results/m1_audit/SUMMARY.md`, `results/m1_audit/AUDIT.md`). All numbers are validation, in
+10⁻⁴ nat per event, paired.
+
+- **Where the gap is.** Formula − MLP = +22.0 ± 2.9. The formula's radial conditionals cost +18.0 ± 2.5, its depth
+  marginal +4.6 ± 1.5, so no depth-profile family can gain more than about 5. By hit position the MLP wins at
+  30 ≤ r < 663 mm (+50.3) and the formula wins in the core (−20.1) and at the entrance (−18.4). Cells where the metric
+  is only approximately a proper score carry +10.2 (46 %); the last ring alone +7.3. Bulk gap: +18.6 ± 2.7.
+- **K is not a lever.** Both models have the same Jensen coefficient (0.160/K); the gap is the same at K = 16 and
+  K = 1024. B2 is kept as pre-registered but is an expected null.
+- **Ensembles.** Three equal-quality networks beat their best member by −8.6 ± 2.5; adding weaker members to `mlp_std`
+  hurts. Predicted gain of five `mlp_std`-quality networks over their mean member: −5.9 (−3.5 … −8.5).
+- **Headroom for any 128×32 map** (cross-validated score test): at least 7.2 ± 3.1 in the population limit, mostly
+  below 4 GeV; a free table fitted on the available 70k events would realise about 1.7.
+- **Binning.** Exact cell integration at the legacy coefficients is +4.07 ± 0.56 worse (the coefficients were fitted
+  through the centre rule); rung A2 therefore means "refit in exact mode".
+- **Refined lookup (D6c): −0.5 ± 0.8 at the K of record, below the 3e-4 rule → sub-track B7 is closed.** One labelled
+  diagnostic column (4× refined lookup at K = 1024) for the closed-form finalist only.
+- **New: lateral detector faces.** In 25.8 % of validation events the shower axis leaves through a side face
+  (|X|, |Y| ≈ 2.62 m) before z′ = 1450 mm; the MLP puts 4.9 % of its mass outside the side faces against 1.5 % in
+  front of the front face. First-order acceptance gain of a geometry-aware model: front face 155, all faces 933.
+  This needs φ and the entry position as inputs and is outside the approved θ-only scope (decision below).
+- **Ringing.** The MLP map carries harmonics of its depth features (1650/k mm) at the level of the seed-to-seed
+  differences; a closed form should not copy them. PySR period check: 1650/k for k = 1…8, periods above ≈ 570 mm
+  count as trend.
+
+**The run lists of `results/m1_audit/AUDIT.md` §4 are the pre-registered lists for Milestone 2** (rules §4.0, Track A
+§4.1, Track B §4.2, θ arms §4.3) and replace the ladders of §5 and §6 where they differ. Primaries — Track A: A4 (EMG),
+A5 (generalised gamma, free soft start), A7 (Burr radial body), A8 (Weibull halo), A9 (detector-frame halo), A10 (pure
+mixture, K = 3); Track B: B1 (five-seed ensemble), B1d (its distillation into one network), B2b (K = 64 training),
+B2c (stratified fold points), B4f (front acceptance on the logits), B6c (width). Every other family the user named
+(inverse Gaussian, log-normal, Burr XII in depth, Student-t, Lomax, generalised-Gaussian core) gets one exploratory
+likelihood fit. Not run: free row factor / free lateral conditional (answered by the hybrid test without training).
+
+**User decision on the geometry-conditioned arm (25 Nov 2026).**
+- The trained conditioned track stays θ-only (Θ1–Θ3) as approved. **No new network with inputs (p, θ, φ, x0, y0) is trained.**
+- Added: a **zero-training 3-D geometry acceptance arm**, run after the θ-blind finalists are frozen and applied to
+  both the frozen θ-blind MLP and the best closed-form formula. Own table, labelled with its inputs
+  (p, θ, φ, entry position); never mixed with θ-blind deltas.
+- **Before it runs, Fable must** (a) find out, from training-split hits only, why 1.35 % of events do not fit a simple
+  box (stepped tower/module outline, beam-pipe cut-out, coordinate edge, …), and (b) verify on validation that the gain
+  persists under G-bulk and with a front + side-only acceptance, so that it is not inflated by the flat `z_b`
+  back-face cut. Report: `results/m2c_theta/geometry/GEOMETRY.md`.
+
+## 15. Checkpoint — 25 Nov 2026, 23:20 UTC (campaign paused at the user's request)
+
+The running batch needed about five more hours, so every worker was stopped at a clean point. Nothing is running; all
+GPU jobs are resumable from their checkpoints. **To resume:** read §13, §14 and this section, then the STATUS files
+below; check `git status`, `uv run pytest shape-form-martin/tests -q`, and that `results/test_access.log` still has
+exactly two lines; continue with the first unfinished item of "Next actions".
+
+**Finished and pushed**
+
+| Item | Commit | Evidence |
+|---|---|---|
+| Milestone 0: workspace, lean cache, parity; Gate 0 PASS WITH AMENDMENTS | `24305cb` | `results/gates/gate0.md` |
+| C1: exact per-event test parity on the reference stream, PASS | in `bcb76fa` | `results/m0_parity/c1_reference_stream.json` |
+| Milestone 1: audit D1–D9, interpretation, run lists; families, harness, registry | `bcb76fa` | `results/m1_audit/{SUMMARY,AUDIT}.md` |
+
+**In progress when paused** (each STATUS file lists what is done, what is not, and the resume command)
+
+| Work item | Agent type | State | STATUS file |
+|---|---|---|---|
+| Track B seeds: five 4×32 networks (report recipe + fine-tune, seeds 11–15), control B0 (seeds 0–2), ensembles | Opus | stage 1 done and registered for all five seeds; fine-tunes done for seeds 11 and 12 (seed 13 restarts from step 0; 14, 15 not started); B0 seed 0 done, seeds 1–2 not started; ensembles, size curve and report not done. About 23 min of fits plus a few minutes remain; the three resume commands are in the STATUS file | `results/m2b_mlp/STATUS.md` |
+| Track A: pre-registered fits of `results/m1_audit/AUDIT.md` §4.1 | Opus | factory, tests (40 pass) and driver for phases templates/parity/plr/stage0/stage1p/stage1x written; **no fit run yet**; report/guards/Stage 2 script not written. Known bug to work around or fix: `ParamNet.fit_to` over-weights constant columns (variance ≈ 1e-15) | `results/m2a_dist/STATUS.md` |
+| PySR math modules (`src/sfm/sr/`) | Fable | `operators.py` done (47 tests); `translate.py`, `audit.py`, `checks.py`, `targets.py`, `refit.py` **not started**, designs and derivations written down; list of points to confirm with Julia in `operators.UNCONFIRMED` | `src/sfm/sr/STATUS.md` |
+| Julia + search runner | Opus | Julia 1.13.4 installed (`.venv/julia_env`, `~/.julia`), trivial fit works; `sr/search.py`, `scripts/sr_run.py` written, 15 Julia-free tests pass; **runner never run against Julia; smoke tests a–f (incl. kill-and-resume) not started**; interface between `operators.search_config` and `search.py` unchecked | `results/m3_sr/smoke/STATUS.md` |
+| Detector-geometry audit (required by the user before the zero-training geometry arm) | Fable | origin identity verified on training events; the instrumented volume is a **stepped octagon with an off-centre beam hole**, not a square box; the 1.35 % misfit comes from the straight-line origin (by exclusion, not yet reproduced). Acceptance, gains and guards **not computed: both of the user's questions are open**; the earlier estimates (155 front / 933 all faces) must not be quoted | `results/m2c_theta/geometry/STATUS.md` |
+
+**Next actions, in order** (routing: Fable for mathematics, physics, statistics and every gate; Opus for engineering
+and running jobs; never two agents with overlapping write access; one GPU job at a time via `sfm.gpulock`)
+
+1. Opus: finish the Track B seeds (remaining fine-tunes, B0 seeds 1–2, guards, ensembles E5 / E6 / size curve).
+2. Opus: run Track A from `run_m2a.py templates parity plr stage0 stage1p stage1x`, write the report script, apply the
+   pre-registered rules, Stage 2 (A11, A11k, A11n). About 4 GPU-hours.
+3. Opus: the remaining Track B list of `AUDIT.md` §4.2 (B1d, B1f, B2a/b/c, B3s, B4f/s/x, B5f, B6a/b/c, B-ceil; needs a
+   `train_fraction` option). About 2 GPU-hours. Fix the `ParamNet.fit_to` weighting and the `sfm.train` weight-decay
+   docstring with tests.
+4. Fable: A11p (Fisher pruning) if a Track A finalist exists; then **Gate 1** (fresh context). On a pass: commit and push Milestone 2.
+5. Fable: finish `src/sfm/sr/` (translate, audit, checks, targets, refit). Opus: live runner test and smoke tests a–f.
+   Then the PySR pilot (one seed, 15–20 min) → **Gate 2-pilot** → trajectories (size 18) and Stage 1 (size 30), three
+   seeds on 20 threads → **Gate 2a** → sin/cos ablation → **Gate 2**. About 5 h of CPU before any extension.
+6. Fable: finish the geometry audit → `results/m2c_theta/geometry/GEOMETRY.md` with a recommendation.
+7. After the θ-blind finalists are frozen: Opus runs the θ track Θ1–Θ3 and, if the geometry audit recommends it, the
+   zero-training geometry arm on the frozen MLP and the best closed form.
+8. Opus writes `results/final/LOCK.json` → **Gate 2c** (Fable, fresh context) → single run of `final_test.py` →
+   **Gate 3** → `REPORT.md`; commit and push.
+
+**First Track B numbers (validation, 10⁻⁴ nat against `mlp_std`, paired; not yet a result — the ensembles are missing)**
+- Stage-1 networks alone: +12.6 … +32.9 (seed-to-seed sd of the mean 7.4). After the fine-tune: seed 11 +1.8 ± 1.7,
+  seed 12 +3.3 ± 1.7. The fine-tune is worth −16 … −20 per network.
+- Control B0 (seed 0), `mlp_std` continued with the identical schedule and best-validation selection at K = 16:
+  +1.19 ± 0.42, i.e. slightly worse than `mlp_std` at K = 64.
+
+**Operational note.** Twice a Track B job that held the GPU lock ran out of memory because another process held
+about 7 GB without holding the lock. Every GPU-using script must keep its tensors off the GPU until it holds
+`gpu_lock` (the Track B scripts now check free memory after taking the lock and back off).
+
+**Open points raised by workers, to settle when resuming**
+- PySR magnitude bound `sup|δ| ≤ 1 nat` depends on the additive gauge; proposal: bound `f − f(reference point, x)`.
+- The literal Stage-2 template is bounded by 1.3, not 1; a `0.7·tanh(f)` variant exists.
+- The audit must be repeated on the refitted equation (constants move in the refit), not only before the refit.
+- "Exponent a constant" for `ppow` is enforced by the hall-of-fame scan, not by the search itself.
+- Fisher weights for trajectory targets must use the expected Hessian of the energy-weighted pseudo-likelihood.
+- The moved notebook writes to `shape-form-martin/results`; a full run would retrain rather than reuse old checkpoints.
