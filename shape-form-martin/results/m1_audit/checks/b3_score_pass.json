@@ -1,0 +1,50 @@
+{
+ "autograd_check": {
+  "max_abs_diff": 2.372682348927846e-07,
+  "max_abs_grad": 0.3630229029981531,
+  "max_abs_rowsum_G": 6.106226635438361e-16
+ },
+ "n_events": 14950,
+ "knot_sets": {
+  "k1": [
+   1.0
+  ],
+  "k3": [
+   1.0,
+   6.0,
+   20.0
+  ],
+  "k6": [
+   0.5,
+   1.5,
+   4.0,
+   8.0,
+   13.0,
+   20.0
+  ],
+  "k12": [
+   0.3,
+   0.6,
+   1.0,
+   1.5,
+   2.5,
+   4.0,
+   6.0,
+   8.0,
+   10.5,
+   13.0,
+   16.5,
+   20.0
+  ]
+ },
+ "main": "k6",
+ "n_blocks": 200,
+ "curvature": true,
+ "scratch": "/tmp/claude-1000/-home-martin-projects-uni-PhD-Particle-Physics-Models/baad5034-857c-48b3-bd15-4b0326ffecf3/scratchpad/d7",
+ "_run": {
+  "script": "results/m1_audit/checks/b3_score_pass.py",
+  "utc": "2026-11-24T22:29:27Z",
+  "seconds": 57.9,
+  "torch": "2.14.0+cu130"
+ }
+}

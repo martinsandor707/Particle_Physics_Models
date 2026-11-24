@@ -1,0 +1,30 @@
+# EXAMPLE, not a pre-registered run: continue mlp_std.pt (the B0 pattern of PLAN.md section 6).
+# Copy to configs/<stage>/<name>.toml, set run.stage / run.name (output: results/<stage>/<name>/) and the schedule.
+# Run:  uv run python -B shape-form-martin/scripts/fit.py shape-form-martin/configs/<stage>/<name>.toml
+
+[run]
+name = "mlp_std_continue_seed0"
+stage = "examples"
+seed = 0
+notes = "template: FieldNet(32, 4) from mlp_std.pt, K_train 16, last iterate"
+
+[model]
+factory = "field_mlp_std"
+
+[fit]
+steps = 3000
+lr = 1e-3
+lr_end = 1e-4
+batch = 256
+k_train = 16
+fold = "iid"
+k_val = 64
+eval_every = 250
+selection = "last"
+smooth = 0.0
+weight_decay = 0.0
+ckpt_every = 250
+
+[evaluate]
+registry = true
+guards = false

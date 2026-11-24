@@ -1,0 +1,28 @@
+# EXAMPLE, not a pre-registered run: analytic acceptance (B4 pattern): logits + ln A, warm-started by KL to mlp_std.
+# template = "stored" (abar.pt, front + back) | "front" (front face only) | "front_back" (recomputed, = stored).
+
+[run]
+name = "field_acc_front_seed0"
+stage = "examples"
+seed = 0
+
+[model]
+factory = "field_acc"
+template = "front"
+base = "mlp_std"
+warm_steps = 500
+warm_lr = 1e-3
+grid_points = 64
+
+[fit]
+steps = 3000
+lr = 1e-3
+lr_end = 1e-4
+k_train = 16
+k_val = 64
+eval_every = 250
+selection = "last"
+ema_decay = 0.999
+
+[evaluate]
+guards = true

@@ -1,0 +1,25 @@
+# Smoke test of the CLI only (a few steps of a tiny network; numbers are meaningless).
+# CPU, isolated results directory (copy the three m0_parity files there first, see README):
+#   SFM_RESULTS_DIR=<scratch>/results CUDA_VISIBLE_DEVICES="" uv run python -B shape-form-martin/scripts/fit.py \
+#       shape-form-martin/configs/smoke/tiny_field.toml --no-lock
+
+[run]
+name = "tiny_field"
+stage = "smoke"
+seed = 0
+
+[model]
+factory = "field"
+hidden = 4
+n_layers = 1
+n_freq = 1
+
+[fit]
+steps = 4
+lr = 1e-3
+lr_end = 1e-4
+batch = 16
+k_train = 4
+k_val = 64
+eval_every = 2
+ckpt_every = 2

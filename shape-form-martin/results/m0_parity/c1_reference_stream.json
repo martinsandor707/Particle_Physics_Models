@@ -1,0 +1,97 @@
+{
+ "created_utc": "2026-11-24T21:56:15+00:00",
+ "git_head": "24305cbd16bd32435c128e6edc272b2e7782c7e6",
+ "device": "cuda",
+ "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+ "versions": {
+  "torch": "2.14.0+cu130",
+  "numpy": "2.5.3",
+  "cuda": "13.0"
+ },
+ "metric": "common.event_nll (unmodified) on the fold points of launch grid 1056 (sfm.refstream.test_nll_ref: K=64, seed 12345, batch 128), inside sfm.metric.deterministic()",
+ "local_grid": 144,
+ "reference_stream_val": {
+  "grid": 1056,
+  "tolerance_mean": 4e-06,
+  "mlp": {
+   "mean_f32": 18.118083953857422,
+   "mean_f64": 18.118082943664348,
+   "stored": 18.118083953857422,
+   "diff": 0.0,
+   "within_4e-6": true
+  },
+  "formula": {
+   "mean_f32": 18.120407104492188,
+   "mean_f64": 18.120407365397067,
+   "stored": 18.120407104492188,
+   "diff": 0.0,
+   "within_4e-6": true
+  },
+  "formula_minus_mlp": {
+   "mean": 0.0023244217327207228,
+   "se": 0.0002942688454616362,
+   "n": 14950,
+   "from_stored_means": 0.002323150634765625,
+   "note": "the stored float32 means resolve the difference only to ~2e-6; the 1e-6 paired criterion of A1(a) was verified in Gate 0 (c04) on the stored float64 ladder differences"
+  }
+ },
+ "test_access": {
+  "reason": "gate0 parity on reference stream (C1)",
+  "log": "shape-form-martin/results/test_access.log"
+ },
+ "c1": {
+  "criteria": {
+   "max_abs_diff_per_event": 0.0001,
+   "abs_mean_diff": 4e-06
+  },
+  "test_event_numbers_equal_gate0_run": true,
+  "mlp": {
+   "n": 14956,
+   "max_abs_diff": 2.86102294921875e-05,
+   "mean_diff": 3.028853304981069e-08,
+   "median_abs_diff": 1.9073486328125e-06,
+   "rms_diff": 5.010773909555999e-06,
+   "frac_within_1e-4": 1.0,
+   "n_above_1e-4": 0,
+   "pearson_r": 0.9999999999943158,
+   "mean_new": 18.120841875915445,
+   "mean_ref": 18.120841845626913,
+   "npz_key": "std:mlp_ft",
+   "mean_new_f32": 18.12084197998047,
+   "pass_per_event": true,
+   "pass_mean": true
+  },
+  "formula": {
+   "n": 14956,
+   "max_abs_diff": 3.0517578125e-05,
+   "mean_diff": -2.4677183769003662e-08,
+   "median_abs_diff": 1.9073486328125e-06,
+   "rms_diff": 5.02756643545424e-06,
+   "frac_within_1e-4": 1.0,
+   "n_above_1e-4": 0,
+   "pearson_r": 0.9999999999943034,
+   "mean_new": 18.12345822044285,
+   "mean_ref": 18.12345824512003,
+   "npz_key": "std:new",
+   "mean_new_f32": 18.123458862304688,
+   "pass_per_event": true,
+   "pass_mean": true
+  },
+  "formula_minus_mlp": {
+   "reference_stream": {
+    "mean": 0.0026163445274024508,
+    "se": 0.00029218921024006835,
+    "n": 14956
+   },
+   "stored": {
+    "mean": 0.0026163994931192695,
+    "se": 0.00029218898456454976,
+    "n": 14956
+   },
+   "abs_diff": 5.4965716818778515e-08,
+   "within_1e-6_informational": true
+  },
+  "C1": "PASS"
+ },
+ "seconds_total": 7.050879955291748
+}

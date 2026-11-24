@@ -692,7 +692,9 @@ TRAINVAL_CACHE = paths.CACHE_DIR / "pion_s1_trainval.pt"
 @pytest.mark.skipif(not TRAINVAL_CACHE.exists(), reason=f"validation cache {TRAINVAL_CACHE} not built")
 def test_real_data_validation_equals_common_test_nll():
     """Gate-0 check: at default settings sfm.metric returns the numbers of common.test_nll on the validation split,
-    bit for bit inside deterministic(), for a random MLP, a random formula and (if the adapter loads) mlp_std.
+    bit for bit inside deterministic(), for a random MLP, a random formula and (if the adapter loads) mlp_std and the
+    component formula (``legacy.load_component_formula``; its ln p centring comes from the training split, which is
+    loaded on the CPU for that and dropped again).
     Opens only the train/val cache file (``load_sets(("val",))``); the test split is never touched."""
     from sfm import data as sfm_data
 
@@ -704,8 +706,11 @@ def test_real_data_validation_equals_common_test_nll():
     try:
         from sfm import legacy
         cands["mlp_std"] = legacy.load_mlp_std()
+        tr, _ = sfm_data.load_sets(("train",), device="cpu")
+        cands["component_formula"] = legacy.load_component_formula(tr["train"])
+        del tr
     except Exception as err:                                               # the adapter is optional for this check
-        print(f"mlp_std not loaded ({type(err).__name__}: {err}); random models only")
+        print(f"benchmarks not loaded ({type(err).__name__}: {err}); random models only")
     with M.deterministic():
         ref = {k: C.test_nll(m, val) for k, m in cands.items()}
         for k, m in cands.items():

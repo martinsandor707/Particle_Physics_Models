@@ -385,7 +385,11 @@ differences within 7.2e-8.
 | A5 | D1 "sub-100 MeV events inspected one by one" (§4) | validation has no event below 0.1747 GeV: inspect the 84 validation events below 0.3 GeV and the two training events below 0.1 GeV; every test delta is also reported without the single test event below the training momentum range (0.0734 GeV), pre-registered |
 | A6 | reference values 18.120842 / 18.118084 / 18.123459 / 18.120407 (§3, §5 A0, §12) | **numbers of record on this machine:** MLP val 18.117857, test 18.120806; formula val 18.120061, test 18.123333; formula − MLP +0.002204 ± 0.000293 (val), +0.002527 ± 0.000304 (test). Stored values are quoted as "reference machine, other fold points". All campaign deltas are paired against locally recomputed arrays (`results/m0_parity/*_nll.npy`). |
 
-**Open item C1.** Exact per-event parity of the two existing benchmarks on *test* on the reference stream (pass: max
+**Item C1 — closed, PASS (24 Nov 2026, user decision: run now).** `results/m0_parity/c1_reference_stream.json`: on the
+emulated reference stream the test arrays of both benchmarks agree with the stored ones for all 14,956 events (max |Δ|
+2.9e-5 and 3.1e-5; means 18.120842 and 18.123458; formula − MLP 0.0026163 ± 0.000292 against the stored 0.0026164).
+The test-access log now holds two Gate 0 parity lines; Gate 2c expects exactly these two before the final run.
+*Original text of the item:* **Open item C1.** Exact per-event parity of the two existing benchmarks on *test* on the reference stream (pass: max
 |Δ| ≤ 1e-4 per event, |Δ mean| ≤ 4e-6). It is the only direct check of the tensors in the test cache. Not blocking
 Milestone 1; must be closed before any finalist touches test. How it is closed (now, as a second logged Gate 0 parity
 access, or as an abort-on-fail first step of `final_test.py`) is the user's decision.
@@ -410,3 +414,6 @@ access, or as an abort-on-fail first step of `final_test.py`) is the user's deci
 - The training-based parts of D7 (residual table, learning curve) run in M2B with the training harness; M1 keeps the
   score test. The math-sensitive diagnostics D6(b), D6(c) and D7 are computed by the Fable step M1-d.
 - Git: commit and push at every reached milestone.
+
+**Correction (M1 audit).** The periods of the MLP's sin/cos depth features are 1650/k mm = 1650, 825, 550, 412.5 mm, not
+3300/1650/1100/825 mm as written in §4 (D9) and §7 (Stage 2 checks); the corrected values apply.

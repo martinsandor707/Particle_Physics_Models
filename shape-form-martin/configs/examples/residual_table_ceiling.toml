@@ -1,0 +1,23 @@
+# EXAMPLE, not a pre-registered run: non-parametric ceiling probe (D7 in M2B): mlp_std (frozen) times a free,
+# zero-initialised log-factor per cell at 12 momentum knots (training ln p quantiles).
+
+[run]
+name = "residual_table_mlp_std_seed0"
+stage = "examples"
+seed = 0
+
+[model]
+factory = "residual_table"
+base = "mlp_std"
+n_knots = 12
+knots = "quantile"
+
+[fit]
+steps = 3000
+lr = 3e-3
+lr_end = 3e-4
+k_train = 16
+k_val = 64
+eval_every = 250
+selection = "last"
+weight_decay = 0.0
