@@ -44,6 +44,12 @@ Resumability
     written the same way. Calling ``fit`` again returns the finished result (weights loaded) when the done-marker
     exists, resumes from the checkpoint otherwise; a checkpoint written with a different config (``config_hash``,
     all fields except ``out_dir`` and ``ckpt_every``) is refused.
+Machine tag (``sfm.machine``)
+    ``fit`` starts with the E10 checks (hard failure without CUDA - unless ``SFM_ALLOW_CPU=1`` is set explicitly, for
+    CPU unit tests - and TF32 off) and stores the live machine tag (with ``deterministic`` = ``cfg.deterministic``)
+    in ``checkpoint.pt``, ``model.pt`` and ``fit_done.json``. A checkpoint or a done-marker with another machine tag,
+    or without one (written before tags existed, e.g. on the laptop), is refused (``MachineMismatch``): no fit is
+    resumed on another machine and a run finished elsewhere is never returned as this machine's training.
     Resume equivalence: an interrupted and resumed run ends with the same weights as an uninterrupted one -
     bit for bit on CPU, and on CUDA inside ``deterministic=True`` (otherwise up to the accumulation order of
     ``index_add_``); ``tests/test_train.py`` checks both.
@@ -78,6 +84,7 @@ from typing import Callable, Optional
 import numpy as np
 import torch
 
+from . import machine as sfm_machine
 from . import metric, paths
 
 if str(paths.MARTIN_DIR) not in sys.path:
@@ -86,7 +93,7 @@ import common as C  # noqa: E402
 
 __all__ = ["FitConfig", "FitResult", "fit", "seed_everything", "val_nll", "config_hash", "atomic_save",
            "atomic_write_json", "ConfigMismatch", "SHUFFLE_SEED_BASE", "FOLD_SEED_BASE", "RunConfig", "EvalSpec",
-           "load_run_config", "RUN_DONE_FILE"]
+           "load_run_config", "RUN_DONE_FILE", "MachineMismatch"]
 
 SHUFFLE_SEED_BASE = 1000          # shapelab.fit_fast: torch.Generator().manual_seed(1000 + seed)
 FOLD_SEED_BASE = 20000
@@ -97,6 +104,11 @@ _NON_RESULT_FIELDS = ("out_dir", "ckpt_every")
 
 class ConfigMismatch(RuntimeError):
     """A checkpoint or finished run in out_dir was produced with a different configuration."""
+
+
+class MachineMismatch(RuntimeError):
+    """A checkpoint or finished run in out_dir was produced on another machine (or carries no machine tag): no fit is
+    continued, and no finished fit is returned, across machines (PLAN.md section 13, A6 revised, point 5)."""
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -161,7 +173,7 @@ class FitConfig:
         return config_hash(self.result_dict())
 
     def resolved_out_dir(self) -> Path:
-        return Path(self.out_dir) if self.out_dir else paths.RESULTS_DIR / "runs" / self.name
+        return Path(self.out_dir) if self.out_dir else run_output_dir("adhoc", self.name)
 
     @classmethod
     def from_dict(cls, d: dict) -> "FitConfig":
@@ -259,7 +271,7 @@ def _fsync_dir(d: Path) -> None:
 
 def atomic_save(obj, path: Path) -> None:
     """``torch.save`` to a temporary file in the same directory, fsync, then rename over ``path``."""
-    path = Path(path)
+    path = paths.check_output_path(Path(path))
     tmp = path.with_name(f".{path.name}.tmp{os.getpid()}")
     with open(tmp, "wb") as f:
         torch.save(obj, f)
@@ -270,10 +282,10 @@ def atomic_save(obj, path: Path) -> None:
 
 
 def atomic_write_json(obj, path: Path) -> None:
-    path = Path(path)
+    path = paths.check_output_path(Path(path))
     tmp = path.with_name(f".{path.name}.tmp{os.getpid()}")
     with open(tmp, "w") as f:
-        f.write(json.dumps(obj, indent=1, default=_json_default) + "\n")
+        f.write(paths.scrub_str(json.dumps(obj, indent=1, default=_json_default)) + "\n")
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, path)
@@ -346,7 +358,7 @@ class _EMA:
 
 class _Log:
     def __init__(self, out_dir: Path, log: Optional[Callable]):
-        self.path, self.log = out_dir / LOG_FILE, log
+        self.path, self.log = paths.check_output_path(out_dir / LOG_FILE), log
 
     def __call__(self, msg: str) -> None:
         line = f"{datetime.now().strftime('%H:%M:%S')} {msg}"
@@ -367,6 +379,24 @@ def _param_groups(params, weight_decay: float):
     if rest:
         groups.append({"params": rest, "weight_decay": 0.0})
     return groups
+
+
+def _weights_sha256(state: dict) -> str:
+    from .provenance import weights_sha256
+    return weights_sha256(state)
+
+
+def _check_machine(stored: Optional[dict], live, what: str) -> None:
+    """Refuse a checkpoint / done-marker written on another machine, or without a machine tag."""
+    if not stored:
+        raise MachineMismatch(f"{what} carries no machine tag (written before machine tags existed, e.g. on the "
+                              f"laptop); it is not resumed or returned on this machine ({live.id}). Use another run "
+                              "name; a laptop-trained network is re-scored with scripts/rescore_registered.py")
+    if stored.get("fields") != live.fields:
+        sf, lf = stored.get("fields") or {}, live.fields
+        diff = sorted(k for k in set(sf) | set(lf) if sf.get(k) != lf.get(k))
+        raise MachineMismatch(f"{what} was written on machine {stored.get('id')}, this is {live.id} (differs in "
+                              f"{diff}); no fit is continued or returned across machines")
 
 
 def _result_from_model_file(obj: dict, out: Path, model_path: Path, seconds: float = 0.0) -> FitResult:
@@ -395,7 +425,10 @@ def fit(model: torch.nn.Module, train, val, config, *, meta: Optional[dict] = No
     """
     cfg = config if isinstance(config, FitConfig) else FitConfig.from_dict(dict(config))
     cfg.validate()
-    out = cfg.resolved_out_dir()
+    sfm_machine.require_cuda("sfm.train.fit", allow_cpu_env=True)       # E10: no silent CPU fallback
+    sfm_machine.disable_tf32()
+    mtag = sfm_machine.machine_tag(deterministic=cfg.deterministic)
+    out = paths.check_output_path(cfg.resolved_out_dir())
     out.mkdir(parents=True, exist_ok=True)
     ck_path, model_path, done_path = out / CHECKPOINT, out / MODEL_FILE, out / DONE_FILE
     L = _Log(out, log)
@@ -409,6 +442,7 @@ def fit(model: torch.nn.Module, train, val, config, *, meta: Optional[dict] = No
         if done.get("config_hash") != chash:
             raise ConfigMismatch(f"{out}: finished run has config {done.get('config_hash')}, this call {chash}; "
                                  "use another name/out_dir")
+        _check_machine(done.get("machine_tag"), mtag, f"{done_path} (finished run)")
         if sha256_file(model_path) != done.get("model_sha256"):
             raise RuntimeError(f"{model_path}: SHA-256 differs from the done-marker")
         obj = torch.load(model_path, map_location=device, weights_only=False)
@@ -438,6 +472,7 @@ def fit(model: torch.nn.Module, train, val, config, *, meta: Optional[dict] = No
         if ck["config_hash"] != chash:
             raise ConfigMismatch(f"{ck_path}: checkpoint has config {ck['config_hash']}, this call {chash}; "
                                  "use another name/out_dir or delete the checkpoint")
+        _check_machine(ck.get("machine_tag"), mtag, f"{ck_path} (checkpoint)")
         model.load_state_dict(ck["model"])
         opt.load_state_dict(ck["optimizer"])
         sched.load_state_dict(ck["scheduler"])
@@ -472,7 +507,8 @@ def fit(model: torch.nn.Module, train, val, config, *, meta: Optional[dict] = No
                      "rng": _rng_states(), "step": st["step"], "order": st["order"], "pos": st["pos"],
                      "history": st["history"], "skipped_loss": st["skipped_loss"], "skipped_grad": st["skipped_grad"],
                      "best": st["best"], "win_sum": float(win_sum), "win_n": st["win_n"],
-                     "seconds": time.time() - t_start, "saved_utc": datetime.now(timezone.utc).isoformat()}, ck_path)
+                     "seconds": time.time() - t_start, "saved_utc": datetime.now(timezone.utc).isoformat(),
+                     "machine_tag": mtag.to_dict(), "host_id": sfm_machine.host_id()}, ck_path)
 
     def note_skip(kind: str):
         st[kind] += 1
@@ -568,10 +604,13 @@ def fit(model: torch.nn.Module, train, val, config, *, meta: Optional[dict] = No
                "best_step": st["best"]["main"][1], "resumed_from": st["resumed_from"], "seconds": seconds}
     obj = {"state": sel_state, "ema_state": ema_state, "config": cfg.result_dict(), "config_hash": chash,
            "history": hist, "summary": summary, "meta": copy.deepcopy(meta) if meta else {},
-           "saved_utc": datetime.now(timezone.utc).isoformat()}
+           "saved_utc": datetime.now(timezone.utc).isoformat(), "machine_tag": mtag.to_dict(),
+           "host_id": sfm_machine.host_id()}
     atomic_save(obj, model_path)
     done = {**summary, "config_hash": chash, "config": cfg.result_dict(), "model": MODEL_FILE,
-            "model_sha256": sha256_file(model_path), "finished_utc": datetime.now(timezone.utc).isoformat()}
+            "model_sha256": sha256_file(model_path), "finished_utc": datetime.now(timezone.utc).isoformat(),
+            "machine_tag": mtag.to_dict(), "host_id": sfm_machine.host_id(),
+            "weights_sha256": _weights_sha256(sel_state)}
     atomic_write_json(done, done_path)
     model.load_state_dict(sel_state)
     model.eval()
@@ -606,7 +645,9 @@ class RunConfig:
 
     @property
     def out_dir(self) -> Path:
-        return paths.RESULTS_DIR / self.stage / self.name
+        """This machine's run directory: OUT_RESULTS/machines/<machine id>/runs/<stage>/<name> (pristine-clone rule:
+        a run trained here never writes into the repository)."""
+        return run_output_dir(self.stage, self.name)
 
     @property
     def done_file(self) -> Path:
@@ -619,12 +660,19 @@ class RunConfig:
         return config_hash(raw)
 
 
+def run_output_dir(stage: str, name: str) -> Path:
+    """OUT_RESULTS/machines/<live machine id>/runs/<stage>/<name>."""
+    from .provenance import run_dir
+    return run_dir(paths.OUT_RESULTS, sfm_machine.machine_tag().id, stage, name)
+
+
 def load_run_config(path) -> RunConfig:
     """Typed loader of a run file (TOML)::
 
         [run]       name (required), stage (required), seed (default 0), notes (optional)
         [model]     factory (required, a name in sfm.models.FACTORIES) + its keyword arguments
-        [fit]       FitConfig fields except name, seed and out_dir (taken from [run]: out_dir = results/<stage>/<name>)
+        [fit]       FitConfig fields except name, seed and out_dir (out_dir = this machine's run directory,
+                    OUT_RESULTS/machines/<machine id>/runs/<stage>/<name>)
         [evaluate]  registry (true), guards (false), k, C   (optional table)
 
     Unknown sections or keys are errors.
@@ -658,7 +706,7 @@ def load_run_config(path) -> RunConfig:
     for k in ("name", "seed", "out_dir"):
         if k in fit_d:
             raise KeyError(f"{path}: [fit] must not set {k} (it comes from [run])")
-    fcfg = FitConfig.from_dict({**fit_d, "name": name, "seed": seed, "out_dir": str(paths.RESULTS_DIR / stage / name)})
+    fcfg = FitConfig.from_dict({**fit_d, "name": name, "seed": seed, "out_dir": str(run_output_dir(stage, name))})
     ev_d = dict(raw.get("evaluate", {}))
     unknown = set(ev_d) - {f.name for f in fields(EvalSpec)}
     if unknown:

@@ -1,9 +1,11 @@
 """Tests of sfm.registry: refusal of anything but the validation split, append-only writing, paired numbers equal to
-sfm.stats.paired, guard columns, reading helpers and the 1-SE selection.
+sfm.stats.paired, guard columns, reading helpers and the 1-SE selection, and the machine/stream tags (reference set
+of the live tag only, no fallback, refusal of mixed tags, untagged rows never used).
 
 Synthetic tests use a small synthetic "validation" set on common.DEVICE with its own ValidationReference and a
-temporary results directory (RegistryEnv), so the campaign's registry is never touched; GPU use is tiny. The
-real-data test only fingerprints the cached validation split on the CPU (no model is evaluated, no test file).
+temporary results directory (RegistryEnv) holding a reference set made from two tiny "benchmark" models, so the
+campaign's registry is never touched; GPU use is tiny. The real-data test only fingerprints the cached validation
+split on the CPU (no model is evaluated, no test file).
 """
 import json
 
@@ -12,11 +14,12 @@ import pytest
 import torch
 
 import common as C
-from sfm import metric, registry, stats
+from sfm import machine, metric, provenance, registry, stats
 from sfm.registry import NotValidationSet, RegistryEnv, ValidationReference, ValidationSet
 from test_train import Tiny, make_showers
 
 DEV = C.DEVICE
+pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="registry rows are computed on CUDA only (E10)")
 
 
 def tiny(seed, scale=0.5):
@@ -35,15 +38,16 @@ def setup(tmp_path):
     en = np.arange(5000, 5000 + len(val), dtype=np.int64)
     ref = ValidationReference(event_number=en, fingerprint=registry.fingerprint(val), n_events=len(val), source="test")
     bench_models = {"mlp": tiny(1), "formula": tiny(2)}
-    (tmp_path / "m0").mkdir()
-    files = {}
+    bench = {}
     with metric.deterministic():
         for b, m in bench_models.items():
-            files[b] = tmp_path / "m0" / f"{b}_val_nll.npy"
-            np.save(files[b], C.test_nll(m, val))
-    env = RegistryEnv(results_dir=tmp_path / "results", bench_files=files)
-    return {"val": val, "en": en, "ref": ref, "env": env, "bench_models": bench_models,
-            "bench": {b: np.load(f) for b, f in files.items()}}
+            bench[b] = C.test_nll(m, val)
+    env = RegistryEnv(results_dir=tmp_path / "results")
+    res = registry.create_reference_set(ValidationSet(val, en), env=env, reference=ref,
+                                        bench_models=lambda: bench_models, guards=True, log=lambda *a: None)
+    assert res["status"] == "created"
+    return {"val": val, "en": en, "ref": ref, "env": env, "bench_models": bench_models, "bench": bench,
+            "refset": res}
 
 
 def run(s, model, name, stage="stage_a", **kw):
@@ -61,7 +65,7 @@ def test_evaluate_row_and_paired_numbers_equal_stats(setup):
     row = run(s, m, "cand", meta={"seed": 7, "config": {"lr": 1e-3}, "notes": "x", "something": 1})
     with metric.deterministic():
         ref = C.test_nll(m, s["val"])
-    saved = np.load(s["env"].results_dir / "stage_a" / "cand" / "val_nll.npy")
+    saved = np.load(s["env"].results_dir / row["val_nll_path"])
     assert np.array_equal(saved, ref)                                  # the unmodified metric, bit-reproducible
     for b in ("mlp", "formula"):
         p = stats.paired(ref, s["bench"][b])
@@ -69,7 +73,18 @@ def test_evaluate_row_and_paired_numbers_equal_stats(setup):
     assert row["val_mean"] == float(ref.astype(np.float64).mean()) and row["n_events"] == len(ref)
     assert row["k"] == m.n_params() and row["C"] is None and row["seed"] == 7
     assert row["config_hash"] == registry._config_hash({"lr": 1e-3}) and row["extra"] == {"something": 1}
-    assert row["val_nll_path"] == "stage_a/cand/val_nll.npy" and row["guards"] is None
+    st = registry.live_stream(s["env"], s["ref"])
+    mid = machine.machine_tag().id
+    assert row["val_nll_path"] == (f"machines/{mid}/runs/stage_a/cand/scores/{provenance.points_id(st['points'])}/"
+                                   "val_nll.npy")
+    assert s["env"].registry_path == s["env"].results_dir / "machines" / mid / "registry.jsonl"
+    assert row["guards"] is None and row["schema"] == registry.ROW_SCHEMA
+    assert row["stream"]["stream_id"] == st["stream_id"] and row["stream"]["machine_id"] == mid
+    assert row["scored_on"]["machine_id"] == mid and row["trained_on"] == "unknown"
+    assert row["weights_sha256"] == provenance.weights_sha256(m.state_dict())
+    for b in ("mlp", "formula"):
+        assert row["benchmarks"][b]["sha256"] == provenance.sha256_array(s["bench"][b])
+    assert row["stream"]["machine"]["tf32_matmul"] is False and row["stream"]["machine"]["tf32_cudnn"] is False
     assert row["git"]["commit"] is None or len(row["git"]["commit"]) == 40
     (only,) = lines(s["env"].registry_path)
     assert json.loads(only) == json.loads(json.dumps(row))
@@ -87,14 +102,16 @@ def test_registry_is_append_only(setup):
     with pytest.raises(FileExistsError):                               # different array under an existing name
         run(s, tiny(5), "cand")
     assert len(lines(path)) == 3
-    run(s, tiny(5), "cand", replace=True)
+    with pytest.raises(ValueError):                                    # tagged arrays are never overwritten
+        run(s, tiny(5), "cand", replace=True)
+    run(s, tiny(5), "cand_b")
     rows = registry.read_registry(path)
-    assert len(rows) == 4 and [r["name"] for r in rows] == ["cand", "cand2", "cand", "cand"]
+    assert len(rows) == 4 and [r["name"] for r in rows] == ["cand", "cand2", "cand", "cand_b"]
     assert rows[0]["val_nll_sha256"] == rows[2]["val_nll_sha256"] != rows[3]["val_nll_sha256"]
     lat = registry.latest(rows)
-    assert [r["name"] for r in lat] == ["cand", "cand2"] and lat[0] is rows[3]
+    assert [r["name"] for r in lat] == ["cand", "cand2", "cand_b"] and lat[0] is rows[2]
     tab = registry.table(path)
-    assert list(tab["name"]) == ["cand", "cand2"] and tab.loc[1, "k"] == 5 and tab.loc[1, "C"] == 13
+    assert list(tab["name"]) == ["cand", "cand2", "cand_b"] and tab.loc[1, "k"] == 5 and tab.loc[1, "C"] == 13
     # a partial line left by a crashed writer does not merge with the next row
     with open(path, "ab") as f:
         f.write(b'{"broken": ')
@@ -134,7 +151,8 @@ def test_select_1se_matches_stats(setup):
     models = {"small": (tiny(3), 10, 1.0), "big": (tiny(4, 0.3), 100, 0.0), "mid": (tiny(5, 0.2), 50, 0.0)}
     for name, (m, k, Cc) in models.items():
         run(s, m, name, meta={"k": k, "C": Cc})
-    arrs = {n: np.load(s["env"].results_dir / "stage_a" / n / "val_nll.npy") for n in models}
+    rows = {r["name"]: r for r in registry.read_registry(s["env"].registry_path)}
+    arrs = {n: np.load(s["env"].results_dir / rows[n]["val_nll_path"]) for n in models}
     expect = stats.one_se_select([stats.Candidate(n, arrs[n], k, Cc) for n, (_, k, Cc) in models.items()])
     got = registry.select_1se(stage="stage_a", path=s["env"].registry_path)
     assert got.selected == expect.selected and got.best == expect.best and got.table == expect.table
@@ -142,8 +160,10 @@ def test_select_1se_matches_stats(setup):
     assert {r["name"] for r in sub.table} == {"small", "mid"}
     with pytest.raises(KeyError):
         registry.select_1se(names=["nope"], path=s["env"].registry_path)
-    np.save(s["env"].results_dir / "stage_a" / "mid" / "val_nll.npy", arrs["mid"] + 1)   # tampered array
-    with pytest.raises(RuntimeError):
+    mid_row = registry.registered_row("stage_a", "mid", stream_id=registry.live_stream(s["env"], s["ref"])["stream_id"],
+                                      path=s["env"].registry_path)
+    np.save(s["env"].results_dir / mid_row["val_nll_path"], arrs["mid"] + 1)            # tampered array
+    with pytest.raises(provenance.UntaggedArray):                      # content no longer matches its tag sidecar
         registry.select_1se(stage="stage_a", path=s["env"].registry_path)
 
 
@@ -152,7 +172,7 @@ def test_guard_columns(setup):
     m = tiny(3)
     abar = torch.ones(C.N_Z, C.N_R, device=DEV)
     abar[:, -3:] = 0.0
-    row = run(s, m, "guarded", guards=True, bench_models=lambda: s["bench_models"], abar=abar)
+    row = run(s, m, "guarded", guards=True, abar=abar)
     g = row["guards"]
     val = s["val"]
     zb = val.ev["zb"].cpu().numpy()
@@ -181,11 +201,14 @@ def test_guard_columns(setup):
         assert gb["gk_persistence"]["numbers"]["margin"] == pytest.approx(pers.numbers["margin"], abs=1e-12)
     assert set(g["mass"]) >= {"total", "beyond_zb", "last_ring", "outside_bulk", "mask:abar_le_0.01"}
     assert abs(g["mass"]["total"]["mean"] - 1) < 1e-5
-    rd = s["env"].results_dir / "stage_a" / "guarded"
+    rd = (s["env"].results_dir / row["val_nll_path"]).parent
     assert np.array_equal(np.load(rd / "val_nll_k1024.npy"), k1024)
-    assert (s["env"].refs_dir / "guard_spec.json").exists()
-    # the cached benchmark guard arrays are reused (no benchmark models needed the second time)
-    row2 = run(s, tiny(4), "guarded2", guards=True, bench_models=lambda: pytest.fail("recomputed"), abar=abar)
+    assert np.array_equal(np.load(s["env"].results_dir / g["arrays"]["k1024"]["path"]), k1024)
+    assert provenance.sidecar_path(rd / "val_nll_k1024.npy").exists()
+    manifest = json.loads((registry.reference_set(s["env"], s["ref"]).dir / "refset.json").read_text())
+    assert manifest["guard_spec"]["machine_id"] == machine.machine_tag().id      # the guard spec contains the tag
+    # the reference set's benchmark guard arrays are used (never recomputed inside evaluate)
+    row2 = run(s, tiny(4), "guarded2", guards=True, abar=abar)
     assert row2["guards"]["n_stratum"] == len(idx)
 
 

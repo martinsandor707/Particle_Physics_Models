@@ -51,6 +51,8 @@ def main(argv=None) -> int:
     ap.add_argument("--stop-on-error", action="store_true")
     args = ap.parse_args(argv)
 
+    from sfm import machine
+    machine.startup("fit_queue.py")                                   # E10 (each fit.py child repeats it)
     files = expand(args.configs)
     if not files:
         print("no config files")

@@ -236,7 +236,7 @@ def _cpu_suite(out_json: str, tmp: str) -> None:
 def cpu_suite(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("cpu_suite")
     out = tmp / "report.json"
-    env = dict(os.environ, CUDA_VISIBLE_DEVICES="", PYTHONDONTWRITEBYTECODE="1")
+    env = dict(os.environ, CUDA_VISIBLE_DEVICES="", PYTHONDONTWRITEBYTECODE="1", SFM_ALLOW_CPU="1")   # explicit opt-in
     code = (f"import sys; sys.dont_write_bytecode = True; sys.path[:0] = [{str(MARTIN / 'src')!r}, {str(MARTIN)!r}, "
             f"{str(HERE)!r}]; import test_train as T; T._cpu_suite({str(out)!r}, {str(tmp)!r})")
     proc = subprocess.run([sys.executable, "-B", "-c", code], env=env, capture_output=True, text=True, timeout=600)

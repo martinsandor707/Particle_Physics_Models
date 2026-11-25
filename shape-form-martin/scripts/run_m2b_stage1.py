@@ -21,7 +21,11 @@ Recipe per seed s (PLAN.md section 6, B1; the notebook 05_mlp_pion_copy.ipynb / 
                                                             patience 15 on the K = 16 validation NLL (improvement
                                                             > 1e-4), best state kept; checkpoint every 5 epochs.
 
-Outputs in results/m2b_mlp/s1_seed<s>/
+Machine tags (A6 revised): outputs go to THIS machine's directory OUT_RESULTS/machines/<id>/runs/m2b_mlp/s1_seed<s>/
+(outside the clone on the H200). A seed whose laptop done.json is in the clone (seeds 11-15: all of them) is a
+record and is never retrained; the fine-tunes s2_seed13..15 start from those laptop networks.
+
+Outputs in <machine dir>/runs/m2b_mlp/s1_seed<s>/
     stage1_fit.pt        common.fit's own checkpoint (resumed by common.fit itself when the job is restarted)
     stage1_monitor.json  per-epoch counters observed through passive hooks (see below) and timings
     model.pt             the selected weights in the sfm format ({"state", "meta": {"model": {"factory": "field", ...}}})
@@ -191,7 +195,8 @@ def run_seed(s: int) -> dict:
         obj = {"state": {k: v.detach().clone() for k, v in model.state_dict().items()},
                "config": lib.STAGE1_RECIPE, "history": hist, "summary": summary,
                "meta": {"model": {"factory": "field", "kwargs": {"hidden": 32, "n_layers": 4, "n_freq": 4}},
-                        "seed": s, "common_fit_checkpoint": str(ck_path)},
+                        "seed": s, "common_fit_checkpoint": lib.paths.portable(ck_path)},
+               "machine_tag": lib.MACHINE.to_dict(),
                "saved_utc": datetime.now(timezone.utc).isoformat()}
         train.atomic_save(obj, model_path)
 
@@ -215,6 +220,7 @@ def run_seed(s: int) -> dict:
                                   "finished_utc": datetime.now(timezone.utc).isoformat()})
     train.atomic_write_json(resources, res_path)
     done = {"name": name, "stage": lib.STAGE, "seed": s, "recipe": lib.STAGE1_RECIPE, "stage1": summary,
+            "machine_tag": lib.MACHINE.to_dict(),
             "model": str(model_path), "model_sha256": lib.sha256_file(model_path),
             "val_mean": row["val_mean"], "vs_mlp": row["vs_mlp"], "vs_formula": row["vs_formula"],
             "registry_timestamp": row["timestamp"], "resources": resources,
@@ -228,10 +234,15 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--seeds", type=int, nargs="+", default=list(lib.S1_SEEDS))
     args = ap.parse_args(argv)
+    lib.start("run_m2b_stage1")
     for s in args.seeds:
+        rec = lib.laptop_record_done(f"s1_seed{s}")
+        if rec is not None:
+            print(f"[s1_seed{s}] trained on the laptop (record {lib.paths.portable(rec)}); never retrained here")
+            continue
         done_file = lib.OUT / f"s1_seed{s}" / "done.json"
-        if done_file.exists():
-            print(f"[s1_seed{s}] already done: {done_file}")
+        if lib.done_marker(done_file) is not None:
+            print(f"[s1_seed{s}] already done on this machine: {lib.paths.portable(done_file)}")
             continue
         lib.run_on_gpu(f"m2b stage1 s1_seed{s}", lambda: run_seed(s), min_free_mb=2000)
         lib.free_cuda()

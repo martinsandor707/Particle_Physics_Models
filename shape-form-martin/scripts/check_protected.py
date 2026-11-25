@@ -160,10 +160,22 @@ def verify() -> int:
     return 1 if fail else 0
 
 
+
+def _refuse_record_writer(what: str) -> None:
+    """transfer/REVIEW_STATUS.md section 4, point 15: this script overwrites a tracked laptop record (or opens test).
+    Blocked unless SFM_ALLOW_RECORD_WRITER=1 is set explicitly, and always blocked with an output root
+    (SFM_OUT_ROOT: the H200 / pristine-clone setting)."""
+    import os as _os
+    if _os.environ.get("SFM_OUT_ROOT") or _os.environ.get("SFM_ALLOW_RECORD_WRITER") != "1":
+        raise SystemExit(f"{what}: blocked - it overwrites tracked laptop records (spec point 15). Never run it on "
+                         "the H200; on the laptop only with SFM_ALLOW_RECORD_WRITER=1 and the user's go-ahead.")
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("mode", choices=["record", "verify"])
     args = ap.parse_args()
+    if args.mode == "record":
+        _refuse_record_writer("check_protected.py record (rewrites checksums.json)")
     return record() if args.mode == "record" else verify()
 
 

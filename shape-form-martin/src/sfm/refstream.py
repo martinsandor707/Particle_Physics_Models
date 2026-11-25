@@ -7,19 +7,24 @@ subsequence ``idx`` and fills the elements ``idx + T (4n + i)`` with ``T = 256 g
 the stream therefore depends on the GPU model. This module re-implements that kernel (``_philox_emul.c``) so the
 fold points of any GPU can be produced here:
 
-    LOCAL_GRID      = 144    this machine (RTX 4060 Laptop: 24 SMs x 1536/256); ``local_grid()`` computes it
+    local_grid()    the launch grid of the GPU this process runs on (from its properties; never a constant)
+    LAPTOP_GRID     = 144    the laptop of 24 Nov 2026 (RTX 4060 Laptop: 24 SMs x 1536/256), whose arrays are
+                             records; used to emulate the laptop stream on another machine (row R1b)
     REFERENCE_GRID  = 1056   the reference machine of the earlier study (132 SMs x 8, H100 class), identified in
                              Gate 0 by reproducing all 13 stored validation means to <= 1.9e-6
 
     test_nll_ref(model, data, grid=REFERENCE_GRID)   ``common.test_nll`` on the fold points of that GPU
     EmulGen(seed, grid).rand(*shape)                 what ``torch.rand(*shape, device="cuda", generator=g)`` gives
+    patched_draw(grid)                               ``sfm.metric.draw`` (i.i.d. fold) on that GPU's points, so the
+                                                     guard evaluations (K = 1024, bulk) can be emulated as well
 
 Validated in Gate 0 (``results/gates/gate0_checks/{philox_emul.c, emul.py, c02, c04}``); this file and
 ``_philox_emul.c`` are copies of those (the originals stay in place). ``tests/test_refstream.py`` repeats the checks.
 
 Use. Reference-stream numbers are a verification instrument and an optional, pre-registered secondary column
 (they allow paired deltas against the stored per-event arrays of the earlier study). They are never the headline:
-the headline is the unmodified ``common.test_nll`` on this machine.
+the headline is the unmodified ``common.test_nll`` on the machine of record (PLAN.md section 13, A6 revised). On a
+GPU whose launch grid equals the emulated one, the emulated and the native points are identical.
 
 Build. The shared object is compiled on first use into ``cache/`` (git-ignored) as ``philox_emul_<sha>.so``, where
 ``<sha>`` is a hash of the C source, with ``gcc -O2 -fopenmp -shared -fPIC -ffp-contract=off``. It is never committed.
@@ -44,11 +49,11 @@ if str(paths.MARTIN_DIR) not in sys.path:
     sys.path.insert(0, str(paths.MARTIN_DIR))
 import common  # noqa: E402  (shape-form-martin/common.py, the metric of record)
 
-__all__ = ["LOCAL_GRID", "REFERENCE_GRID", "THREADS_PER_BLOCK", "local_grid", "grid_for", "EmulGen", "patched_fold",
-           "test_nll_ref", "library_path"]
+__all__ = ["LAPTOP_GRID", "REFERENCE_GRID", "THREADS_PER_BLOCK", "local_grid", "grid_for", "EmulGen", "patched_fold",
+           "patched_draw", "test_nll_ref", "library_path"]
 
 THREADS_PER_BLOCK = 256
-LOCAL_GRID = 144             # RTX 4060 Laptop GPU: 24 SMs x (1536 // 256); checked against local_grid() in the tests
+LAPTOP_GRID = 144            # the laptop of record until 25 Nov 2026 (RTX 4060 Laptop GPU: 24 SMs x (1536 // 256))
 REFERENCE_GRID = 1056        # reference machine of the stored arrays: 132 SMs x (2048 // 256)
 
 C_SOURCE = Path(__file__).resolve().parent / "_philox_emul.c"
@@ -142,6 +147,28 @@ def patched_fold(gen: EmulGen):
         yield
     finally:
         common.fold = orig
+
+
+@contextlib.contextmanager
+def patched_draw(grid: int, seed: int = 12345):
+    """Temporarily replace ``sfm.metric.draw`` (in memory only) by a version whose i.i.d. offsets come from
+    ``EmulGen(seed, grid)``; the generator argument is ignored. ``sfm.metric.test_nll`` / ``test_nll_multi`` re-create
+    their generator once per call with the same seed, so each call inside this block must be preceded by a fresh
+    block (one block = one evaluation). Only ``fold="iid"`` is supported. Not thread-safe."""
+    from . import metric
+    gen = EmulGen(seed, grid)
+    orig = metric.draw
+
+    def draw(b, box, K, gen_ignored=None, fold="iid"):
+        if fold != "iid":
+            raise NotImplementedError("patched_draw emulates the i.i.d. fold only")
+        return (gen.rand(len(b.xyz), K, 3, device=b.xyz.device) - 0.5) * box
+
+    metric.draw = draw
+    try:
+        yield gen
+    finally:
+        metric.draw = orig
 
 
 @torch.no_grad()

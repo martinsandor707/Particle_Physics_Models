@@ -1,23 +1,39 @@
-"""Shared helpers of the Track-B (M2B) run scripts ``scripts/run_m2b_*.py``.
+"""Shared helpers of the Track-B (M2B) run scripts ``scripts/run_m2b_*.py`` and of the batch commands
+``scripts/val_parity.py`` / ``scripts/rescore_registered.py``.
 
-    STAGE, OUT                      registry stage "m2b_mlp" and its result directory results/m2b_mlp/
+    start(what)                     E10 start-up (``sfm.machine.startup``: CUDA or a hard failure, TF32 off, per-job
+                                    caps, clean clone in pristine mode); prints and returns the batch record
+    STAGE                           registry stage "m2b_mlp"
+    OUT                             THIS machine's directory of the stage: OUT_RESULTS/machines/<id>/runs/m2b_mlp
+                                    (outputs; on the H200 outside the clone)
+    REPO_OUT                        the clone's results/m2b_mlp (laptop records and inputs, read-only)
     S1_SEEDS, B0_SEEDS              seeds of the five independent 4x32 networks and of the B0 control copies
-    registered_row(name, ckpt)      latest registry row of (STAGE, name) whose checkpoint SHA-256 equals the file's
-                                    (lets a re-run after a crash between "row appended" and "done.json written" skip
-                                    the evaluation instead of appending a duplicate row)
+    CONTROL_NAMES                   the H200 controls b0h_seed0..2 (user decision P5); LAPTOP_CONTROL_RECORD b0_seed0
+    LAPTOP_TRAINED                  the eight networks trained on the laptop (records; re-scored, never retrained)
+    live_stream_id()                stream id of this process (machine + points tag)
+    registered_row(name, ckpt)      latest row of (STAGE, name) on the LIVE stream whose checkpoint SHA-256 equals the
+                                    file's (laptop rows and rows of other machines never match; spec point 11)
+    done_marker(path)               a done.json / fit_done.json written on THIS machine, else None; refuses a marker
+                                    of another machine
+    member(run)                     "out:..." for a run trained on this machine, "repo:..." for a laptop record
     stage1_epochs(hist)             (epochs run, best epoch) of a ``common.fit`` history, replaying its rule
     Resources                       wall-clock and peak CUDA memory of one phase
     free_cuda()                     release cached CUDA memory between jobs (the GPU is shared through the lock)
+    run_on_gpu(label, fn)           ``fn()`` under the GPU lock; on a capped (shared, large) device the job is refused
+                                    when less than cap + 4 GB is free; on the laptop the lock is released and retried
 
-Nothing here touches the GPU lock, the test split or the registry file directly.
+Nothing here touches the test split or the registry file directly.
 """
 from __future__ import annotations
 
 import gc
 import hashlib
+import json
 import math
+import os
 import sys
 import time
+from functools import lru_cache
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -25,12 +41,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import torch  # noqa: E402
 
-from sfm import gpulock, paths, registry  # noqa: E402
+from sfm import gpulock, machine, paths, provenance, registry  # noqa: E402
 
 STAGE = "m2b_mlp"
-OUT = paths.RESULTS_DIR / STAGE
+MACHINE = machine.machine_tag()                       # TF32 is already off (sfm.machine import)
+MACHINE_DIR = provenance.machine_dir(paths.OUT_RESULTS, MACHINE.id)
+OUT = MACHINE_DIR / "runs" / STAGE
+REPO_OUT = paths.REPO_RESULTS / STAGE
 S1_SEEDS = (11, 12, 13, 14, 15)
 B0_SEEDS = (0, 1, 2)
+CONTROL_NAMES = tuple(f"b0h_seed{s}" for s in B0_SEEDS)        # P5: the H200 controls
+LAPTOP_CONTROL_RECORD = "b0_seed0"
+LAPTOP_TRAINED = tuple([f"s1_seed{s}" for s in S1_SEEDS] + ["s2_seed11", "s2_seed12", "b0_seed0"])
 STAGE1_RECIPE = {"model": "common.FieldModel(hidden=32, n_layers=4, n_freq=4)",
                  "trainer": "common.fit (unmodified)", "epochs": 60, "lr": 3e-3, "smooth": 1e-4, "patience": 15,
                  "batch": 32, "k_train": 16, "k_val_selection": 16, "min_improvement": 1e-4,
@@ -38,6 +60,21 @@ STAGE1_RECIPE = {"model": "common.FieldModel(hidden=32, n_layers=4, n_freq=4)",
                             "seeded with s immediately before the model is built; common.SEED = s during "
                             "common.fit (its shuffle generator is seeded with common.SEED + start_epoch), "
                             "restored afterwards"}
+
+
+def start(what: str) -> dict:
+    """E10 start-up of a batch command; returns (and prints) what every batch records."""
+    tag = machine.startup(what)
+    from sfm import guard
+    rec = {"what": what, "machine_id": tag.id, "host_id": machine.host_id(), "caps": machine.caps(),
+           "git": machine.git_state(), "pristine_mode": paths.pristine_mode(),
+           "out_results": paths.portable(paths.OUT_RESULTS), "file_access_guard_active": guard.active()}
+    print(f"[{what}] machine {tag.id} (GPU {tag.fields['gpu_name']}, grid {tag.fields['launch_grid']}, torch "
+          f"{tag.fields['torch']}, Python {tag.fields['python']}, TF32 {tag.fields['tf32_matmul']}/"
+          f"{tag.fields['tf32_cudnn']}); caps {rec['caps']}; git {rec['git']}; outputs under {rec['out_results']}; "
+          f"file-access guard {'ACTIVE' if rec['file_access_guard_active'] else 'off'}",
+          flush=True)
+    return rec
 
 
 def sha256_file(path) -> str:
@@ -48,23 +85,47 @@ def sha256_file(path) -> str:
     return h.hexdigest()
 
 
+@lru_cache(maxsize=1)
+def live_stream_id() -> str:
+    return registry.live_stream()["stream_id"]
+
+
 def registered_row(name: str, ckpt=None, need_guards: bool = False):
-    """The latest registry row of (STAGE, name) with the same checkpoint SHA-256 (and guards, if required)."""
-    want = None
-    if ckpt is not None:
-        if not Path(ckpt).exists():
-            return None
-        want = sha256_file(ckpt)
-    found = None
-    for r in registry.read_registry():
-        if r.get("stage") != STAGE or r.get("name") != name:
-            continue
-        if want is not None and r.get("checkpoint_sha256") != want:
-            continue
-        if need_guards and not r.get("guards"):
-            continue
-        found = r
-    return found
+    """The latest row of (STAGE, name) on the live stream with the same checkpoint SHA-256 (and guards, if
+    required), from this machine's registry."""
+    return registry.registered_row(STAGE, name, stream_id=live_stream_id(), ckpt=ckpt, need_guards=need_guards)
+
+
+def done_marker(path) -> dict | None:
+    """The marker at ``path`` if it exists and was written on this machine; None if absent. A marker of another
+    machine, or without a machine tag inside this machine's directory, raises."""
+    path = Path(path)
+    if not path.exists():
+        return None
+    d = json.loads(path.read_text())
+    tag = d.get("machine_tag") or {}
+    if tag.get("id") != MACHINE.id:
+        raise RuntimeError(f"{paths.portable(path)} was written on machine {tag.get('id')!r}, this is {MACHINE.id!r}; "
+                           "markers are never shared across machines")
+    return d
+
+
+def laptop_record_done(name: str) -> Path | None:
+    """The laptop's done.json of a run in the clone (a record), if any."""
+    p = REPO_OUT / name / "done.json"
+    return p if p.exists() else None
+
+
+def member(run_name: str) -> str:
+    """Run reference for the ensemble factory: this machine's run if it exists, else the laptop record in the clone
+    (only for the networks of LAPTOP_TRAINED)."""
+    mine = OUT / run_name / "model.pt"
+    if mine.exists():
+        return f"out:{os.path.relpath(OUT / run_name, paths.OUT_RESULTS)}"
+    if run_name in LAPTOP_TRAINED and (REPO_OUT / run_name / "model.pt").exists():
+        return f"repo:{STAGE}/{run_name}"
+    raise FileNotFoundError(f"{STAGE}/{run_name}: not trained on this machine ({paths.portable(mine)}) and not a "
+                            "laptop-trained record")
 
 
 def stage1_epochs(hist: dict) -> tuple:
@@ -108,17 +169,24 @@ def free_cuda() -> None:
 
 
 def run_on_gpu(label: str, fn, min_free_mb: float = 3000.0, poll: float = 30.0, max_wait: float = 6 * 3600.0):
-    """Run ``fn()`` under ``sfm.gpulock.gpu_lock(label)`` once the device has at least ``min_free_mb`` free.
+    """Run ``fn()`` under ``sfm.gpulock.gpu_lock(label)``.
 
-    The lock alone does not guarantee memory: a process that has released the lock can still hold cached CUDA
-    memory (observed: another agent's process with ~7 GB while the lock was free, which made two jobs fail with
-    OOM while loading data). So after acquiring the lock the free device memory is checked; if it is too small the
-    lock is RELEASED again (never wait for memory while holding it), and the check is repeated after ``poll``
-    seconds, up to ``max_wait`` seconds in total (then RuntimeError)."""
+    Shared, capped device (``SFM_GPU_MEM_GB`` in force, default on devices > 24 GB): after the lock is taken the free
+    device memory must be at least the job's cap + 4 GB (``sfm.machine.check_free_memory``), otherwise the job is
+    refused at once (``InsufficientGPUMemory``; the device is never empty, so there is no waiting).
+    Uncapped device (the laptop): the lock alone does not guarantee memory (another process can hold cached memory),
+    so if less than ``min_free_mb`` is free the lock is RELEASED (never wait for memory while holding it) and the
+    check is repeated after ``poll`` seconds, up to ``max_wait`` seconds in total (then RuntimeError)."""
+    machine.require_cuda(label)
+    capped = bool(machine.apply_caps().get("gpu_mem_cap_gb"))
     t0 = time.time()
     while True:
         with gpulock.gpu_lock(label):
-            free = torch.cuda.mem_get_info()[0] / 2 ** 20 if torch.cuda.is_available() else math.inf
+            if capped:
+                info = machine.check_free_memory(label)
+                print(f"[run_on_gpu] {label}: {info['free_gb']:.1f} GB free, cap {info['cap_gb']:.1f} GB", flush=True)
+                return fn()
+            free = torch.cuda.mem_get_info()[0] / 2 ** 20
             if free >= min_free_mb:
                 return fn()
         waited = time.time() - t0

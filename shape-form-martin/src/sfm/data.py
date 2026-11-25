@@ -12,12 +12,15 @@ Files written to the cache directory (default ``shape-form-martin/cache/``, env 
     pion_s1_test.pt       test set (separate file; only opened through ``load_sets(..., allow_test=True, reason=...)``)
     pion_s1_meta.json     geometry, counts, ranges
 
-Every test-cache access appends one line (UTC time, script, reason) to ``results/test_access.log``.
+Every test-cache access appends one line (UTC time, script, reason, host id, GPU, launch grid, machine id) to
+``results/test_access.log``; it is allowed only on the machine named in ``results/final/LOCK.json`` and never with a
+path override (``check_test_access_allowed``).
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -250,12 +253,59 @@ def build_cache(parquet: Path | str | None = None, cache_dir: Path | None = None
     return sh, extras, parts, meta
 
 
+OVERRIDE_ENV = ("SFM_RESULTS_DIR", "SFM_CACHE_DIR")
+
+
+def lock_file() -> Path:
+    """``results/final/LOCK.json`` of the repository (never relocated: overrides are refused for test access)."""
+    return paths.MARTIN_DIR / "results" / "final" / "LOCK.json"
+
+
+def check_test_access_allowed(lock_path: Path | None = None) -> dict:
+    """Raise ``PermissionError`` unless a test access is allowed on this machine (spec points 6 and 14 of
+    ``transfer/REVIEW_STATUS.md`` section 4): no ``SFM_RESULTS_DIR`` / ``SFM_CACHE_DIR`` override (the log would be
+    written outside the tracked file), ``results/final/LOCK.json`` exists and names this machine as the machine of
+    record (key ``machine_of_record.machine_id`` = ``sfm.machine.machine_tag().id``; if it also holds ``host_id``,
+    that must equal ``sfm.machine.host_id()``). CUDA is required (E10). Returns the LOCK content. Opens nothing else."""
+    bad = [k for k in OVERRIDE_ENV if os.environ.get(k)]
+    if bad:
+        raise PermissionError(f"test access refused: path override(s) set: {bad}; the test-access log and the "
+                              "caches must be the repository's own")
+    lock_path = Path(lock_path or lock_file())
+    if not lock_path.exists():
+        raise PermissionError(f"test access refused: {lock_path} does not exist (the test split is opened only by the "
+                              "final run on the machine of record, after Gate 2c)")
+    from . import machine
+    machine.startup("test access")
+    lock = json.loads(lock_path.read_text())
+    mor = lock.get("machine_of_record") or {}
+    live = machine.machine_tag()
+    if mor.get("machine_id") != live.id:
+        raise PermissionError(f"test access refused: LOCK.json names machine {mor.get('machine_id')!r}, this machine "
+                              f"is {live.id!r}")
+    if mor.get("host_id") and mor["host_id"] != machine.host_id():
+        raise PermissionError(f"test access refused: LOCK.json names host_id {mor['host_id']!r}, this is {machine.host_id()!r}")
+    return lock
+
+
+def test_access_line(reason: str, script: str | None = None) -> str:
+    """One line of results/test_access.log: UTC time, script, reason, host id (a hash; no host name), GPU, launch
+    grid, machine id."""
+    from . import machine
+    script = script or (Path(sys.argv[0]).name if sys.argv and sys.argv[0] else "<interactive>")
+    return (f"{datetime.now(timezone.utc).isoformat(timespec='seconds')}\t{script}\t{reason}\t"
+            f"{machine.short_label()}")
+
+
+test_access_line.__test__ = False
+
+
 def _log_test_access(reason: str):
     log = paths.TEST_ACCESS_LOG
     log.parent.mkdir(parents=True, exist_ok=True)
-    script = Path(sys.argv[0]).name if sys.argv and sys.argv[0] else "<interactive>"
+    line = test_access_line(reason)
     with open(log, "a") as f:
-        f.write(f"{datetime.now(timezone.utc).isoformat(timespec='seconds')}\t{script}\t{reason}\n")
+        f.write(line + "\n")
 
 
 def _unpack(pack: dict, device) -> tuple:
@@ -270,7 +320,9 @@ def load_sets(splits=("train", "val"), device=common.DEVICE, allow_test=False, r
 
     Returns (sets, extras): sets[split] is a Showers object, extras[split] = {"event_number", "theta", "phi",
     "index"} (numpy, CPU; "index" is the event's position in the full ascending event list).
-    Loading "test" requires allow_test=True and a non-empty `reason`; each such call is logged.
+    Loading "test" requires allow_test=True, a non-empty `reason`, no SFM_RESULTS_DIR / SFM_CACHE_DIR override and
+    ``results/final/LOCK.json`` naming this machine (``check_test_access_allowed``); each such call is logged with
+    host id, GPU and launch grid before the file is opened.
     """
     splits = (splits,) if isinstance(splits, str) else tuple(splits)
     bad = set(splits) - set(SPLITS)
@@ -283,6 +335,7 @@ def load_sets(splits=("train", "val"), device=common.DEVICE, allow_test=False, r
             raise PermissionError("the test split is locked: pass allow_test=True and a reason")
         if not reason or not str(reason).strip():
             raise ValueError("loading the test split requires a non-empty reason")
+        check_test_access_allowed()                    # overrides, LOCK.json naming this machine (before any write)
         _log_test_access(str(reason).strip())
         obj = torch.load(files["test"], map_location="cpu", weights_only=False)
         sets["test"], extras["test"] = _unpack(obj["test"], device)

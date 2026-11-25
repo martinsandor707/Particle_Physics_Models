@@ -84,6 +84,14 @@ def build(name: str, ctx: Optional[BuildContext] = None, **kwargs) -> nn.Module:
 
 
 def _run_dir(run: str, ctx: BuildContext) -> Path:
+    """Directory of a finished run. "repo:<stage>/<name>" = a record in the clone (``paths.REPO_RESULTS``, e.g. a
+    laptop-trained network); "out:machines/<id>/runs/<stage>/<name>" = an output of a machine under the output root
+    (``paths.OUT_RESULTS``; on the laptop this is the repository, where returned machine directories are placed);
+    otherwise relative to ``ctx.results_dir`` (or absolute)."""
+    if run.startswith("repo:"):
+        return paths.REPO_RESULTS / run[len("repo:"):]
+    if run.startswith("out:"):
+        return paths.OUT_RESULTS / run[len("out:"):]
     p = Path(run)
     return p if p.is_absolute() else Path(ctx.results_dir) / p
 

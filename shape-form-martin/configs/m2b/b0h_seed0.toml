@@ -1,0 +1,33 @@
+# Track B (PLAN.md section 6). Stage 2 = the fine-tune that made mlp_std.pt: the equivalent of
+# shapelab.fit_fast(steps=6000, lr=1e-3, lr_end=1e-4) at batch 256, K=16, best validation state kept
+# (sfm.train docstring: k_train=16, k_val=16, selection="best_val", fold_rng="global", eval_every=250).
+# H200 control (P5): same recipe as b0_seed0.toml, new run name; b0_seed0 stays the archived laptop record.
+# Run: .venv/bin/python -B shape-form-martin/scripts/run_m2b_fit.py shape-form-martin/configs/m2b/<this file>
+
+[run]
+name = "b0h_seed0"
+stage = "m2b_mlp"
+seed = 0
+notes = "B0 control trained on the machine of record (user decision P5): continue mlp_std.pt with the identical stage-2 schedule, seed 0"
+
+[model]
+factory = "field_mlp_std"
+
+[fit]
+steps = 6000
+lr = 1e-3
+lr_end = 1e-4
+batch = 256
+k_train = 16
+fold = "iid"
+k_val = 16
+eval_every = 250
+selection = "best_val"
+fold_rng = "global"
+smooth = 0.0
+weight_decay = 0.0
+ckpt_every = 250
+
+[evaluate]
+registry = true
+guards = true

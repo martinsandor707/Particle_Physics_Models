@@ -24,7 +24,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from sfm import data, gpulock, models, registry, train  # noqa: E402
+from sfm import data, gpulock, machine, models, paths, registry, train  # noqa: E402
 
 common = train.C
 
@@ -37,11 +37,17 @@ def main(argv=None) -> int:
     ap.add_argument("--no-evaluate", action="store_true", help="skip the registry evaluation")
     args = ap.parse_args(argv)
 
+    tag = machine.startup("fit.py")                                  # E10: CUDA or a hard failure; TF32 off; caps
+    gitst = machine.git_state()
     rc = train.load_run_config(args.config)
-    print(f"run {rc.stage}/{rc.name}  (config {rc.source}, hash {rc.hash()})  model {rc.model_factory} "
-          f"{rc.model_kwargs}  -> {rc.out_dir}")
+    print(f"run {rc.stage}/{rc.name}  (config {paths.portable(rc.source)}, hash {rc.hash()})  model {rc.model_factory} "
+          f"{rc.model_kwargs}  -> {paths.portable(rc.out_dir)}  (machine {tag.id})")
+    legacy = paths.REPO_RESULTS / rc.stage / rc.name / train.RUN_DONE_FILE
+    if legacy.exists() and not args.dry_run:
+        raise SystemExit(f"{paths.portable(legacy)}: this run was finished before machine tags existed (a laptop "
+                         "record); it is not retrained or continued here. Use another run name.")
     if rc.done_file.exists() and not args.dry_run:
-        print(f"already done: {rc.done_file}")
+        print(f"already done: {paths.portable(rc.done_file)}")
         return 0
     lock = (contextlib.nullcontext() if (args.no_lock or args.dry_run)
             else gpulock.gpu_lock(f"fit {rc.stage}/{rc.name}"))
@@ -49,7 +55,8 @@ def main(argv=None) -> int:
     with lock:
         sets, extras = data.load_sets(("train", "val"), device=common.DEVICE)
         train.seed_everything(rc.seed)
-        ctx = models.BuildContext(device=common.DEVICE, train=sets["train"], seed=rc.seed)
+        ctx = models.BuildContext(device=common.DEVICE, train=sets["train"], seed=rc.seed,
+                                  results_dir=paths.REPO_RESULTS)
         model = models.build(rc.model_factory, ctx, **rc.model_kwargs)
         n_params = models.count_params(model)
         print(f"model: {type(model).__name__}, {n_params} parameters "
@@ -58,7 +65,7 @@ def main(argv=None) -> int:
             print("dry run: config valid, model built; nothing trained")
             return 0
         meta = {"model": {"factory": rc.model_factory, "kwargs": rc.model_kwargs}, "run": rc.raw,
-                "run_hash": rc.hash(), "config_path": str(rc.source)}
+                "run_hash": rc.hash(), "config_path": paths.portable(rc.source)}
         res = train.fit(model, sets["train"], sets["val"], rc.fit, meta=meta)
         row = None
         if rc.evaluate.registry and not args.no_evaluate:
@@ -72,12 +79,13 @@ def main(argv=None) -> int:
             print(f"registered: val {row['val_mean']:.6f}  vs mlp {row['vs_mlp']['mean']:+.6f} +- "
                   f"{row['vs_mlp']['se']:.6f}  vs formula {row['vs_formula']['mean']:+.6f} +- "
                   f"{row['vs_formula']['se']:.6f}")
-        done = {"name": rc.name, "stage": rc.stage, "config": str(rc.source), "run_hash": rc.hash(),
+        done = {"name": rc.name, "stage": rc.stage, "config": paths.portable(rc.source), "run_hash": rc.hash(),
+                "machine_tag": tag.to_dict(), "git": gitst, "caps": machine.caps(),
                 "fit": res.summary(), "registered": row is not None,
                 "val_mean": row["val_mean"] if row else None, "seconds": time.time() - t0,
                 "finished_utc": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         train.atomic_write_json(done, rc.done_file)
-    print(f"done: {rc.done_file}")
+    print(f"done: {paths.portable(rc.done_file)}")
     if res.skipped:
         print(f"WARNING: {res.skipped_loss} batches skipped for a non-finite loss, {res.skipped_grad} for a "
               "non-finite gradient")

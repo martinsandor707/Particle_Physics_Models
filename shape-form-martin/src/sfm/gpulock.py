@@ -4,7 +4,7 @@
         ...                                   # training / evaluation
 
 Blocking by default: a second job logs who holds the lock, waits, and logs how long it waited. The holder writes
-its label, PID, host and start time into the lock file, so ``cat cache/gpu.lock`` shows who is running. The lock
+its label, PID, a host id (hash, no host name) and start time into the lock file, so ``cat cache/gpu.lock`` shows who is running. The lock
 is released when the block exits (also on exceptions) and automatically by the kernel if the process dies.
 ``timeout`` (seconds) turns the wait into polling that raises ``TimeoutError``. The lock file can be moved with the
 environment variable ``SFM_GPU_LOCK``. ``flock`` locks belong to the open file description, so two ``gpu_lock``
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import hashlib
 import os
 import socket
 import sys
@@ -42,7 +43,8 @@ def holder(path: Optional[Path] = None) -> str:
 
 def _me(label: Optional[str]) -> str:
     script = Path(sys.argv[0]).name if sys.argv and sys.argv[0] else "<interactive>"
-    return (f"{label or script} | pid {os.getpid()} | host {socket.gethostname()} | since "
+    host_id = hashlib.sha256(b"sfm-host|" + socket.gethostname().encode()).hexdigest()[:12]   # no host name in files
+    return (f"{label or script} | pid {os.getpid()} | host_id {host_id} | since "
             f"{datetime.now(timezone.utc).isoformat(timespec='seconds')}")
 
 
