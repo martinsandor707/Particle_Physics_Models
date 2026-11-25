@@ -1402,3 +1402,29 @@ by hand, machine-tagged.
 
 **Copy 2 — only after Gate 2c has passed (8 files, 2,674,270,935 bytes):** the two deferred lists and
 `verify --after-gate2c` (§16.2), immediately before the single final run.
+
+**Variant for a machine without `rsync` and without `uv` (the H200, as reported by the user on 25 Nov 2026).** `scp`
+cannot keep relative paths from a file list, so each list is packed with `tar` on the laptop, copied with `scp`, and
+unpacked on the H200. The environment is built with `venv` and `pip` from `transfer/requirements-h200.txt`, an export
+of `uv.lock` (`uv export --frozen --no-hashes --no-emit-project`); it must be regenerated whenever `uv.lock` changes.
+Python 3.12 gives the laptop's exact versions (numpy 2.5.3, scipy 1.18.1); Python 3.11 would install numpy 2.4.6 and
+scipy 1.17.1. `<ssh options>` stands for the key and port options of the H200 login (`-p` for `ssh`, `-P` for `scp`);
+they are not recorded in the repository.
+
+```
+# laptop, repository root
+tar -cf ~/h200_inputs.tar  -T shape-form-martin/transfer/files_b_inputs.txt
+tar -cf ~/h200_records.tar -T shape-form-martin/transfer/files_b_laptop_records.txt
+scp <ssh options> ~/h200_inputs.tar ~/h200_records.tar <user>@<h200>:~/
+# H200
+cd <repo>
+tar -xf ~/h200_inputs.tar
+mkdir -p shape-form-martin/cache/laptop_records
+tar -xf ~/h200_records.tar -C shape-form-martin/cache/laptop_records
+python3.12 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r shape-form-martin/transfer/requirements-h200.txt
+```
+
+On the H200 every `uv run python -B …` of this plan then reads `.venv/bin/python -B …`, and `uv run pytest …` reads
+`.venv/bin/python -m pytest …`. The two deferred lists are packed and copied the same way after Gate 2c.
