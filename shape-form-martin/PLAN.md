@@ -1703,3 +1703,30 @@ in the exponent; the "exponent a constant" scan removed 4 of the 13 members of t
 legitimate exponential trajectories unless `exp` takes that role; the gate should look at this on the real
 trajectory targets. Under the gauge loss a bare constant drifted to 187.8, which confirms the need for the gauge
 stripping of §17.7.
+
+### 17.9 Fable review of the enabling code — PASS WITH REQUIRED FIXES (commit `ebfac77`)
+
+Report: `transfer/ENABLING_REVIEW.md` (findings with reproducers, proposed fixes, a corrected H200 step list).
+
+- **What held:** `common.py` is byte-identical at every checked commit including Milestone 0. The emulated draw is
+  bit-exact on this GPU against the native draw and against the stored guard arrays. Every mis-pairing attempt was
+  refused (no reference set, untagged arrays at a live path, an array swapped under its sidecar, laptop rows in a
+  selection, another machine's tag, a K mismatch). No test opens the real test cache; the release of the deferred
+  names cannot be triggered by an environment variable. The memory cap and the free-memory refusal work.
+- **Required before H200 steps 6–8 (A):** step 5 fails as written under the active guard; `val_parity.py` can print
+  "ALL APPLICABLE CHECKS: PASS" although a check failed or was not made; the reference set is created and sealed
+  before any check is evaluated; `rescore_registered.py` skips checks silently when laptop records are not found;
+  pristine mode and the guard are fail-open (they depend on variables that only the launcher sets).
+- **Required before steps 9–11 (B):** the machine id changes with per-call flags; the starting point of a fine-tune is
+  neither verified by hash nor recorded; step 11 cannot fail (bit-equality not enforced, subset arrays bound to a
+  file name, "B0 mean" formed from fewer than three controls without a warning).
+- **Not blocking (C), to be fixed where cheap:** the ULP summary of the P3 outlier material decides nothing — 27 % of
+  random validation events have a fold point within 2 ULP of a bin edge; the deciding test is a point-by-point cell
+  comparison with the laptop's re-derivation, to be written before step 6 runs; guard events not hooked (rename,
+  remove, mkdir, hard links); the launcher reports an immediately failing command as started and its documented stop
+  command skips the command-line check of rule 10; the dirty-clone check does not compare `HEAD` with a pushed commit.
+- **Cause of the test-suite hang:** one geometry test takes the real GPU lock with a 30-minute timeout and waits for
+  its own parent when a wrapper holds the lock. Without that the suite takes about 94 s and under 1 GB of GPU memory.
+
+The fixes are with the worker who wrote the code; the reviewer re-checks them before anything runs on the H200
+(condition of the user's approval, §17.6).
