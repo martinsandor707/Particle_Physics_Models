@@ -1848,3 +1848,39 @@ arm (E7) is not written yet.
   the Stage-1 table, GPU memory is freed and the job continues; such a rung is never silently omitted. For primary
   comparisons and controls the independent rungs of the job still finish, but a primary rung is marked as failed only
   after a Fable diagnosis.
+
+### 17.12 PySR: decisions S1–S5 built in (commit `d91b067`); two points back to the user
+
+All five decisions of §17.11 are in the code (315 PySR tests pass). Detail: `src/sfm/sr/STATUS.md` sections 13 and 14.
+
+**Preview of the tail criteria on the legacy component formula** (not the baseline of record, which is the refitted
+Track A finalist on the H200; density before the acceptance template):
+
+| p / GeV | 0.05 | 0.1 | 1 | 5 | 20 | 30 | 50 |
+|---|---|---|---|---|---|---|---|
+| flattest radial log-log slope of ρ, r ≥ 200 mm | −0.95 | −0.95 | −0.89 | −1.21 | −1.27 | −1.13 | −0.92 |
+| z_90 / mm | 124 | 98 | 385 | 663 | 857 | 908 | 950 |
+| largest depth slope beyond z_90, nat per 100 mm | −0.08 | −0.08 | +0.33 | +0.55 | +0.02 | +0.04 | +0.02 |
+
+- *Radial:* flatter than −2 at every momentum, so the alternative branch of S4 is to be expected (`∂_r ln ρ < 0` and
+  `∂_r δ ≤ 0` for r > 200 mm).
+- *Depth:* **the legacy formula itself violates "depth slope ≤ 0 beyond z_90"** at 1, 5, 20, 30 and 50 GeV. Causes,
+  each confirmed by removing one component: at 1 GeV the track component's Bragg factor just before the range end
+  (z′ 722–760 mm, +8 % over 38 mm; physics the formula contains by construction, compatible with the training data
+  but below what they resolve); at 5 GeV a low-weight end component whose flank piles up in the last depth row of the
+  grid (a construction artefact; the measured energy there is ten times smaller than the formula's and only 23 % of
+  events reach that row); at 20–50 GeV the lateral widening of the shower with depth at radii beyond the grid
+  (extrapolation, no data). z_90 is not the cause. The training data show no rising depth bin beyond z_90 within two
+  bootstrap standard errors in any of the twelve profiles examined.
+- *Consequence:* under the absolute depth rule no correction could be certified on such a baseline, δ = 0 included.
+  The Stage-2 check of §7 ("no sign change of `∂_z′ ln ρ` beyond z_90") is the same statement and has the same problem.
+
+**Awaiting the user's decision**
+
+| # | Question | Recommendation of the mathematics worker |
+|---|---|---|
+| T1 | Depth rule when the baseline itself rises beyond z_90 | the inheriting form, point by point: `∂_z′ ln ρ_model ≤ max(0, ∂_z′ ln ρ_base)` at every registered momentum, radius and depth — the model may not rise where the baseline falls and may not rise faster where the baseline already rises. δ = 0 always passes; everywhere else the accepted absolute rule stays in force. The same form for the Stage-2 modulation, with the sign-change counts of model and baseline printed beside it. Not implemented yet (the global relative form `∂_z′ δ ≤ 0` exists in the code, switched off; it would forbid every correction that rises with depth even where the baseline falls steeply) |
+| T2 | Cusp-stall flag (S5) | the gradient-clip count does not fire at the default clip norm, because the gradient at a kink is bounded (0 of 160 steps clipped in the test). A second indicator that does not depend on the clip norm (an `sqa` argument crossing or staying near zero in the final quarter of the run) catches that case and not a control; it is reported but not part of the flag. Recommendation: make it part of the flag |
+
+Caveat on S1: on a synthetic problem with a true correction of 0.8 nat (close to the bound) the bounded control fits
+0.011 nat worse than the plain polynomial; the two are close only for corrections well below 1 nat.

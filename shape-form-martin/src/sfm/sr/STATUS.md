@@ -3,7 +3,8 @@
 Written for whoever continues. All six modules are implemented; each section says what the code does, what was
 verified and what was not. Section 8 holds the decisions and the plan rules they touch (**all eight accepted by
 the user on 25 Nov 2026**); section 12 answers the user's four confirmations; **section 13 builds in the user's
-decisions S1–S5 (PLAN §17.11) and holds the tail-criterion preview for the legacy formula**; section 10 holds
+decisions S1–S5 (PLAN §17.11) and holds the tail-criterion preview for the legacy formula**; **section 14 explains
+why the legacy formula fails the depth rule and recommends a form of the rule**; section 10 holds
 the interfaces for the runner. Where sections 12 and 13 differ, 13 is in force. **Numbers are measured only where they say so.**
 
 ## 1. Status per module
@@ -662,3 +663,71 @@ loose cost false refusals.
   `ClipMonitor`, `clip_statistics`, `cusp_hover_statistics`, `constants_inside_sqa`, `extended_ring_grid`,
   `continued_log_density`, `tail_criterion_for_baseline`.
 - Nothing that `scripts/sr_post.py` or the search runner uses was renamed or removed.
+
+## 14. Why the legacy formula violates "depth slope ≤ 0 beyond z_90" (investigation, read-only; no code changed)
+
+Legacy component formula, **not the baseline of record**. Scripts and raw output: scratch directory `sr_math/`
+(`depth_cause_model.py`, `depth_cause_data.py`). Model part: CPU, float64, density before the acceptance template,
+continued to 1500 mm. Data part: **training events only** (69,783 events), hit centres, energy-weighted, 200
+bootstrap resamples by event.
+
+**14.1 Three different causes, by momentum** (each confirmed by removing one component at a time):
+
+| p / GeV | component | where | size | total rise | energy in the rising cells |
+|---|---|---|---|---|---|
+| 0.05, 0.1 | — | no rise | −0.08 nat / 100 mm | — | — |
+| 1 | **track**: its Bragg factor `(1 − z′/R + 0.03)^(−q)` just before the range end R(T) = 755 mm | z′ 722–760 mm, r 1–227 mm | +0.33 nat / 100 mm (track alone +0.79) | +8 % over 38 mm | 1.1e-3 |
+| 5 | **end blob**: Gaussian centred at R(T) = 7035 mm, weight < 5e-5, normalised onto the grid so its flank piles up at the boundary | last depth row only, z′ 1431–1444 mm, r 74–329 mm | +0.55 nat / 100 mm | +7 % | 1.9e-4 |
+| 20 | **shower**: its lateral profile widens with depth (own slope +0.09 at r ≈ 900 mm), against the far halo's −0.08 | z′ 863–1108 mm, r 711–1182 mm — entirely beyond the grid | +0.016 nat / 100 mm | +2 % | 0 inside the grid (1.4e-3 in the continuation) |
+| 30, 50 | same as 20 GeV; momenta outside the training range | z′ 915–1328 mm, r 610–1260 mm | +0.04, +0.02 nat / 100 mm | +6 %, +3 % | 3.9e-4 inside the grid |
+
+Without the track the 1 GeV rise is gone (largest slope −0.08); without the end blob the 5 GeV rise is gone (−0.05);
+the r-integrated profile rises for the same two reasons (+0.02 at 735–747 mm at 1 GeV, +0.13 in the last row at
+5 GeV) and not at all at 20–50 GeV.
+
+**14.2 z_90 is not the issue.** It is computed from the baseline's own map before the acceptance template, on the
+truncated grid: 125, 98, 385, 663, 856, 908, 950 mm — 500 to 1350 mm before the grid end. With the acceptance
+template: 153, 118, 420, 678, 839, 880, 915 mm; continued to 1500 mm: 125, 99, 396, 680, 874, 921, 956 mm; z_95:
+161, 140, 507, 841, 1049, 1098, 1135 mm. With any of these the 1 and 5 GeV results are identical (+0.33, +0.55);
+with z_95 the high-momentum ones shrink (+0.007, +0.026, +0.009) and stay positive.
+
+**14.3 The data.** Momentum bins [0.8, 1.25), [4.5, 5.5), [18, 20) GeV (1683, 3537, 6998 training events); depth
+bins of 52 mm; bands all r, r < 30, 30–200, 200–700 mm. Models as the hits can show them (map truncated at each
+event's back face, averaged over the bin's events).
+- **No depth bin beyond z_90 rises by more than two bootstrap standard errors, in any band, in any of the three
+  momentum bins** (12 profiles). The formula's bin-averaged profile has no rising bin either (largest slope −0.16
+  to −0.74 nat / 100 mm); the MLP has two, at 1166 and 1217 mm for r < 30 mm at 1 GeV.
+- 1 GeV, range end: in u = z′/R(T) (R from the formula's range law, 537–1051 mm across the bin) the data near the
+  axis fall steadily and stop beyond u ≈ 1.1; the one upward step (u 0.92 → 0.97, r < 50 mm) is +0.30 ± 0.28. The
+  formula has a shoulder there (−0.14 against −0.25 around it) and the edge after u = 1. The data are compatible
+  with a Bragg shoulder of the formula's size and cannot resolve a 38 mm rise.
+- 5 GeV, last row: 23 % of the training events have their back face beyond 1431 mm (median 1349 mm); the measured
+  energy beyond 1400 mm is 1e-5 per event (formula 1e-4, MLP 5e-5). Nothing constrains the formula there.
+- 20 GeV: the rise lies beyond 700 mm, where there is no data; in the outermost band 200–700 mm the data fall
+  (largest slope −0.09 nat / 100 mm).
+
+**Verdict.** 1 GeV: physics that the formula contains by construction (the Bragg rise of stopping pions), real but
+below what the data resolve. 5 GeV: an artefact of the formula's construction in the last grid row, with no data.
+20–50 GeV: an extrapolation feature beyond the grid radius (and, at 30 and 50 GeV, beyond the training momenta).
+None is an artefact of how the check is evaluated — but the check is pointwise (single momenta, single rows), so
+it sees features far below the resolution of the data.
+
+**14.4 Recommendation.** Use the *inheriting* form, point by point: beyond z_90 the model may not rise where the
+baseline falls, and may not rise faster where the baseline rises —
+`∂_z′ ln ρ_model ≤ max(0, ∂_z′ ln ρ_base)` at every registered momentum, radius and depth band. It is the user's
+radial logic applied locally: δ = 0 always passes, a correction is never rejected for the baseline's Bragg bump
+or boundary row, and everywhere else the accepted absolute rule stays in force (a correction may rise as long as
+the density still falls). Compared with the two forms that exist in the code: the absolute rule fails δ = 0 on this
+baseline, and with it every correction that does not happen to cancel the baseline's own rises; the global relative form (`allow_depth_alternative=True`: ∂_z′ δ ≤ 0 everywhere
+beyond z_90) passes δ = 0 but forbids every correction that rises with depth, even where the baseline falls by
+0.2–0.5 nat / 100 mm. Not recommended: restricting the region (the 1 GeV rise is inside the data region) or using
+the r-integrated profile only (it rises too). **The inheriting form is not implemented** — it is a change of about
+ten lines in `audit.tail_check` and one rule name in `checks.decide_tail_criterion`, to be made once decided.
+- **Stage-2 sin/cos check** (PLAN §7, "no sign change of ∂_z′ ln ρ beyond z_90" — the same statement): the baseline
+  itself has sign changes (two at 1 GeV, one at 5 GeV), so in absolute form no Stage-2 result could pass either. The
+  same inheriting rule applies unchanged — the modulation may not create a rise the baseline does not have — with
+  the sign-change counts of model and baseline reported beside it as a diagnostic ("not more than the baseline",
+  as §7 of this file already proposed).
+- **Not verified:** the Track A finalist may differ (it is refitted, and several rungs change the track and halo
+  forms); the data comparison is unfolded (hit centres against cell probabilities) and bin-averaged; the three
+  momentum bins are the only ones looked at.
