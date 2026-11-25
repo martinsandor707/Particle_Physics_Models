@@ -1428,3 +1428,14 @@ python3.12 -m venv .venv
 
 On the H200 every `uv run python -B …` of this plan then reads `.venv/bin/python -B …`, and `uv run pytest …` reads
 `.venv/bin/python -m pytest …`. The two deferred lists are packed and copied the same way after Gate 2c.
+
+**Status, 25 Nov 2026 (afternoon): Copy 1 is done.** Reported by the user: the branch is cloned on the H200, both
+archives were copied with `scp` and unpacked, the environment was built with `venv` and `pip` from
+`transfer/requirements-h200.txt` under **Python 3.13.12** (the laptop has 3.12), and the six check commands "all went
+as expected". The expected values were: `verify` PASS with the eight deferred files absent, torch
+`2.14.0+cu130 13.0 True`, launch grid 1056, emulator test passed. The literal outputs are not on file; the identity
+record R0 (GPU name, launch grid, torch build, generator test) is written by the first GPU step (E2) and checked at
+Gate 1. Python 3.13 changes no pinned package: the environment markers of the requirements file switch versions only
+below 3.12 (numpy 2.5.3, scipy 1.18.1 and contourpy 1.4.0 apply from 3.12 on), so the H200 has the laptop's package
+versions under another interpreter. The interpreter version becomes part of the machine tag (E1). Nothing else has
+been run on the H200; the GPU work waits for the enabling code of §16.7 and the user's go-ahead.
