@@ -81,6 +81,25 @@ def _member_refs(spec) -> list:
     return [lib.member(n) for n in spec["members"]]
 
 
+def _member_file(ref) -> Path:
+    return models._run_dir(ref, models.BuildContext()) / "model.pt"
+
+
+def check_members(names) -> dict:
+    """Every member file must be the checkpoint of a row of the LIVE stream (its own registration or re-score on this
+    machine), by SHA-256 (review B3). Returns {ref: file SHA-256}."""
+    out = {}
+    for n in names:
+        ref = lib.member(n)
+        f = _member_file(ref)
+        row = lib.registered_row(n, f)
+        if row is None:
+            raise SystemExit(f"member {n} ({ref}): no row on the live stream {lib.live_stream_id()} with this file's "
+                             "SHA-256; register / re-score it on this machine first")
+        out[ref] = lib.sha256_file(f)
+    return out
+
+
 def _member_info(refs, include_mlp_std) -> dict:
     out = {}
     for r in refs:
@@ -102,6 +121,7 @@ def register_ensemble(name: str, spec: dict) -> dict:
         print(f"[{name}] already done on this machine")
         return done
     refs = _member_refs(spec)
+    check_members(spec["members"])
 
     def job():
         val = registry.load_validation()
@@ -159,6 +179,7 @@ def score_subsets() -> dict:
     if todo:
         st = registry.live_stream()
         refs = {s: lib.member(f"s2_seed{s}") for s in lib.S1_SEEDS}
+        member_sha = check_members([f"s2_seed{s}" for s in lib.S1_SEEDS])
 
         def job():
             val = registry.load_validation()
@@ -173,7 +194,9 @@ def score_subsets() -> dict:
                     if not np.isfinite(nll).all():
                         raise FloatingPointError(f"subset {c}: non-finite NLL")
                     provenance.save_tagged(subset_file(c), nll, st["points"], st["machine"],
-                                           label=f"ensemble subset s2 {c}", extra={"members": [refs[s] for s in c]})
+                                           label=f"ensemble subset s2 {c}",
+                                           extra={"members": [refs[s] for s in c],
+                                                  "member_sha256": {refs[s]: member_sha[refs[s]] for s in c}})
                     timing["-".join(map(str, c))] = r1.as_dict()
                     print(f"subset {c}: val {float(np.mean(nll, dtype=np.float64)):.6f}  ({r1.seconds:.0f}s)")
             timing["_all"] = r_all.as_dict()
@@ -213,10 +236,17 @@ def scaling_table() -> dict:
     single_mean = {s: float(single[s].values.astype(np.float64).mean()) for s in lib.S1_SEEDS}
     best_single = min(lib.S1_SEEDS, key=lambda s: single_mean[s])
     arrays = {(s,): single[s] for s in lib.S1_SEEDS}
+    member_sha = check_members([f"s2_seed{s}" for s in lib.S1_SEEDS])
     for m in (2, 3, 4):
         for c in itertools.combinations(lib.S1_SEEDS, m):
-            arrays[c] = provenance.load_tagged(subset_file(c), expect_points=st["points"],
-                                               expect_machine_id=st["machine"].id, label=f"subset {c}")
+            f = subset_file(c)
+            arrays[c] = provenance.load_tagged(f, expect_points=st["points"], expect_machine_id=st["machine"].id,
+                                               label=f"subset {c}")
+            side = json.loads(provenance.sidecar_path(f).read_text())
+            want = {lib.member(f"s2_seed{s}"): member_sha[lib.member(f"s2_seed{s}")] for s in c}
+            if side.get("member_sha256") != want:
+                raise SystemExit(f"{paths.portable(f)}: its members are not today's files (sidecar "
+                                 f"{side.get('member_sha256')} vs {want}); refused")
     arrays[tuple(lib.S1_SEEDS)] = _arr(rows, "E5_s2")
     checks = {}                                                       # representatives: registered == recomputed
     for m in (2, 3, 4):
@@ -281,6 +311,13 @@ def scaling_table() -> dict:
 BATCH: dict = {}
 
 
+def representatives_verdict(checks: dict) -> tuple:
+    """(ok, failing names): the acceptance of R6 - all three representatives bit-equal (review B3)."""
+    expected = {_rep_name(tuple(lib.S1_SEEDS[:m])) for m in (2, 3, 4)}
+    bad = sorted(k for k in expected if not checks.get(k, False))
+    return not bad, bad
+
+
 def main(argv=None) -> int:
     global BATCH
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -297,7 +334,12 @@ def main(argv=None) -> int:
             prev.update({k: v for k, v in t.items() if k != "_all"})
             prev.setdefault("_runs", []).append(t.get("_all"))
             train.atomic_write_json(prev, tf)
-    scaling_table()
+    out = scaling_table()
+    ok, bad = representatives_verdict(out["representative_bitwise_equal"])
+    if not ok:
+        print(f"FAIL: representatives not bit-equal to their registered arrays: {bad} (acceptance of R6)")
+        return 1
+    print("PASS: all three representatives bit-equal to their registered arrays")
     return 0
 
 

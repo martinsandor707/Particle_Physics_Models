@@ -16,8 +16,12 @@ Rules (a Python audit hook, ``sys.addaudithook``)
        under the clone (``paths.REPO_ROOT``), the output root (``paths.OUT_ROOT``) or the launcher's cache / temp
        directory (``SFM_USER_CACHE``) is refused. Checked events: ``open`` (builtins/io/os.open, so numpy.load,
        torch.load with a path, json reads ...), ``os.listdir``, ``os.scandir``, ``shutil.copyfile``,
-       ``shutil.copytree``, ``ctypes.dlopen``, ``subprocess.Popen``, ``os.exec``, ``os.posix_spawn``, ``os.spawn``
-       (path-like arguments of a child process). Paths outside the area (interpreter, system libraries) pass.
+       ``shutil.copytree``, ``ctypes.dlopen``, ``os.remove``/``unlink``, ``os.rename``/``replace``, ``os.mkdir``,
+       ``os.rmdir``, ``os.link``, ``os.symlink``, ``os.truncate``, ``os.chmod``, ``os.chown``, ``os.utime``,
+       ``shutil.rmtree``, ``shutil.move``, ``shutil.copymode/copystat/chown``, ``subprocess.Popen``, ``os.exec``,
+       ``os.posix_spawn``, ``os.spawn``, ``os.system`` (path-like arguments of a child process / shell command; a
+       relative argument containing "/" is resolved against the working directory, so commands are started from the
+       clone root). Paths outside the area (interpreter, system libraries) pass.
     2. Names, wherever they are: the eight deferred files (``DEFERRED_NAMES``: the test cache, ``test_v3_nll.npz``,
        ``test_event_number.npy``, the four ``*_test_nll*.npy`` arrays, the raw Parquet table) and every
        ``*_hits_with_model_outputs.parquet`` are refused. The deferred names (only those) can be released by
@@ -43,6 +47,11 @@ Limits (stated honestly)
     * ``os.stat`` / ``os.path.exists`` / ``os.readlink`` raise no audit event: metadata of a refused path (size,
       mtime, existence) can be read; file contents cannot through Python.
     * Audit hooks cannot be removed and are process-wide; threads are covered, other processes are not.
+    * A hard link that already exists inside an allowed directory and points to a foreign file is opened (a hard
+      link has no target to resolve); creating one through Python is refused (``os.link``).
+    * Python code can change the guard's own state (``guard._STATE``); the guard protects against mistakes of the
+      campaign code, not against code written to defeat it. The deferred names can be released only through
+      ``enable_final_test_access`` (LOCK.json in the clone naming the live machine), not by an environment variable.
 """
 from __future__ import annotations
 
@@ -67,8 +76,14 @@ DEFERRED_NAMES = frozenset({
 FOREIGN_PATTERNS = ("*_hits_with_model_outputs.parquet",)
 REFUSED_IMPORTS = ("pyarrow", "fastparquet", "polars", "duckdb")
 PATH_EVENTS = {"open": (0,), "os.listdir": (0,), "os.scandir": (0,), "shutil.copyfile": (0, 1),
-               "shutil.copytree": (0, 1), "ctypes.dlopen": (0,)}
+               "shutil.copytree": (0, 1), "ctypes.dlopen": (0,),
+               # review C2: operations that move, remove, link or alter files (rules 1 and 6)
+               "os.remove": (0,), "os.rename": (0, 1), "os.mkdir": (0,), "os.rmdir": (0,), "os.link": (0, 1),
+               "os.symlink": (0, 1), "os.truncate": (0,), "os.chmod": (0,), "os.chown": (0,), "os.utime": (0,),
+               "shutil.rmtree": (0,), "shutil.move": (0, 1), "shutil.copymode": (0, 1), "shutil.copystat": (0, 1),
+               "shutil.chown": (0,)}
 PROC_EVENTS = ("subprocess.Popen", "os.exec", "os.posix_spawn", "os.spawn")
+SHELL_EVENTS = ("os.system",)
 
 _STATE = {"active": False, "area": None, "allowed": [], "allow_deferred": False, "installed_hook": False,
           "pyarrow_loaded_before_guard": None, "refusals": 0}
@@ -199,6 +214,14 @@ def _hook(event: str, args) -> None:
         return
     if event in PROC_EVENTS:
         _check_proc_args(args)
+        return
+    if event in SHELL_EVENTS and args and isinstance(args[0], (str, bytes)):
+        import shlex
+        try:
+            toks = shlex.split(os.fsdecode(args[0]))
+        except ValueError:
+            _refuse(os.fsdecode(args[0])[:200], "os.system: command line could not be parsed")
+        _check_proc_args([toks])
 
 
 def install(area: Optional[str] = None) -> bool:

@@ -38,6 +38,7 @@ from sfm import data, models, paths, registry, train  # noqa: E402
 
 common = train.C
 BATCH: dict = {}
+VERIFY_ONLY = False
 
 
 def run_config(path: str) -> dict:
@@ -53,6 +54,9 @@ def run_config(path: str) -> dict:
     if done is not None:
         print(f"already done on this machine: {paths.portable(rc.done_file)}")
         return done
+    init = lib.verify_init(rc.name, rc.model_factory, rc.model_kwargs)        # B2: pre-registered + SHA-256
+    print(f"starting point verified: {init['factory']} {init['run'] or ''} file {init['file_sha256'][:12]} weights "
+          f"{init['weights_sha256'][:12]} ({init['trained_on']})")
     t0 = time.time()
 
     def job():
@@ -61,11 +65,15 @@ def run_config(path: str) -> dict:
         ctx = models.BuildContext(device=common.DEVICE, train=sets["train"], seed=rc.seed,
                                   results_dir=paths.REPO_RESULTS)     # from_run: the laptop's stage-1 networks
         model = models.build(rc.model_factory, ctx, **rc.model_kwargs)
+        lib.check_built_weights(model, init)
+        if VERIFY_ONLY:
+            print("verify-only: starting point and built weights agree; nothing trained or written")
+            return {"verified_init": init}, None
         n_params = models.count_params(model)
         print(f"model: {type(model).__name__}, {n_params} parameters "
               f"({sum(p.numel() for p in model.parameters() if p.requires_grad)} trainable)")
         meta = {"model": {"factory": rc.model_factory, "kwargs": rc.model_kwargs}, "run": rc.raw,
-                "run_hash": rc.hash(), "config_path": paths.portable(rc.source)}
+                "run_hash": rc.hash(), "config_path": paths.portable(rc.source), "init_from": init}
         ck = rc.out_dir / train.CHECKPOINT
         resumed_from = None
         if ck.exists() and not (rc.out_dir / train.DONE_FILE).exists():
@@ -83,7 +91,8 @@ def run_config(path: str) -> dict:
                         meta={"k": rc.evaluate.k if rc.evaluate.k is not None else n_params, "C": rc.evaluate.C,
                               "seed": rc.seed, "config": rc.raw, "config_hash": rc.hash(),
                               "checkpoint": str(res.model_path), "notes": rc.notes, "fit": res.summary(),
-                              "trained_on": {"machine_id": lib.MACHINE.id, "source": "trained in this job"}},
+                              "trained_on": {"machine_id": lib.MACHINE.id, "source": "trained in this job",
+                                             "init_from": init}},
                         guards=rc.evaluate.guards)
                 else:
                     print(f"already registered ({row['timestamp']}); not evaluated again")
@@ -100,6 +109,7 @@ def run_config(path: str) -> dict:
         train.atomic_write_json(resources, res_path)
         done = {"name": rc.name, "stage": rc.stage, "config": paths.portable(rc.source), "run_hash": rc.hash(),
                 "machine_tag": lib.MACHINE.to_dict(), "stream_id": lib.live_stream_id(), "batch": BATCH,
+                "init_from": init,
                 "fit": res.summary(), "registered": row is not None,
                 "val_mean": row["val_mean"] if row else None, "seconds": time.time() - t0,
                 "resources": resources, "finished_utc": datetime.now(timezone.utc).isoformat(timespec="seconds")}
@@ -108,6 +118,8 @@ def run_config(path: str) -> dict:
         return done, res
     done, res = lib.run_on_gpu(f"m2b fit {rc.stage}/{rc.name}", job, min_free_mb=3000)
     lib.free_cuda()
+    if res is None:                                                      # --verify-init-only
+        return done
     print(f"done: {paths.portable(rc.done_file)}")
     if res.skipped:
         print(f"WARNING: {res.skipped_loss} batches skipped for a non-finite loss, {res.skipped_grad} for a "
@@ -118,8 +130,11 @@ def run_config(path: str) -> dict:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("configs", nargs="+")
+    ap.add_argument("--verify-init-only", action="store_true",
+                    help="verify the starting points and the built weights, then stop (nothing trained or written)")
     args = ap.parse_args(argv)
-    global BATCH
+    global BATCH, VERIFY_ONLY
+    VERIFY_ONLY = bool(args.verify_init_only)
     BATCH = lib.start("run_m2b_fit")
     for c in args.configs:                                            # fail early on a broken file
         train.load_run_config(c)

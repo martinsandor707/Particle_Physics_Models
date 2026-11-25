@@ -20,7 +20,10 @@ results/registry.jsonl, schema 1, read-only):
        any grid    mass monitors within 1e-4 relative per event of the laptop's files;
                    ``--emulate-laptop``: R1b, the laptop stream emulated here (grid 144) against the laptop's
                    registered val_nll.npy, every event within 1e-4 and means within 1e-6 (relaxed clause reported)
-Report: results/machines/<id>/checks/rescore/report_<utc>.json. Exit code 0 if all applicable checks passed.
+Verdict per network (review A4): the required checks of this grid are listed one by one; a check that could not be
+made (laptop record missing or not verified against transfer/SHA256SUMS) is NOT MADE and makes the verdict
+INCOMPLETE, never PASS. A launch grid other than 1056 / 144 is refused unless --allow-unchecked-grid (then INCOMPLETE).
+Report: results/machines/<id>/checks/rescore/report_<utc>.json. Exit code 0 PASS, 1 FAIL, 2 INCOMPLETE.
 """
 import argparse
 import json
@@ -46,6 +49,34 @@ GUARDS_1056 = {      # transfer/REVIEW_STATUS.md measurement D: K = 1024 mean, b
     "b0_seed0": (18.1156983, 18.0430490), "s2_seed11": (18.1157633, 18.0431667), "s2_seed12": (18.1159234, 18.0433190)}
 
 
+def required_checks(name: str, grid, guarded: bool, emulate: bool) -> list:
+    """The checks a network must have for a PASS on this grid (review A4); anything not made -> INCOMPLETE."""
+    req = []
+    if grid == refstream.REFERENCE_GRID:
+        req += ["predicted_mean", "predicted_delta_vs_mlp_e4"]
+        if guarded and name in GUARDS_1056:
+            req += ["predicted_k1024_mean", "predicted_bulk_mean"]
+    elif grid == refstream.LAPTOP_GRID:
+        req += ["laptop_registered_array"] + (["laptop_k1024", "laptop_bulk_zb1221"] if guarded else [])
+    else:
+        req += ["R4_on_emulated_grid_1056"]                      # not implemented: always NOT MADE
+    if guarded:
+        req.append("mass_monitors")
+    if emulate:
+        req.append("R1b_emulated_144_vs_laptop")
+    return req
+
+
+def network_verdict(checks: dict, required: list) -> tuple:
+    """("PASS" | "FAIL" | "INCOMPLETE", not made, failed): FAIL if a made check failed, INCOMPLETE if a required check
+    was not made, PASS only if every required check was made and passed."""
+    not_made = [k for k in required if k not in checks or checks[k].get("made") is False]
+    failed = [k for k, c in checks.items() if isinstance(c, dict) and c.get("made") is not False and "pass" in c
+              and not c["pass"]]
+    verdict = "FAIL" if failed else ("INCOMPLETE" if not_made else "PASS")
+    return verdict, not_made, failed
+
+
 def within(x, target, tol) -> dict:
     return {"value": x, "target": target, "tol": tol, "diff": x - target, "pass": bool(abs(x - target) <= tol)}
 
@@ -58,12 +89,18 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--names", nargs="+", default=list(lib.LAPTOP_TRAINED))
     ap.add_argument("--emulate-laptop", action="store_true", help="R1b: also score on the emulated laptop stream")
+    ap.add_argument("--allow-unchecked-grid", action="store_true",
+                    help="score on a launch grid that is neither 1056 nor 144 (verdict at best INCOMPLETE)")
     ap.add_argument("--source-registry", default=str(registry.LEGACY_REGISTRY),
                     help="registry holding the laptop rows (default: the clone's results/registry.jsonl)")
     args = ap.parse_args(argv)
     batch = lib.start("rescore_registered")
     tag = machine.machine_tag()
     grid = tag.fields["launch_grid"]
+    if grid not in (refstream.REFERENCE_GRID, refstream.LAPTOP_GRID) and not args.allow_unchecked_grid:
+        raise SystemExit(f"launch grid {grid} is neither 1056 nor 144: the predicted table cannot be checked here and R4 "
+                         "on the emulated grid 1056 is not implemented. Not started (no rows written). Pass "
+                         "--allow-unchecked-grid to score anyway (verdict at best INCOMPLETE).")
     env = registry.RegistryEnv()
     src_rows = registry.read_registry(Path(args.source_registry))
     laptop = {}
@@ -135,14 +172,19 @@ def main(argv=None) -> int:
     for n in args.names:
         e = res[n]
         if "error" in e:
-            ok.append(False)
+            e["verdict"] = "FAIL"
+            e["failed"] = [e["error"]]
             report["networks"][n] = e
             continue
+        guarded = bool(e["laptop_row"]["guards"])
         chk = {}
         mine = np.load(env.results_dir / e["row"]["val_nll_path"])
         rec = provenance.laptop_record(f"results/{lib.STAGE}/{n}/val_nll.npy", hashes=hashes)
-        rec_arr = np.load(rec["path"]) if rec["path"] is not None else None
+        rec_ok = rec["path"] is not None and rec["verified"]
+        rec_arr = np.load(rec["path"]) if rec_ok else None
         chk["laptop_record"] = {k: (paths.portable(v) if isinstance(v, Path) else v) for k, v in rec.items()}
+        why_rec = ("laptop record not found" if rec["path"] is None else
+                   "laptop record not verified against transfer/SHA256SUMS")
         if grid == refstream.REFERENCE_GRID and n in PREDICTED_1056:
             mu, d = PREDICTED_1056[n]
             chk["predicted_mean"] = within(e["row"]["val_mean"], mu, 1e-6 + 5e-8)
@@ -153,22 +195,29 @@ def main(argv=None) -> int:
                 bulk = np.load(env.results_dir / g["arrays"]["bulk_zb1221"]["path"])
                 chk["predicted_bulk_mean"] = within(float(np.nanmean(bulk.astype(np.float64))), GUARDS_1056[n][1],
                                                     1e-6 + 5e-8)
-        if grid == refstream.LAPTOP_GRID and rec_arr is not None:
-            chk["laptop_registered_array"] = provenance.tolerance_check(mine, rec_arr, top=5)
-            chk["laptop_registered_array"]["pass"] = chk["laptop_registered_array"]["bit_identical"]
-            chk["laptop_registered_array"]["sha_equals_laptop_row"] = (provenance.sha256_array(mine)
-                                                                       == e["laptop_row"]["val_nll_sha256"])
-            if e["row"]["guards"]:
+        if grid == refstream.LAPTOP_GRID:
+            if rec_arr is None:
+                chk["laptop_registered_array"] = {"made": False, "reason": why_rec}
+            else:
+                tc = provenance.tolerance_check(mine, rec_arr, top=5)
+                chk["laptop_registered_array"] = {**tc, "pass": tc["bit_identical"],
+                                                  "sha_equals_laptop_row": (provenance.sha256_array(mine)
+                                                                            == e["laptop_row"]["val_nll_sha256"])}
+            if guarded:
                 for kind, rel in (("k1024", "val_nll_k1024.npy"), ("bulk_zb1221", "val_bulk_zb1221.npy")):
                     r2 = provenance.laptop_record(f"results/{lib.STAGE}/{n}/{rel}", hashes=hashes)
-                    if r2["path"] is not None:
-                        a = np.load(env.results_dir / e["row"]["guards"]["arrays"][kind]["path"])
-                        tc = provenance.tolerance_check(a, np.load(r2["path"]), top=3)
-                        chk[f"laptop_{kind}"] = {"bit_identical": tc["bit_identical"], "max_abs": tc["max_abs"],
-                                                 "pass": tc["bit_identical"]}
-        if e["row"]["guards"]:
+                    if r2["path"] is None or not r2["verified"]:
+                        chk[f"laptop_{kind}"] = {"made": False, "reason": "record missing or not verified"}
+                        continue
+                    a = np.load(env.results_dir / e["row"]["guards"]["arrays"][kind]["path"])
+                    tc = provenance.tolerance_check(a, np.load(r2["path"]), top=3)
+                    chk[f"laptop_{kind}"] = {"bit_identical": tc["bit_identical"], "max_abs": tc["max_abs"],
+                                             "pass": tc["bit_identical"]}
+        if guarded:
             r3 = provenance.laptop_record(f"results/{lib.STAGE}/{n}/val_mass_monitors.npz", hashes=hashes)
-            if r3["path"] is not None:
+            if r3["path"] is None or not r3["verified"]:
+                chk["mass_monitors"] = {"made": False, "reason": "mass-monitor record missing or not verified"}
+            else:
                 with np.load(env.results_dir / e["row"]["guards"]["arrays"]["mass_monitors"]["path"]) as a, \
                         np.load(r3["path"]) as b:
                     rel = {}
@@ -178,22 +227,34 @@ def main(argv=None) -> int:
                             den = np.maximum(np.abs(y), 1e-30)
                             rel[k] = {"max_rel_per_event": float(np.max(np.abs(x - y) / den)),
                                       "rel_mean": float(abs(x.mean() - y.mean()) / max(abs(y.mean()), 1e-30))}
-                    chk["mass_monitors"] = {"per_key": rel, "pass": all(v["max_rel_per_event"] <= 1e-4 and
-                                                                        v["rel_mean"] <= 1e-6 for v in rel.values())}
+                    chk["mass_monitors"] = {"per_key": rel, "pass": bool(rel) and all(
+                        v["max_rel_per_event"] <= 1e-4 and v["rel_mean"] <= 1e-6 for v in rel.values())}
         if "_emul144" in e:
             emu = e.pop("_emul144")
-            if rec_arr is not None:
+            if rec_arr is None:
+                chk["R1b_emulated_144_vs_laptop"] = {"made": False, "reason": why_rec}
+            else:
                 tc = provenance.tolerance_check(emu, rec_arr, top=5)
                 chk["R1b_emulated_144_vs_laptop"] = {k: tc[k] for k in ("max_abs", "rms", "mean_diff", "n_above",
                                                                          "bit_identical", "strict_pass", "relaxed_pass",
                                                                          "largest")}
                 chk["R1b_emulated_144_vs_laptop"]["pass"] = tc["strict_pass"]
         e["checks"] = chk
-        e["pass"] = all(v.get("pass", True) for v in chk.values() if isinstance(v, dict))
-        ok.append(e["pass"] and e.get("checkpoint_matches_laptop_row", False))
+        e["required"] = required_checks(n, grid, guarded, args.emulate_laptop)
+        e["verdict"], e["not_made"], e["failed"] = network_verdict(chk, e["required"])
+        if not e.get("checkpoint_matches_laptop_row", False):
+            e["verdict"], e["failed"] = "FAIL", e["failed"] + ["checkpoint SHA-256"]
         report["networks"][n] = e
 
-    report["all_applicable_checks_pass"] = bool(all(ok))
+    verdicts = [e["verdict"] for e in report["networks"].values()]
+    overall = "FAIL" if "FAIL" in verdicts else ("INCOMPLETE" if "INCOMPLETE" in verdicts else "PASS")
+    if grid not in (refstream.REFERENCE_GRID, refstream.LAPTOP_GRID):
+        overall = "INCOMPLETE" if overall == "PASS" else overall
+        report["notes"].append(f"launch grid {grid}: R4 on the emulated grid 1056 is not implemented; the predicted "
+                               "table was NOT checked")
+    report["verdict"] = overall
+    report["all_applicable_checks_pass"] = overall == "PASS"
+    report["batch_end"] = lib.finish(batch)
     cdir = provenance.checks_dir(env.results_dir, tag.id, "rescore")
     paths.check_output_path(cdir)
     cdir.mkdir(parents=True, exist_ok=True)
@@ -211,22 +272,26 @@ def main(argv=None) -> int:
         return o
     rf.write_text(paths.scrub_str(json.dumps(_clean(report), indent=1, default=str)) + "\n")
 
-    print("\n============ rescore_registered summary (validation; laptop-trained records re-scored here) ============")
+    print("\n============ rescore_registered verdict (validation; laptop-trained records re-scored here) ============")
     print(f"machine {tag.id}, grid {grid}, stream {st['stream_id']}")
-    print(f"{'name':<10} {'sha ok':>6} {'status':<12} {'val K64':>11} {'d mlp e-4':>16} {'checks':<8}")
     for n, e in report["networks"].items():
         if "error" in e:
-            print(f"{n:<10} {'':>6} ERROR: {e['error']}")
+            print(f"{n:<10} FAIL  {e['error']}")
             continue
         v = e["row"]
-        print(f"{n:<10} {str(e['checkpoint_matches_laptop_row']):>6} {e['status'][:12]:<12} {v['val_mean']:>11.7f} "
-              f"{v['vs_mlp']['mean'] * 1e4:+8.2f} +- {v['vs_mlp']['se'] * 1e4:4.2f} "
-              f"{'PASS' if e['pass'] else 'FAIL'}  " +
-              "; ".join(f"{k}={'ok' if c.get('pass', True) else 'FAIL'}" for k, c in e["checks"].items()
-                        if isinstance(c, dict) and "pass" in c))
+        print(f"{n:<10} sha {'ok' if e['checkpoint_matches_laptop_row'] else 'MISMATCH'}  {e['status'][:12]:<12} "
+              f"val {v['val_mean']:.7f}  d mlp {v['vs_mlp']['mean'] * 1e4:+.2f} +- {v['vs_mlp']['se'] * 1e4:.2f} e-4  "
+              f"-> {e['verdict']}")
+        for k in e["required"]:
+            c = e["checks"].get(k)
+            state = ("NOT MADE (" + (c or {}).get("reason", "no such check on this grid") + ")"
+                     if (c is None or c.get("made") is False) else ("ok" if c.get("pass") else "FAIL"))
+            print(f"      {k:<32} {state}")
+    for note in report["notes"]:
+        print(f"NOTE: {note}")
     print(f"report: {paths.portable(rf)}")
-    print(f"ALL APPLICABLE CHECKS: {'PASS' if report['all_applicable_checks_pass'] else 'FAIL'}")
-    return 0 if report["all_applicable_checks_pass"] else 1
+    print(f"ALL APPLICABLE CHECKS: {overall}")
+    return {"PASS": 0, "FAIL": 1, "INCOMPLETE": 2}[overall]
 
 
 if __name__ == "__main__":

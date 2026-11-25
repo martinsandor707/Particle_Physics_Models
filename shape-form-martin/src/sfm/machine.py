@@ -12,8 +12,12 @@ the GPU, the torch / CUDA build and a few switches. Every per-event array and ev
 Machine tag (``MachineTag.fields``)
     gpu_name, sm_count, max_threads_per_sm, launch_grid (``sfm.refstream.local_grid()``), torch, cuda (build),
     cudnn, python, tf32_matmul, tf32_cudnn, deterministic, draw ("native" or "emulated"), cublas_workspace_config.
-    ``id`` = readable prefix + the first 8 hex digits of the SHA-256 of the canonical JSON of all fields, so two
-    machines (or two builds, two Python versions, TF32 on/off, ...) can never share an id. The host is provenance
+    ``id`` = readable prefix + the first 8 hex digits of the SHA-256 of the canonical JSON of the IDENTITY fields
+    (``IDENTITY_KEYS``: GPU, SM count, threads/SM, launch grid, torch, CUDA, cuDNN, Python, both TF32 flags), so two
+    machines (or two builds, two Python versions, TF32 on/off, ...) can never share an id. The per-computation
+    SETTINGS (``SETTINGS_KEYS``: deterministic flag, native/emulated draw, CUBLAS_WORKSPACE_CONFIG) stay in the tag's
+    fields - so ``sfm.provenance.check_pairable`` still requires them equal - but do not change the id (review B1):
+    the id names the machine directory and is what ``trained_on`` / ``scored_on`` / LOCK.json refer to. The host is provenance
     only, and only as ``host_id()`` (a hash): no host name, address or user name is ever written to a file (the
     repository is public).
 
@@ -58,7 +62,8 @@ if str(paths.MARTIN_DIR) not in sys.path:
     sys.path.insert(0, str(paths.MARTIN_DIR))
 import common  # noqa: E402  (shape-form-martin/common.py, the metric of record; not modified)
 
-__all__ = ["NoCUDA", "DirtyClone", "InsufficientGPUMemory", "MachineTag", "ALLOW_CPU_ENV", "LAPTOP_RECORD_LABEL",
+__all__ = ["NoCUDA", "DirtyClone", "InsufficientGPUMemory", "UnguardedStart", "require_guarded_start",
+           "is_laptop_of_record", "MachineTag", "ALLOW_CPU_ENV", "LAPTOP_RECORD_LABEL",
            "LAPTOP_RECORD", "disable_tf32", "tf32_flags", "require_cuda", "startup", "machine_tag", "host_id",
            "identity_record", "short_label", "apply_caps", "caps", "check_free_memory", "git_state",
            "require_clean_clone", "machine_dir_live"]
@@ -82,6 +87,14 @@ class InsufficientGPUMemory(RuntimeError):
     """Less than the job's memory cap + 4 GB is free on the (shared) device."""
 
 
+class UnguardedStart(RuntimeError):
+    """A machine other than the laptop of record started campaign code without the output root outside the clone
+    or without the file-access guard (sfm.policy; review A5)."""
+
+
+IDENTITY_KEYS = ("gpu_name", "sm_count", "max_threads_per_sm", "launch_grid", "torch", "cuda", "cudnn", "python",
+                 "tf32_matmul", "tf32_cudnn")
+SETTINGS_KEYS = ("deterministic", "draw", "cublas_workspace_config")
 LARGE_DEVICE_GB = 24.0
 DEFAULT_CAP_GB_LARGE = 10.0
 DEFAULT_THREADS_LARGE = 4
@@ -125,9 +138,32 @@ def startup(what: str = "script", *, allow_cpu_env: bool = False, deterministic:
     guard.install()                                      # file-access guard (inert unless SFM_GUARD_AREA is set)
     require_cuda(what, allow_cpu_env=allow_cpu_env)
     disable_tf32()
+    require_guarded_start(what)                          # fail closed off the laptop of record (A5)
     apply_caps()
     require_clean_clone(what)
     return machine_tag(deterministic=deterministic)
+
+
+def is_laptop_of_record(tag: Optional["MachineTag"] = None) -> bool:
+    from . import policy
+    return (tag or machine_tag()).id in policy.LAPTOP_MACHINE_IDS
+
+
+def require_guarded_start(what: str = "script") -> dict:
+    """Off the laptop of record (``sfm.policy``) refuse to start unless the output root is outside the clone AND the
+    file-access guard is active (``UnguardedStart``). Processes without CUDA (CPU unit tests) are exempt."""
+    from . import guard
+    tag = machine_tag()
+    out = {"laptop_of_record": is_laptop_of_record(tag), "pristine_mode": paths.pristine_mode(),
+           "guard_active": guard.active()}
+    if tag.fields.get("gpu_name") == "cpu" or out["laptop_of_record"]:
+        return out
+    if not (out["pristine_mode"] and out["guard_active"]):
+        raise UnguardedStart(f"{what}: machine {tag.id} is not the laptop of record (sfm.policy); campaign code runs "
+                             f"here only with the output root outside the clone (pristine mode: {out['pristine_mode']}) "
+                             f"and the file-access guard active (guard: {out['guard_active']}). Start the command "
+                             "through shape-form-martin/scripts/launch.sh with SFM_OUT_ROOT and SFM_USER_CACHE set.")
+    return out
 
 
 def host_id() -> str:
@@ -194,16 +230,35 @@ def check_free_memory(what: str = "job") -> dict:
 
 
 def git_state() -> dict:
-    """``git rev-parse HEAD`` and whether ``git status --porcelain`` is empty (the clone of the code)."""
-    def run(*args):
-        return subprocess.run(["git", "-C", str(paths.REPO_ROOT), *args], capture_output=True, text=True,
-                              check=True).stdout
+    """``git rev-parse HEAD``, whether ``git status --porcelain`` is empty, and whether HEAD equals the upstream
+    tracking ref (no fetch). Read-only: ``--no-optional-locks`` (never takes index.lock). Ignored files are not seen
+    (by construction of git status)."""
+    def run(*args, check=True):
+        return subprocess.run(["git", "--no-optional-locks", "-C", str(paths.REPO_ROOT), *args], capture_output=True,
+                              text=True, check=check).stdout
     try:
         commit = run("rev-parse", "HEAD").strip()
         porcelain = run("status", "--porcelain")
-        return {"commit": commit, "clean": porcelain.strip() == "", "n_changed": len(porcelain.splitlines())}
+        up = run("rev-parse", "--verify", "-q", "@{u}", check=False).strip() or None
+        return {"commit": commit, "clean": porcelain.strip() == "", "n_changed": len(porcelain.splitlines()),
+                "upstream": up, "head_equals_upstream": (up == commit) if up else None}
     except Exception as err:                                                     # pragma: no cover
         return {"commit": None, "clean": None, "error": type(err).__name__}
+
+
+OPT_OUT_ENV = ("SFM_ALLOW_DIRTY_CLONE", "SFM_GUARD_AREA", "SFM_GPU_MEM_GB", "SFM_CPU_THREADS", "SFM_ALLOW_CPU",
+               "SFM_ALLOW_RECORD_WRITER", "CUBLAS_WORKSPACE_CONFIG", "SFM_RESULTS_DIR", "SFM_CACHE_DIR", "SFM_DATA_DIR")
+
+
+def env_record() -> dict:
+    """The switches in force, verbatim (path values as '<...>' placeholders; review C4)."""
+    out = {}
+    for k in OPT_OUT_ENV:
+        v = os.environ.get(k)
+        if v is None:
+            continue
+        out[k] = paths.portable(v) if (os.sep in v) else v
+    return out
 
 
 def require_clean_clone(what: str = "script") -> dict:
@@ -232,7 +287,7 @@ def _slug(s: str) -> str:
 
 @dataclass(frozen=True)
 class MachineTag:
-    """Arithmetic part of the provenance of an array (see the module docstring)."""
+    """Arithmetic part of the provenance of an array (see the module docstring): identity + settings."""
     fields_json: str                                   # canonical JSON of the fields (frozen, hashable)
 
     @classmethod
@@ -244,8 +299,20 @@ class MachineTag:
         return json.loads(self.fields_json)
 
     @property
+    def identity(self) -> dict:
+        """The fields that identify the machine (they name its directory)."""
+        f = self.fields
+        return {k: f.get(k) for k in IDENTITY_KEYS}
+
+    @property
+    def settings(self) -> dict:
+        """Per-computation settings (part of the pairing tag, not of the machine id)."""
+        f = self.fields
+        return {k: f.get(k) for k in f if k not in IDENTITY_KEYS}
+
+    @property
     def sha8(self) -> str:
-        return hashlib.sha256(self.fields_json.encode()).hexdigest()[:8]
+        return hashlib.sha256(json.dumps(self.identity, sort_keys=True, default=str).encode()).hexdigest()[:8]
 
     @property
     def id(self) -> str:
@@ -254,7 +321,8 @@ class MachineTag:
         return f"{_slug(f.get('gpu_name', 'unknown'))}-g{grid if grid is not None else 'na'}-{self.sha8}"
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "fields": self.fields}
+        return {"id": self.id, "fields": self.fields, "settings_sha8":
+                hashlib.sha256(json.dumps(self.settings, sort_keys=True, default=str).encode()).hexdigest()[:8]}
 
     def with_(self, **kw) -> "MachineTag":
         f = self.fields
@@ -326,7 +394,8 @@ def identity_record(generator_check: Optional[dict] = None) -> dict:
     from . import guard
     gst = guard.state()
     rec["file_access_guard"] = {"active": gst["active"], "area_set": bool(gst["area"]),
-                                "allowed_roots": [paths.portable(a) for a in gst["allowed"]] if gst["active"] else [],
+                                "allowed_roots": (["clone", "output root"] + (["SFM_USER_CACHE"] if len(gst["allowed"]) > 2
+                                                                              else [])) if gst["active"] else [],
                                 "deferred_names_released": gst["allow_deferred"],
                                 "parquet_reader_modules_loaded_before_guard": gst["pyarrow_loaded_before_guard"],
                                 "refusals_so_far": gst["refusals"],

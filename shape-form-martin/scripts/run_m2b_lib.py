@@ -68,12 +68,23 @@ def start(what: str) -> dict:
     from sfm import guard
     rec = {"what": what, "machine_id": tag.id, "host_id": machine.host_id(), "caps": machine.caps(),
            "git": machine.git_state(), "pristine_mode": paths.pristine_mode(),
-           "out_results": paths.portable(paths.OUT_RESULTS), "file_access_guard_active": guard.active()}
+           "out_results": paths.portable(paths.OUT_RESULTS), "file_access_guard_active": guard.active(),
+           "laptop_of_record": machine.is_laptop_of_record(tag), "env": machine.env_record()}
     print(f"[{what}] machine {tag.id} (GPU {tag.fields['gpu_name']}, grid {tag.fields['launch_grid']}, torch "
           f"{tag.fields['torch']}, Python {tag.fields['python']}, TF32 {tag.fields['tf32_matmul']}/"
           f"{tag.fields['tf32_cudnn']}); caps {rec['caps']}; git {rec['git']}; outputs under {rec['out_results']}; "
           f"file-access guard {'ACTIVE' if rec['file_access_guard_active'] else 'off'}",
           flush=True)
+    return rec
+
+
+def finish(rec: dict) -> dict:
+    """End-of-batch record: the git state again (the clone must still be clean in pristine mode)."""
+    rec = dict(rec)
+    rec["git_at_end"] = machine.git_state()
+    if paths.pristine_mode() and rec["git_at_end"].get("clean") is not True:
+        print("WARNING: the clone is no longer clean at the end of the batch: "
+              f"{rec['git_at_end']}", flush=True)
     return rec
 
 
@@ -195,3 +206,77 @@ def run_on_gpu(label: str, fn, min_free_mb: float = 3000.0, poll: float = 30.0, 
         if waited > max_wait:
             raise RuntimeError(f"{label}: device memory did not become free within {max_wait:.0f} s")
         time.sleep(poll)
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Starting points of the H200 fits (review B2): only the pre-registered ones, verified by SHA-256 and recorded
+# ----------------------------------------------------------------------------------------------------------------------
+ALLOWED_INIT = {**{f"s2_seed{s}": ("from_run", {"run": f"{STAGE}/s1_seed{s}"}) for s in S1_SEEDS},
+                **{n: ("field_mlp_std", {}) for n in CONTROL_NAMES}}
+MLP_STD_REL = "shape-form-proton/results/particles/pion/mlp_std.pt"
+
+
+def input_hashes(sums_file=None) -> dict:
+    """{repo-relative path: SHA-256} of the "inputs" section of the tracked transfer/SHA256SUMS."""
+    import re
+    sums_file = Path(sums_file or provenance.SHA256SUMS)
+    out, on = {}, False
+    for line in sums_file.read_text().splitlines():
+        if re.match(r"^# BEGIN inputs$", line):
+            on = True
+            continue
+        if re.match(r"^# END inputs$", line):
+            on = False
+            continue
+        if on and line and not line.startswith("#"):
+            h, rel = line.split(None, 1)
+            out[rel.strip()] = h
+    return out
+
+
+def verify_init(name: str, factory: str, kwargs: dict, *, repo_results=None, legacy_registry=None,
+                sums_file=None) -> dict:
+    """Check that ``name`` starts from its pre-registered starting point and that the starting file is the one on
+    record; return the ``init_from`` record. Raises SystemExit otherwise (nothing is trained)."""
+    from sfm import provenance as P
+    exp = ALLOWED_INIT.get(name)
+    if exp is None:
+        raise SystemExit(f"{STAGE}/{name}: no pre-registered starting point (allowed: {sorted(ALLOWED_INIT)})")
+    if (factory, dict(kwargs or {})) != exp:
+        raise SystemExit(f"{STAGE}/{name}: starting point {factory} {kwargs} is not the pre-registered {exp}")
+    repo_results = Path(repo_results or paths.REPO_RESULTS)
+    if factory == "from_run":
+        run = kwargs["run"]
+        stage, src = run.split("/")
+        f = repo_results / stage / src / "model.pt"
+        rows = [r for r in registry.read_registry(Path(legacy_registry or registry.LEGACY_REGISTRY))
+                if r.get("stage") == stage and r.get("name") == src and registry.row_stream_id(r) is None]
+        if not rows:
+            raise SystemExit(f"{run}: no laptop registry row to verify the starting point against")
+        row = rows[-1]
+        sha = P.sha256_file(f)
+        if sha != row.get("checkpoint_sha256"):
+            raise SystemExit(f"{run}: starting file SHA-256 {sha[:12]} differs from the laptop row "
+                             f"({str(row.get('checkpoint_sha256'))[:12]}); not trained")
+        obj = torch.load(f, map_location="cpu", weights_only=False)
+        return {"run": run, "factory": factory, "file": paths.portable(f), "file_sha256": sha,
+                "weights_sha256": P.weights_sha256(obj["state"]), "trained_on": machine.LAPTOP_RECORD_LABEL,
+                "source_row": {"stage": stage, "name": src, "timestamp": row.get("timestamp"),
+                               "checkpoint_sha256": row.get("checkpoint_sha256"),
+                               "val_nll_sha256": row.get("val_nll_sha256")}}
+    f = paths.PION_RESULTS_DIR / "mlp_std.pt"
+    want = input_hashes(sums_file).get(MLP_STD_REL)
+    sha = P.sha256_file(f)
+    if not want or sha != want:
+        raise SystemExit(f"mlp_std.pt: SHA-256 {sha[:12]} differs from transfer/SHA256SUMS ({str(want)[:12]})")
+    obj = torch.load(f, map_location="cpu", weights_only=False)
+    return {"run": None, "factory": factory, "file": paths.portable(f), "file_sha256": sha,
+            "weights_sha256": P.weights_sha256(obj["state"]), "trained_on": "earlier study (shape-form-proton)",
+            "source_row": None}
+
+
+def check_built_weights(model, init: dict) -> None:
+    """The model built by the factory must hold exactly the verified starting weights."""
+    w = provenance.weights_sha256({k: v for k, v in model.state_dict().items()})
+    if w != init["weights_sha256"]:
+        raise SystemExit(f"built model weights {w[:12]} differ from the verified starting file "
+                         f"({init['weights_sha256'][:12]}); not trained")

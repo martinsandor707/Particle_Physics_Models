@@ -427,6 +427,7 @@ def fit(model: torch.nn.Module, train, val, config, *, meta: Optional[dict] = No
     cfg.validate()
     sfm_machine.require_cuda("sfm.train.fit", allow_cpu_env=True)       # E10: no silent CPU fallback
     sfm_machine.disable_tf32()
+    sfm_machine.require_guarded_start("sfm.train.fit")                 # A5: fail closed off the laptop of record
     mtag = sfm_machine.machine_tag(deterministic=cfg.deterministic)
     out = paths.check_output_path(cfg.resolved_out_dir())
     out.mkdir(parents=True, exist_ok=True)

@@ -62,10 +62,12 @@ def test_machine_tag_fields_and_id():
         assert k in f
     assert f["tf32_matmul"] is False and f["tf32_cudnn"] is False          # switched off at import (E10)
     assert t.id == machine.machine_tag().id                                 # stable
-    for change in ({"launch_grid": 1056}, {"python": "3.13.12"}, {"tf32_cudnn": True}, {"deterministic": False},
-                   {"draw": "emulated"}, {"gpu_name": "NVIDIA H200"}):
+    for change in ({"launch_grid": 1056}, {"python": "3.13.12"}, {"tf32_cudnn": True}, {"gpu_name": "NVIDIA H200"}):
         assert t.with_(**change).id != t.id, change
-    assert machine.machine_tag(deterministic=False).id != t.id
+    # review B1: per-computation settings stay in the tag (pairing) but do not change the machine id
+    for change in ({"deterministic": False}, {"draw": "emulated"}, {"cublas_workspace_config": ":4096:8"}):
+        assert t.with_(**change).id == t.id and t.with_(**change).fields != t.fields, change
+    assert machine.machine_tag(deterministic=False).id == t.id
     assert "/" not in t.id and " " not in t.id
 
 
@@ -93,6 +95,8 @@ def test_no_cuda_is_a_hard_failure_and_cpu_needs_explicit_opt_in():
 
 def test_caps_defaults_follow_the_device_size(monkeypatch):
     monkeypatch.setattr(machine, "_caps_applied", {})
+    monkeypatch.delenv("SFM_GPU_MEM_GB", raising=False)                     # the launcher exports these (A1)
+    monkeypatch.delenv("SFM_CPU_THREADS", raising=False)
     c = machine.apply_caps()
     if c["device_total_gb"] and c["device_total_gb"] <= machine.LARGE_DEVICE_GB:
         assert c["gpu_mem_cap_gb"] is None and c["cpu_threads"] is None     # laptop: no cap unless asked
@@ -115,6 +119,11 @@ def test_pristine_mode_refuses_writes_inside_the_clone(monkeypatch, tmp_path):
     assert paths.portable(paths.MARTIN_DIR / "x") == "<repo>/shape-form-martin/x"
     s = paths.scrub_str(json.dumps({"p": str(tmp_path / "out" / "q"), "r": str(paths.MARTIN_DIR / "y")}))
     assert str(tmp_path) not in s and str(paths.REPO_ROOT) not in s and "<out>/q" in s
+    monkeypatch.setenv("SFM_USER_CACHE", str(tmp_path / "ucache"))          # outside clone and output root
+    monkeypatch.setenv("SFM_GUARD_AREA", str(tmp_path))
+    s = paths.scrub_str(json.dumps({"c": str(tmp_path / "ucache" / "tmp"), "a": str(tmp_path / "other")}))
+    assert str(tmp_path) not in s and "<cache>/tmp" in s and "<area>/other" in s
+    assert paths.portable(tmp_path / "ucache" / "x") == "<cache>/x"
 
 
 def test_dirty_clone_is_refused_in_pristine_mode(monkeypatch, tmp_path):
@@ -245,7 +254,7 @@ def test_reference_set_of_another_machine_is_not_used(reg):
     other = fake_tag(gpu_name="NVIDIA H200", launch_grid=1056, sm_count=132, max_threads_per_sm=2048)
     env_o = RegistryEnv(results_dir=reg["tmp"] / "results", machine=other)
     res = registry.create_reference_set(ValidationSet(reg["val"], reg["en"]), env=env_o, reference=reg["ref"],
-                                        bench_models=lambda: reg["bench"], guards=False, log=lambda *a: None)
+                                        bench_models=lambda: reg["bench"], guards=False, log=lambda *a: None, parity={"verdict": "PASS", "source": "unit test"})
     assert res["status"] == "created" and other.id in res["dir"]
     env = RegistryEnv(results_dir=reg["tmp"] / "results")
     with pytest.raises(registry.NoReferenceSet):
@@ -254,7 +263,7 @@ def test_reference_set_of_another_machine_is_not_used(reg):
     d = Path(res["dir"])
     assert not os.access(d / "mlp_val_nll.npy", os.W_OK) and not os.access(d, os.W_OK)
     again = registry.create_reference_set(ValidationSet(reg["val"], reg["en"]), env=env_o, reference=reg["ref"],
-                                          bench_models=lambda: reg["bench"], guards=False, log=lambda *a: None)
+                                          bench_models=lambda: reg["bench"], guards=False, log=lambda *a: None, parity={"verdict": "PASS", "source": "unit test"})
     assert again["status"] == "exists_identical"
     for p in list(d.iterdir()) + [d]:                                           # let pytest clean up
         p.chmod(0o755 if p.is_dir() else 0o644)
@@ -266,7 +275,7 @@ def test_mixed_streams_untagged_rows_and_live_paths(reg):
     root = reg["tmp"] / "results"
     env = RegistryEnv(results_dir=root)
     registry.create_reference_set(vs, env=env, reference=reg["ref"], bench_models=lambda: reg["bench"], guards=False,
-                                  log=lambda *a: None)
+                                  log=lambda *a: None, parity={"verdict": "PASS", "source": "unit test"})
     rows = [registry.evaluate(tiny(s), f"c{s}", "s", vs, env=env, reference=reg["ref"]) for s in (3, 4)]
     live = registry.live_stream(env, reg["ref"])["stream_id"]
     assert registry.registered_row("s", "c3", stream_id=live, path=env.registry_path)["val_nll_sha256"] == \
@@ -275,7 +284,7 @@ def test_mixed_streams_untagged_rows_and_live_paths(reg):
     other = fake_tag(gpu_name="NVIDIA H200", launch_grid=1056)
     env_o = RegistryEnv(results_dir=root, machine=other, registry_path=env.registry_path)
     registry.create_reference_set(vs, env=env_o, reference=reg["ref"], bench_models=lambda: reg["bench"],
-                                  guards=False, log=lambda *a: None)
+                                  guards=False, log=lambda *a: None, parity={"verdict": "PASS", "source": "unit test"})
     registry.evaluate(tiny(5), "c5", "s", vs, env=env_o, reference=reg["ref"])
     # an untagged (laptop, schema 1) row appended by hand
     legacy = {"name": "c3", "stage": "s", "k": 1, "C": None, "val_mean": 1.0, "val_nll_path": "s/c3/val_nll.npy",
@@ -312,7 +321,7 @@ def test_evaluate_refuses_replace_and_the_legacy_registry(reg):
     vs = ValidationSet(reg["val"], reg["en"])
     env = RegistryEnv(results_dir=reg["tmp"] / "results")
     registry.create_reference_set(vs, env=env, reference=reg["ref"], bench_models=lambda: reg["bench"], guards=False,
-                                  log=lambda *a: None)
+                                  log=lambda *a: None, parity={"verdict": "PASS", "source": "unit test"})
     with pytest.raises(ValueError):
         registry.evaluate(tiny(3), "c", "s", vs, env=env, reference=reg["ref"], replace=True)
     with pytest.raises(TypeError):

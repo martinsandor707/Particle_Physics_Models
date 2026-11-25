@@ -38,6 +38,19 @@ ORDER = ([f"s1_seed{s}" for s in lib.S1_SEEDS] + [f"s2_seed{s}" for s in lib.S1_
 LABEL = {lib.LAPTOP_CONTROL_RECORD: "b0_seed0 (laptop-trained record)"}
 
 
+def b0_controls(tarr: dict) -> tuple:
+    """(names, B0-mean TaggedArray, complete, present): the B0 mean is formed ONLY from exactly the three H200
+    controls b0h_seed0..2 (A6 revised, point 5; review B3); otherwise (names=[], mean=None, complete=False)."""
+    present = [n for n in lib.CONTROL_NAMES if n in tarr]
+    if len(present) != len(lib.CONTROL_NAMES):
+        return [], None, False, present
+    provenance.check_pairable(*(tarr[n] for n in present))
+    t0 = tarr[present[0]]
+    mean = provenance.TaggedArray.make(np.mean([tarr[n].values.astype(np.float64) for n in present], axis=0),
+                                       t0.points, machine.MachineTag.from_fields(t0.machine), label="B0 mean (b0h)")
+    return present, mean, True, present
+
+
 def _pd(p) -> dict:
     return {"mean": p.mean, "se": p.se, "z": p.z}
 
@@ -54,12 +67,11 @@ def main() -> int:
     tarr = {n: registry.row_array(rows[n]) for n in have}               # tag + SHA-256 checked, live stream only
     provenance.check_pairable(*tarr.values())
     arrays = {n: t.values.astype(np.float64) for n, t in tarr.items()}
-    b0_names = [n for n in lib.CONTROL_NAMES if n in arrays]
-    b0_mean = None
-    if b0_names:
-        t0 = tarr[b0_names[0]]
-        b0_mean = provenance.TaggedArray.make(np.mean([arrays[n] for n in b0_names], axis=0), t0.points,
-                                              machine.MachineTag.from_fields(t0.machine), label="B0 mean (b0h)")
+    b0_names, b0_mean, b0_complete, present = b0_controls(tarr)
+    if not b0_complete:                                                  # review B3: exactly the three b0h runs
+        print("!" * 100 + f"\nINCOMPLETE: only {len(present)} of the {len(lib.CONTROL_NAMES)} H200 controls "
+              f"{list(lib.CONTROL_NAMES)} are registered on this stream ({present}); the B0 mean, the 'vs B0 mean' "
+              "column and the B0 scatter are NOT formed.\n" + "!" * 100)
 
     table = []
     for n in have:
@@ -144,6 +156,7 @@ def main() -> int:
         raise RuntimeError(f"{paths.portable(scal_f)} belongs to stream {scaling.get('stream_id')}, live is {sid}")
     out = {"created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"), "stream_id": sid,
            "machine_id": lib.MACHINE.id, "batch": batch, "control_names": list(lib.CONTROL_NAMES),
+           "b0_controls_complete": b0_complete,
            "laptop_b0_seed0_minus_b0h_seed0": laptop_vs_h200_seed0,
            "metric": registry.METRIC_OF_RECORD, "units": "nat per event", "table": table, "b0_scatter": b0,
            "s1_scatter": s1_scatter, "s2_scatter": s2_scatter, "finetune_gain_s2_minus_s1": ft,
@@ -197,6 +210,9 @@ def main() -> int:
         print(f"b0_seed0 (laptop-trained) - b0h_seed0 (this machine), both scored here: {_f(laptop_vs_h200_seed0)} e-4 "
               "(reported, no pass/fail)")
     print(f"\nwrote {paths.portable(lib.OUT / 'summary.json')}")
+    if not b0_complete:
+        print("REPORT INCOMPLETE: B0 columns not formed (fewer than three b0h controls)")
+        return 2
     return 0
 
 

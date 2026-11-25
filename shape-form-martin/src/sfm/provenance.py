@@ -325,6 +325,9 @@ def load_tagged(path, *, expect_points: Optional[Mapping] = None, expect_machine
         raise UntaggedArray(f"{path}: no tag sidecar ({side.name}); untagged arrays (e.g. laptop records) are never "
                             "used as live arrays")
     meta = json.loads(side.read_text())
+    if meta.get("array") != path.name:
+        raise UntaggedArray(f"{path}: the sidecar describes {meta.get('array')!r}, not {path.name!r} (renamed or copied "
+                            "pair); refused")
     values = np.load(path)
     if sha256_array(values) != meta.get("sha256"):
         raise UntaggedArray(f"{path}: content differs from its tag sidecar (SHA-256); the file was replaced")

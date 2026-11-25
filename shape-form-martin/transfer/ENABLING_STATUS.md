@@ -1,5 +1,21 @@
 # Enabling code, batch 1 (E1, E2, E3, E5, E10, b0h part of E6) - status
 
+> **API / behaviour changes after the review (read first; other workers use this API):**
+> 1. `registry.create_reference_set(...)` now REQUIRES `parity={"verdict": "PASS", ...}` for a new set (keyword added;
+>    old calls without it raise `ReferenceSetNotLicensed`). `registry.reference_set` / `evaluate` refuse a set without
+>    a passing parity record (`ReferenceSetNotLicensed`) and a set with a `*.DIFFERENT*.json` marker
+>    (`ReferenceSetDisputed`). Reference sets made by the earlier code have no parity record: recreate them with
+>    `scripts/val_parity.py --create-refset`.
+> 2. Machine ids changed (B1): the id now hashes the machine identity only (not `deterministic`, `draw`,
+>    `CUBLAS_WORKSPACE_CONFIG`). Laptop: `rtx-4060-laptop-gpu-g144-76c0f59a` (was `...-629104b0`). Machine
+>    directories written before this change sit under the old id and are not found by new processes.
+> 3. `registry.registered_row(..., stream_id=None)` raises `ValueError`.
+> 4. Off the laptop of record (`src/sfm/policy.py`) every `machine.startup` and `train.fit` refuses to start without
+>    `SFM_OUT_ROOT` outside the clone and an active guard (`UnguardedStart`).
+> 5. `provenance.load_tagged` refuses an array whose sidecar names another file (renamed pair).
+> Names and signatures otherwise unchanged (additions only).
+
+
 25 Nov 2026. Worker status file; PLAN.md is not edited. Nothing was trained, nothing was registered in the campaign
 results, the test split was never opened, `common.py` is unchanged, nothing under `shape-form-proton/` or
 `shape-form-original/` was touched, `results/registry.jsonl` and `results/test_access.log` are byte-identical
@@ -61,7 +77,7 @@ Spec points (transfer/REVIEW_STATUS.md section 4):
 1. **Tags.** Machine tag (`machine.machine_tag()`): GPU name, SM count, threads/SM, launch grid
    (`refstream.local_grid()`), torch, CUDA build, cuDNN, Python version, both TF32 flags, deterministic flag,
    native/emulated draw, CUBLAS_WORKSPACE_CONFIG; id = readable prefix + 8 hex of the SHA-256 of all fields
-   (laptop: `rtx-4060-laptop-gpu-g144-629104b0`). Points tag: grid, seed, K, batch, fold, split + fingerprint,
+   (laptop: `rtx-4060-laptop-gpu-g144-76c0f59a`; identity fields only, see section 7, B1). Points tag: grid, seed, K, batch, fold, split + fingerprint,
    subset (and chunk / bulk spec for the guard arrays). Every per-event array is written with a sidecar
    `<name>.tag.json` (points, machine, array SHA-256) by `provenance.save_tagged`; rows carry the full stream tag.
 2. **Tag-named locations, no fallback.** `R = $SFM_OUT_ROOT/shape-form-martin/results` (laptop default: the repo's
@@ -118,7 +134,8 @@ run 1, K = 1024 and bulk guard references) and the R2 targets. **P3:** any event
 arrays prints a banner and writes `checks/val_parity/outliers_<bench>_<utc>.json/.npz`: event index and number, both
 values, batch, Philox offset of the batch, H of the batch, the event's hit rows, the fold points of every hit
 (computed with common.fold's expression on the GPU), grid cells, distance of z'/r to the nearest bin edge in float32
-ULPs, and how to re-derive them with `EmulGen` on the laptop. **Fallback (grid != 1056):** the targets are evaluated
+ULPs, and how to re-derive them with `EmulGen` on the laptop. [Superseded by the review fix C1, section 7: no ULP
+summary any more; the deciding test is `scripts/p3_compare.py`.] **Fallback (grid != 1056):** the targets are evaluated
 on the emulated grid-1056 arrays (K = 64 via `refstream.test_nll_ref`; guards via the new
 `refstream.patched_draw`, which emulates `sfm.metric.draw`), and native vs emulated is checked on A3. Missing in the
 fallback: R4 on the emulated grid (the eight networks on emulated 1056 points) is not automated (`rescore` scores
@@ -151,34 +168,45 @@ machine (`out:` reference); subsets saved tagged under `ensemble_subsets/<points
 PIP_CACHE_DIR, XDG_CACHE_HOME, MPLCONFIGDIR, CUDA_CACHE_PATH, TORCH_HOME, TMPDIR (subdirectories of
 `SFM_USER_CACHE`, created), thread variables (`SFM_CPU_THREADS`, default 4), `SFM_GUARD_AREA` (default: the directory
 containing the clone), starts the command with nohup, writes `<out>/jobs/<job>_<UTC>.pid` and `.log`, prints both.
-**Stop a job only by its PID file:** `kill "$(cat <out>/jobs/<job>_<UTC>.pid)"` (never pkill/killall).
+**Stop a job only with** `shape-form-martin/scripts/stop_job.sh <out>/jobs/<job>_<UTC>.pid` (checks /proc start
+time, working directory and command line before signalling; never pkill/killall, never a bare kill). See section 7, C3.
 `sfm.refstream` builds its `.so` only in `shape-form-martin/cache/` (git-ignored): `tempfile.mkstemp(dir=cache)` +
 rename; gcc's own temporary files follow `TMPDIR` (gcc documents `TMPDIR` for its temporaries; not traced here).
 
-## 2. H200 command lines, run-book steps 5-11 (in order; one step at a time)
+## 2. H200 command lines, run-book steps 5-11 (corrected after the review; launcher form; one job at a time)
 
+**Before every start**
 ```
-cd <repo>
-export SFM_OUT_ROOT=<area>/sfm_out          # outside the clone
-export SFM_USER_CACHE=<area>/sfm_cache
-# optional: export SFM_GPU_MEM_GB=10 SFM_CPU_THREADS=4      (defaults on the H200)
-L=shape-form-martin/scripts/launch.sh
-P=.venv/bin/python
+cd <repo>                                   # always from the clone root (the guard resolves relative arguments)
+export SFM_OUT_ROOT=<area>/sfm_out SFM_USER_CACHE=<area>/sfm_cache
+L=shape-form-martin/scripts/launch.sh       # starts one job detached; PID, job, log, exit files under <area>/sfm_out/jobs/
+S=shape-form-martin/scripts/stop_job.sh     # the ONLY way to stop a job: $S <pid file>  (checks start time, cwd, cmdline)
+P=.venv/bin/python                          # never "uv run" (the launcher refuses it), never a bare python without $L
+nvidia-smi                                  # read it: a job needs its cap (10 GB) + 4 GB free, else it refuses at start
+git status --porcelain                      # must print nothing; git rev-parse HEAD = git rev-parse origin/shape-form-martin
 ```
-Each `$L` prints a PID file and a log; wait until the job has ended (`kill -0 "$(cat <pid file>)"` fails) and read
-the last lines of the log before the next step. Do not set `SFM_RESULTS_DIR`, `SFM_CACHE_DIR`, `SFM_DATA_DIR`,
-`SFM_ALLOW_DIRTY_CLONE`, `SFM_ALLOW_RECORD_WRITER`, `SFM_ALLOW_CPU`.
+Do not set `SFM_RESULTS_DIR`, `SFM_CACHE_DIR`, `SFM_DATA_DIR`, `SFM_ALLOW_DIRTY_CLONE`, `SFM_ALLOW_RECORD_WRITER`,
+`SFM_ALLOW_CPU`, `SFM_GUARD_AREA`, `CUBLAS_WORKSPACE_CONFIG`. Campaign code refuses to start on the H200 without the
+launcher's settings (A5), so a forgotten `$L` stops at once instead of writing into the clone. After each job: wait
+until `<pid file>`'s `.exit` file exists (or `kill -0 "$(cat <pid file>)"` fails), then read the log to its end; the
+first line of a campaign command must show `outputs under <out>/...` and `file-access guard ACTIVE`.
+A re-run under a run name that already has tagged arrays stops with `FileExistsError` (nothing is ever overwritten
+or deleted on the H200): use a new run name and report it.
 
-| step | command | expected / acceptance |
+| step | command | acceptance (every listed item; the commands now end FAIL / INCOMPLETE when one is missing) |
 |---|---|---|
-| 5 (R0, suite) | `$L tests $P -B -m pytest shape-form-martin/tests -q -p no:cacheprovider --ignore=shape-form-martin/tests/test_geometry.py` | all pass; `test_refstream.py` passes on grid 1056 (no expected failures any more); `test_emulation_reproduces_torch_rand_bitwise` must pass. `test_geometry.py` (other worker; laptop-only geometry audit) writes and reads synthetic Parquet files through pyarrow, which the guard refuses on the H200, hence `--ignore`. Tests needing the Parquet table or the test cache skip (files absent). |
-| 6-7 (R0, R1, R1b, R2, R3) | `$L val_parity $P -B shape-form-martin/scripts/val_parity.py --create-refset` | log ends `ALL APPLICABLE CHECKS: PASS`; grid 1056; float32 means 18.118083953857422 / 18.120407104492188 (4e-6); every event within 1e-4 of the laptop's emulated arrays (no P3 banner; if a banner appears: STOP, send `checks/val_parity/outliers_*` for Fable's 1-ULP review); emulated == native bit for bit; formula - MLP +23.24 +- 2.94; second run bit-identical; R3 within 1e-4 / 1e-6; reference set "created"; K = 1024 means 18.1155556 / 18.1177364, bulk 18.0429497 / 18.0448778 (1e-6), 14,784 events. Must run before anything else is registered. |
-| 8 (R4) | `$L rescore $P -B shape-form-martin/scripts/rescore_registered.py --emulate-laptop` | `ALL APPLICABLE CHECKS: PASS`; 8 checkpoints match the laptop rows; means / deltas = PLAN 16.3 table (1e-6 / 0.01e-4); guard means = review table D; mass monitors within 1e-4 rel.; R1b within 1e-4 (relaxed clause reported) |
-| 9 | `$L s2_ft $P -B shape-form-martin/scripts/run_m2b_fit.py shape-form-martin/configs/m2b/s2_seed13.toml shape-form-martin/configs/m2b/s2_seed14.toml shape-form-martin/configs/m2b/s2_seed15.toml` | three rows in this machine's registry; fits start from step 0 (no laptop checkpoint exists or is accepted) |
+| 5a | `$L tests_core $P -B -m pytest shape-form-martin/tests/test_refstream.py shape-form-martin/tests/test_provenance.py shape-form-martin/tests/test_registry.py shape-form-martin/tests/test_review_fixes.py shape-form-martin/tests/test_guard.py shape-form-martin/tests/test_metric.py shape-form-martin/tests/test_data.py shape-form-martin/tests/test_train.py -q -p no:cacheprovider -rs` | all pass (`test_emulation_reproduces_torch_rand_bitwise` among them). A failure of a CUDA tolerance test of `test_train.py` (tolerances measured on the laptop) is reported, not blocking |
+| 5b | `$L tests_pkg $P -B -m pytest shape-form-martin/tests/test_transfer_package.py -q -p no:cacheprovider` | all pass; a process of its own: its fixtures write synthetic files with deferred names, which a guarded process refuses (this file imports no `sfm`, so no guard is installed in it) |
+| 6 | `$L val_parity $P -B shape-form-martin/scripts/val_parity.py` | launch grid 1056, else STOP (fallback incomplete for R4); every verdict line PASS, among them R0, both float32 means, formula - MLP, both per-event comparisons, `emulated_equals_native`, `laptop record verified` for all four records, R1b, R3; no P3 banner (with a banner: STOP and send `checks/val_parity/outliers_*` to the laptop for `scripts/p3_compare.py`); exit 0 |
+| 7 | only if 6 passed: `$L refset $P -B shape-form-martin/scripts/val_parity.py --create-refset`, then the same command once more | first: `R2 reference set status: created` + all R2 targets PASS (14,784); the set is created only after the parity checks of the same run passed, and its `refset.json` holds that run's report SHA-256. Second: `exists_identical`. `exists_DIFFERENT` = FAIL, and the set is blocked for every later use (marker file beside it) until the user decides |
+| 8 | `$L rescore $P -B shape-form-martin/scripts/rescore_registered.py --emulate-laptop` | `ALL APPLICABLE CHECKS: PASS` (exit 0). Each network lists its required checks: predicted mean and delta (+ K = 1024 and bulk means and mass monitors for b0_seed0, s2_seed11, s2_seed12) and R1b. `INCOMPLETE` (exit 2) = a laptop record is missing or not verified: STOP, fix the quarantine copy; never read as PASS |
+| 9-pre | `$L verify_init $P -B shape-form-martin/scripts/run_m2b_fit.py --verify-init-only shape-form-martin/configs/m2b/s2_seed13.toml shape-form-martin/configs/m2b/s2_seed14.toml shape-form-martin/configs/m2b/s2_seed15.toml shape-form-martin/configs/m2b/b0h_seed0.toml shape-form-martin/configs/m2b/b0h_seed1.toml shape-form-martin/configs/m2b/b0h_seed2.toml` | six `starting point verified` lines (s1_seed13..15 files = their laptop rows' SHA-256; mlp_std.pt = SHA256SUMS) and `built weights agree`; nothing trained or written |
+| 9 | `$L s2_ft $P -B shape-form-martin/scripts/run_m2b_fit.py shape-form-martin/configs/m2b/s2_seed13.toml shape-form-martin/configs/m2b/s2_seed14.toml shape-form-martin/configs/m2b/s2_seed15.toml` | three rows in this machine's registry with `trained_on.init_from` (file and weights SHA-256, source row); fits start from step 0 |
 | 10 | `$L b0h $P -B shape-form-martin/scripts/run_m2b_fit.py shape-form-martin/configs/m2b/b0h_seed0.toml shape-form-martin/configs/m2b/b0h_seed1.toml shape-form-martin/configs/m2b/b0h_seed2.toml` | three rows; none with checkpoint SHA-256 `75de31f2...` |
-| 11 | `$L ensembles $P -B shape-form-martin/scripts/run_m2b_ensembles.py` then `$L report $P -B shape-form-martin/scripts/run_m2b_report.py` | six ensemble rows, representatives bit-equal (`representative_bitwise_equal` all true), `summary.json` with B0 = b0h_seed0..2 |
+| 11 | `$L ensembles $P -B shape-form-martin/scripts/run_m2b_ensembles.py`, then `$L report $P -B shape-form-martin/scripts/run_m2b_report.py` | ensembles exit 0 only if all three representatives are bit-equal (`PASS: all three representatives ...`); every member's file equals the checkpoint of its live-stream row; report exit 0 with `b0_controls_complete: true` (exit 2 and a banner if fewer than three b0h controls) |
 
-Laptop time estimates as in PLAN 16.3 (steps 6-7 about 1 min, step 8 about 1.5 min, 9 and 10 about 13 min each).
+Laptop durations: step 6 about 1.5 min (with the emulated guards a grid-1056 machine skips), step 7 about 1.5 min
+each, step 8 about 1.5 min, 9-pre seconds, 9 and 10 about 13 min each.
 
 ## 3. What each step writes, and what to copy back
 
@@ -270,5 +298,79 @@ New: `src/sfm/machine.py`, `src/sfm/provenance.py`, `src/sfm/guard.py`, `scripts
 Modified: `src/sfm/{registry,train,data,paths,refstream,gpulock}.py`, `src/sfm/models/__init__.py`,
 `scripts/run_m2b_{lib,fit,stage1,ensembles,report}.py`, `scripts/{fit,fit_queue,mc_noise_val,build_cache,
 check_protected,parity}.py`, `tests/test_{registry,refstream,train}.py`.
+Review-fix round, new: `src/sfm/policy.py`, `scripts/stop_job.sh` (executable), `scripts/p3_compare.py`,
+`tests/test_review_fixes.py`; modified again: `src/sfm/{machine,guard,paths,provenance,registry,train}.py`,
+`scripts/{launch.sh,val_parity,rescore_registered,run_m2b_lib,run_m2b_fit,run_m2b_ensembles,run_m2b_report}.py`,
+`tests/{test_guard,test_provenance,test_registry}.py`, and ONE test of `tests/test_geometry.py`
+(`test_score_variants_reproduces_the_metric`: lock timeout 5 s + skip; authorised by the orchestrator).
 Not mine (other workers): `src/sfm/sr/`, `src/sfm/geometry.py`, `tests/test_sr_*`, `tests/test_geometry.py`,
 `results/m2c_theta/`. Nothing was written under `results/` of the repository.
+
+## 7. Review fixes (transfer/ENABLING_REVIEW.md, verdict PASS WITH REQUIRED FIXES)
+
+| finding | change | regression test (fails closed now) |
+|---|---|---|
+| A1 step 5 red by construction | `test_guard.py` creates its deferred-name files inside the child process, before the guard exists; `test_caps_defaults...` clears the launcher's cap variables; step 5 split into 5a (guarded, core files) and 5b (`test_transfer_package.py` in a process of its own: its fixtures write `pion_s1_test.pt`, which a guarded process must refuse - that file is another worker's, not changed) | `test_review_fixes.py::test_A1_guard_tests_pass_inside_a_guarded_pytest_process` (runs `test_guard.py` inside a pytest process whose guard is active) |
+| A2 verdict ignored four checks | `val_parity.verdict_items` is the only source of the exit code and lists every item on its own line: R0, every R1 target, `laptop record verified` (SHA-256 vs `transfer/SHA256SUMS`) for all four records, A3 off grid 1056, R1b, R3, reference-set status (`exists_DIFFERENT` = FAIL), R2 targets, and "requested but not created" | `test_A2_verdict_includes_refset_status_A3_R1b_and_record_identity`; reviewer's reproducer `w1` adapted to the new API (section 8) |
+| A3 set created before the checks | the GPU job computes everything, forms the parity verdict, and only if it passes writes a parity report and calls `create_reference_set(..., parity={verdict, report SHA-256, ...})`; `create_reference_set` refuses a new set without a passing parity record; `reference_set` (so `evaluate`, the re-score, Track A) refuses a set without it and any set with a `<set>.DIFFERENT_<utc>.json` marker, which a differing recomputation writes | `test_A3_reference_set_needs_parity_and_disputes_block`, `test_A3_set_without_parity_record_is_refused` |
+| A4 silent skips in the re-score | `required_checks` per network and grid; a check that cannot be made (record missing or not verified) is `NOT MADE` -> verdict `INCOMPLETE` (exit 2), a failed check -> `FAIL` (exit 1); each required check is printed per network; a grid other than 1056 / 144 is refused unless `--allow-unchecked-grid` (then at best INCOMPLETE: "R4 on the emulated grid 1056 not implemented") | `test_A4_rescore_missing_checks_are_incomplete`; reproducer `w3` adapted (section 8) |
+| A5 fail-open pristine mode / guard | tracked policy `src/sfm/policy.py` names the laptop of record by machine id; on any other machine `machine.startup` and `train.fit` raise `UnguardedStart` unless the output root is outside the clone AND the guard is active. No opt-out (CPU-only unit-test processes are exempt; they cannot make numbers of record) | `test_A5_other_machine_needs_output_root_and_guard`, `test_A5_policy_names_this_laptop_by_machine_id_only` |
+| B1 machine id moved with settings | `MachineTag.id` hashes `IDENTITY_KEYS` only (GPU, SMs, threads/SM, grid, torch, CUDA, cuDNN, Python, TF32 flags); `deterministic`, `draw`, `CUBLAS_WORKSPACE_CONFIG` stay in the fields, so `check_pairable` is as strict as before | `test_B1_machine_id_vs_settings`; `test_provenance.py::test_machine_tag_fields_and_id` updated |
+| B2 starting point unverified | `run_m2b_lib.ALLOWED_INIT` (s2_seed11..15 <- m2b_mlp/s1_seed same; b0h_seed0..2 <- mlp_std.pt) and `verify_init`: file SHA-256 against the laptop row's `checkpoint_sha256` (mlp_std.pt against SHA256SUMS), weights hash; `check_built_weights` after the factory; `init_from` (run, file and weights SHA-256, trained-on label, source row) in `model.pt` meta, `done.json` and the row's `trained_on`; `run_m2b_fit.py --verify-init-only` | `test_B2_verify_init`, `test_B2_mlp_std_start_is_checked_against_sha256sums`; dry run 9-pre (section 8) |
+| B3 step 11 had no failing outcome | `load_tagged` refuses a sidecar that names another file; subset sidecars carry the member file SHA-256s, checked on load; every member must be the checkpoint of a live-stream row (`check_members`); ensembles exit 1 unless the three representatives are bit-equal; the report forms B0 columns only from exactly b0h_seed0..2, else banner + exit 2 | `test_B3_renamed_tagged_pair_is_refused`, `test_B3_representatives_and_controls` |
+| C1 P3 summary decided nothing | ULP summary removed; saved material now: offsets, z', r, cells, weights, float64 edge distance in mm, per-hit ln g_i and log rho (this machine's arithmetic); `scripts/p3_compare.py` (laptop) re-derives the events with `EmulGen(12345, grid)`, compares cells point by point and attributes the NLL difference to the differing points ("flip: explained" / "not explained" / "no differing cell: NOT a flip"). Emulated grid-1056 arrays are tagged `draw="emulated"` in memory | `test_C1_cell_attribution` |
+| C2 unhooked guard events | added `os.remove`, `os.rename`, `os.mkdir`, `os.rmdir`, `os.link`, `os.symlink`, `os.truncate`, `os.chmod`, `os.chown`, `os.utime`, `shutil.rmtree`, `shutil.move`, `shutil.copymode/copystat/chown`, `os.system` (tokens checked); remaining limits named in `guard.py` (existing hard links, C-level opens, subprocess internals, `guard._STATE` writable by Python code) | `test_guard.py::test_guard_refuses_and_allows` (rename, remove, mkdir, hard link, chmod, os.system, rmtree of the other project's files: refused, file untouched) |
+| C3 launcher | records the command's own PID (wrapper waits and appends `# exit status N`, writes `.exit`), `.job` file with PID, `/proc` start time, cwd, command line; liveness check after `SFM_LAUNCH_GRACE` (3 s): an immediately failing command is `FAILED`, exit 1; refuses `uv`/`conda`/... as the command; `PYTHONUNBUFFERED`, `setsid`, exported `SFM_USER_CACHE`; `scripts/stop_job.sh <pid file>` signals only if start time, cwd and command line still match | `test_C3_launcher_and_stop_helper` (failing interpreter -> FAILED; uv refused; tampered job file -> refused, process alive; correct -> SIGTERM, exit status recorded) |
+| C4 dirty-clone check | `git --no-optional-locks`; `upstream` and `head_equals_upstream` recorded; git state recorded again at the end of each batch (`lib.finish`); the switches in force recorded verbatim (`machine.env_record`) | `test_C4_git_state_and_env_record` |
+| C5 smaller points | `registered_row(stream_id=None)` raises; rows and `refset.json` carry `common_py_sha256`; registry docstring path fixed; run-book line on re-fits under an existing name | `test_C5_registered_row_refuses_untagged_lookup` |
+| suite hang | `tests/test_geometry.py::test_score_variants_reproduces_the_metric` takes the campaign lock with a 5 s timeout and skips instead of waiting (only that test changed) | observed: skipped after 5 s while my wrapper held the lock |
+
+**Not changed, with reasons**
+- `latest()` / `table()` still return untagged rows by default (C5): other workers call them; changing a default
+  silently would change their tables. `row_array`, `select_1se` and `registered_row` refuse untagged rows.
+- The mass-monitor criterion "means within 1e-6 relative" (C5) stays: it is in `transfer/REVIEW_STATUS.md` section 1.2
+  ("1e-4 relative per event, 1e-6 relative on the means"). If it fails on the H200 for a harmless reason, the gate
+  decides; it is reported per key.
+- `test_transfer_package.py` (another worker's file) is not changed; it runs in step 5b in its own process.
+- R4 on the emulated grid 1056 for a third launch grid is still not implemented; the re-score refuses such a grid.
+- The test-access log inside the clone (C5/E8) remains open for E8.
+- The points tag still states the constants of `common.test_nll` (seed 12345, batch 128, K 64) rather than reading
+  them; `common_py_sha256` in every row now pins the code they describe.
+
+## 8. Laptop dry run after the fixes (fresh scratch output root, guard active, pristine mode)
+
+Run as the corrected step list prescribes (steps 6, 7, 7 again, 8, 9-pre, plus a negative 9-pre), with
+`SFM_ALLOW_DIRTY_CLONE=1` (the laptop tree is never clean while other workers edit; on the H200 this is forbidden):
+- step 6 (`val_parity.py`, no `--create-refset`): 26 verdict lines, all PASS (fallback path: grid 144), exit 0; only
+  `identity.json` and the report were written, **no reference set**;
+- step 7 (`--create-refset`): parity verdict first, then `R2 reference set status: created`, all R2 targets PASS,
+  `refset.json` holds the parity record (report path + SHA-256); step 7 again: `exists_identical`, exit 0;
+- step 8 (`rescore_registered.py --emulate-laptop`): eight networks PASS, each with its required checks listed
+  (`laptop_registered_array`, guards and `mass_monitors` for the three guarded ones, `R1b`), exit 0;
+- step 9-pre (`run_m2b_fit.py --verify-init-only s2_seed13 b0h_seed0`): `starting point verified` (s1_seed13 file
+  `5e8e7ef9f434...` = its laptop row; mlp_std.pt = SHA256SUMS) and `built weights agree`; nothing written;
+  `b0_seed1.toml` (not pre-registered for this machine) refused, exit 1;
+- guard log: only the tolerated `pyarrow` imports of pandas; `results/registry.jsonl` and `results/test_access.log`
+  SHA-256 unchanged; no JSON under the output root contains an absolute path or a host name. One leak was found and
+  fixed in this run: the identity record listed the `SFM_USER_CACHE` path among the guard's allowed roots; it now
+  lists labels only, and `paths.scrub_str` / `paths.portable` replace `SFM_USER_CACHE`, the guarded area and `TMPDIR`
+  by `<cache>`, `<area>`, `<tmp>` in every written JSON (test added).
+- **Reviewer's reproducers, adapted to the new API** (`create_reference_set` now needs `parity=`; scratch output
+  roots): `w1` (a sealed reference set that differs + a wrong A3 constant) now ends `FAIL A3 native vs emulated`,
+  `R2 reference set NOT created: the parity checks above did not all pass`, `ALL APPLICABLE CHECKS: FAIL`, exit 1.
+  `w3` (laptop records reported "not found") now ends `s1_seed11 -> INCOMPLETE`, both required checks `NOT MADE
+  (laptop record not found)`, `ALL APPLICABLE CHECKS: INCOMPLETE`, exit 2. The `exists_DIFFERENT` path itself is
+  covered by `test_A3_reference_set_needs_parity_and_disputes_block` (in `w1` the A3 failure stops the run first).
+- Tests after all fixes (my files + `test_geometry.py` + `test_transfer_package.py`, run while a wrapper held the GPU
+  lock): **151 passed, 1 skipped** (the geometry test skipped after 5 s because my wrapper held the lock - the fixed
+  behaviour). Not run here: other workers' test files (`test_models.py`, `test_dist_factory.py`, `test_run_m2a.py`,
+  `test_families_*`, `test_sr_*`, `test_stats.py`); the full suite was not run in one process.
+
+## 9. Still unverifiable off the H200
+
+Launch grid and `EmulGen` = `torch.rand` there; the grid-1056 code paths of `val_parity.py` (native targets,
+`emulated_equals_native`) and of the re-score (predicted table); a real P3 banner and `p3_compare.py` on real
+outliers; the 10 GB cap and `InsufficientGPUMemory` on the shared device; `UnguardedStart` / `DirtyClone` with the
+H200's real machine id and a really clean clone; the guard with the real layout (venv inside the clone, area = the
+user's folder); `setsid` / `/proc` behaviour of the launcher and stop helper on that system; `flock` on its file
+system; whether every job fits under 10 GB; steps 9-11 (training) - only their pre-checks ran on the laptop.

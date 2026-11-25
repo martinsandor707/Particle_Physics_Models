@@ -15,6 +15,12 @@ MARTIN = HERE.parent
 
 CHILD = textwrap.dedent('''
     import json, os, subprocess, sys
+    # files with deferred / foreign names are created HERE, before the guard exists (review A1: the parent pytest
+    # process may itself be guarded, so it never writes such names)
+    for p in (os.path.join(os.environ["T_AREA"], "out", "test_event_number.npy"),
+              os.path.join(os.environ["T_ELSEWHERE"], "pion_s1_test.pt"),
+              os.path.join(os.environ["T_ELSEWHERE"], "pion_hits_with_model_outputs.parquet")):
+        open(p, "w").write("x")
     sys.path[:0] = [{src!r}, {martin!r}]
     from sfm import paths, guard                      # importing sfm installs the guard when SFM_GUARD_AREA is set
     res = {{"active": guard.active()}}
@@ -46,6 +52,15 @@ CHILD = textwrap.dedent('''
                                                             capture_output=True, check=True))
     attempt("outside_area_file", lambda: open(os.path.join(os.environ["T_ELSEWHERE"], "plain.txt")).read())
     attempt("final_test_switch_refused", lambda: guard.enable_final_test_access())
+    other = os.path.join(area, "other")
+    attempt("rename_foreign_into_out", lambda: os.rename(os.path.join(other, "secret.txt"), os.path.join(area, "out", "s.txt")))
+    attempt("remove_foreign", lambda: os.remove(os.path.join(other, "secret.txt")))
+    attempt("mkdir_in_foreign", lambda: os.mkdir(os.path.join(other, "newdir")))
+    attempt("hardlink_foreign", lambda: os.link(os.path.join(other, "secret.txt"), os.path.join(area, "out", "h.txt")))
+    attempt("chmod_foreign", lambda: os.chmod(os.path.join(other, "secret.txt"), 0o600))
+    attempt("os_system_foreign", lambda: os.system("cat " + os.path.join(other, "secret.txt") + " > /dev/null"))
+    import shutil
+    attempt("rmtree_foreign", lambda: shutil.rmtree(other))
     print("RESULT " + json.dumps(res))
 ''')
 
@@ -56,11 +71,9 @@ def _run(tmp_path, guard_on: bool):
         (area / d).mkdir(parents=True)
     (area / "other" / "secret.txt").write_text("other project")
     os.symlink(area / "other" / "secret.txt", area / "out" / "link.txt")
-    (area / "out" / "test_event_number.npy").write_bytes(b"x")
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    for n in ("pion_s1_test.pt", "pion_hits_with_model_outputs.parquet", "plain.txt"):
-        (elsewhere / n).write_text("x")
+    (elsewhere / "plain.txt").write_text("x")
     env = dict(os.environ, T_AREA=str(area), T_ELSEWHERE=str(elsewhere), SFM_OUT_ROOT=str(area / "out"),
                SFM_USER_CACHE=str(area / "cache"), PYTHONDONTWRITEBYTECODE="1")
     env.pop("SFM_GUARD_AREA", None)
@@ -79,8 +92,11 @@ def test_guard_refuses_and_allows(tmp_path):
     for k in ("clone_file", "out_file", "cache_file", "outside_area_file"):
         assert r[k] == "ok", (k, r)
     for k in ("other_project_file", "other_project_listdir", "symlink_into_other", "deferred_name_outside_area",
-              "deferred_name_in_out", "foreign_parquet", "subprocess_reads_other"):
+              "deferred_name_in_out", "foreign_parquet", "subprocess_reads_other", "rename_foreign_into_out",
+              "remove_foreign", "mkdir_in_foreign", "hardlink_foreign", "chmod_foreign", "os_system_foreign",
+              "rmtree_foreign"):
         assert r[k] == "refused", (k, r)
+    assert (area / "other" / "secret.txt").read_text() == "other project"     # untouched
     assert r["import_pyarrow_parquet"] == "refused-import"
     assert r["final_test_switch_refused"].startswith(("error:", "refused")) and r["final_test_switch_refused"] != "ok"
     log = (area / "out" / "guard" / "guard.log").read_text().splitlines()

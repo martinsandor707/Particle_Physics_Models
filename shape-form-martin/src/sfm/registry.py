@@ -23,11 +23,13 @@ What ``evaluate`` does
        pairing partners) and a SHA-256 fingerprint of every tensor of the ``Showers`` object (hits, weights, cell
        box, per-event p / ln p / zb / R / bin / evis) must equal those of the cached validation split. A test set,
        a subset, a reordering or modified tensors are rejected (``NotValidationSet``) before any model is run.
-    2. Loads the reference set of the live tag (``reference_set``; raises without it).
+    2. Loads the reference set of the live tag (``reference_set``; raises without it, without a passing parity
+       record, or when a recomputation was found to differ).
     3. Per-event validation NLL with the UNMODIFIED ``common.test_nll(model, val)`` (K = 64, CUDA generator seed
        12345, batches of 128) called inside ``sfm.metric.deterministic()``, so the stored array is bit-reproducible on
        the machine that computed it (PLAN.md section 13). Saved, with its tag sidecar, as
-       ``results/<stage>/<name>/scores/<machine id>/<points id>/val_nll.npy``. Tagged arrays are never overwritten.
+       ``R/machines/<machine id>/runs/<stage>/<name>/scores/<points id>/val_nll.npy`` (R = ``paths.OUT_RESULTS``).
+       Tagged arrays are never overwritten.
     4. Paired difference against both benchmarks of the reference set through ``sfm.provenance.paired_delta`` (the
        one delta function; it refuses arrays with different tags).
     5. Optional guard columns (``guards=True``; plan section 6 with the section-13 refinements):
@@ -76,7 +78,7 @@ if str(paths.MARTIN_DIR) not in sys.path:
     sys.path.insert(0, str(paths.MARTIN_DIR))
 import common as C  # noqa: E402
 
-__all__ = ["NotValidationSet", "NoReferenceSet", "UntaggedRow", "ValidationReference", "ValidationSet", "RegistryEnv",
+__all__ = ["NotValidationSet", "NoReferenceSet", "UntaggedRow", "ReferenceSetNotLicensed", "ReferenceSetDisputed", "ValidationReference", "ValidationSet", "RegistryEnv",
            "RefSet", "fingerprint", "validation_reference", "load_validation", "check_validation", "evaluate",
            "read_registry", "table", "select_1se", "latest", "row_stream_id", "live_stream", "reference_set",
            "create_reference_set", "registered_row", "row_array", "BENCHMARKS", "ZB_STRATUM_MM", "K_GUARD",
@@ -107,6 +109,15 @@ class NoReferenceSet(FileNotFoundError):
 
 class UntaggedRow(ValueError):
     """A registry row without a stream tag (laptop record, schema 1) was about to be used as a live row."""
+
+
+class ReferenceSetNotLicensed(PermissionError):
+    """A reference set without a passing parity record (review A3): never created, never used."""
+
+
+class ReferenceSetDisputed(PermissionError):
+    """A recomputation of the reference set differed from the stored one (``exists_DIFFERENT``): the set is blocked
+    for every use until the user has decided (review A3)."""
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -388,12 +399,20 @@ def reference_set(env: Optional[RegistryEnv] = None, reference: Optional[Validat
     m, pts = st["machine"], st["points"]
     d = provenance.refset_dir(env.results_dir, m.id, pts)
     mf = d / REFSET_FILE
+    disputes = sorted(d.parent.glob(f"{d.name}.DIFFERENT*.json")) if d.parent.exists() else []
+    if disputes:
+        raise ReferenceSetDisputed(f"{d}: a recomputation differed from the stored reference set "
+                                   f"({', '.join(x.name for x in disputes)}); it is blocked for every use until the "
+                                   "user has decided (nothing is deleted by code)")
     if not mf.exists():
         raise NoReferenceSet(
             f"no reference set for the live tag (machine {m.id}, points {provenance.points_id(pts)}): {d} does not "
             "exist. Create it once with scripts/val_parity.py --create-refset (run-book steps 6-7). There is no "
             "fallback to results/m0_parity/*_val_nll.npy or results/registry_refs/*.npy (laptop records).")
     manifest = json.loads(mf.read_text())
+    if (manifest.get("parity") or {}).get("verdict") != "PASS":
+        raise ReferenceSetNotLicensed(f"{mf}: no passing parity record (key 'parity'); a reference set is used only "
+                                      "if it was created after a passing scripts/val_parity.py run in that process")
     if manifest.get("machine_id") != m.id or manifest.get("points_id") != provenance.points_id(pts):
         raise MixedTags(f"{mf}: holds machine {manifest.get('machine_id')} / points {manifest.get('points_id')}, "
                         f"live is {m.id} / {provenance.points_id(pts)}")
@@ -443,12 +462,16 @@ def _default_bench_models() -> dict:
 def create_reference_set(val_set, *, env: Optional[RegistryEnv] = None,
                          reference: Optional[ValidationReference] = None, bench_models: Optional[Callable] = None,
                          guards: bool = True, k64_arrays: Optional[Mapping] = None, seal: bool = True,
-                         log: Callable = print) -> dict:
+                         log: Callable = print, parity: Optional[Mapping] = None) -> dict:
     """Create the reference set of the live tag ONCE (spec point 9): K = 64 pairing arrays of both benchmarks with
     the unmodified ``common.test_nll`` inside ``deterministic()`` (or the arrays passed in ``k64_arrays``, which must
     have been computed that way in this process), and - with ``guards`` - the K = 1024 and bulk guard references.
     Written into a temporary directory and renamed into place, then made read-only (``seal``; spec point 12).
     If the set exists already, everything is recomputed and compared bit for bit; nothing is overwritten.
+    ``parity`` is REQUIRED for a new set: the record of the passing parity run that licenses it ({"verdict": "PASS",
+    "report_sha256", ...}); it is stored in ``refset.json`` and ``reference_set`` refuses a set without it (A3).
+    If the set exists, a recomputation that differs writes ``<set>.DIFFERENT_<utc>.json`` beside it, which blocks
+    the set for every use (``ReferenceSetDisputed``).
     Returns {"status": "created" | "exists_identical" | "exists_DIFFERENT", "dir", "hashes", ...}."""
     sfm_machine.startup("registry.create_reference_set")
     env = env or RegistryEnv()
@@ -477,6 +500,9 @@ def create_reference_set(val_set, *, env: Optional[RegistryEnv] = None,
             raise FloatingPointError(f"reference array {b}/{k}: non-finite values")
     final = provenance.refset_dir(env.results_dir, m.id, pts)
     fp, grid = pts["split_fingerprint"], pts["grid"]
+    if not (final / REFSET_FILE).exists() and (not parity or parity.get("verdict") != "PASS"):
+        raise ReferenceSetNotLicensed("create_reference_set: a new reference set needs a passing parity record "
+                                      "(parity={'verdict': 'PASS', ...}); none given")
     if (final / REFSET_FILE).exists():
         existing = reference_set(env, stream=st)
         diffs = {}
@@ -487,7 +513,15 @@ def create_reference_set(val_set, *, env: Optional[RegistryEnv] = None,
             elif not np.array_equal(old.values, a):
                 diffs[f"{b}_{k}"] = float(np.abs(old.values.astype(np.float64) - a.astype(np.float64)).max())
         status = "exists_identical" if not diffs else "exists_DIFFERENT"
-        log(f"[refset] {final} exists; recomputation: {status} {diffs or ''}")
+        log(f"[refset] {paths.portable(final)} exists; recomputation: {status} {diffs or ''}")
+        if diffs:
+            marker = paths.check_output_path(final.parent / (f"{final.name}.DIFFERENT_"
+                                             f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"))
+            marker.write_text(paths.scrub_str(json.dumps({"refset": final.name, "differences": diffs,
+                                                          "machine_id": m.id, "git": sfm_machine.git_state(),
+                                                          "parity_of_this_run": parity}, indent=1,
+                                                         default=_json_default)) + "\n")
+            log(f"[refset] BLOCKED: {paths.portable(marker)} written; the set is refused for every use")
         return {"status": status, "dir": str(final), "differences": diffs, "hashes": existing.hashes()}
     tmp = paths.check_output_path(final.parent / f".{final.name}.tmp{os.getpid()}")
     if tmp.exists():
@@ -508,14 +542,16 @@ def create_reference_set(val_set, *, env: Optional[RegistryEnv] = None,
                                                            "source": ref.source},
                 "guards": bool(guards), "guard_spec": _guard_spec(len(val), fp, m, pts) if guards else None,
                 "n_stratum": int(len(stratum_idx)) if stratum_idx is not None else None,
-                "arrays": manifest_arrays, "benchmarks": {"mlp": "mlp_std.pt (legacy.load_mlp_std)",
+                "arrays": manifest_arrays, "parity": dict(parity),
+                "common_py_sha256": provenance.sha256_file(paths.MARTIN_DIR / "common.py"),
+                "benchmarks": {"mlp": "mlp_std.pt (legacy.load_mlp_std)",
                                                           "formula": "new3_std_n3.pt (legacy.load_component_formula)"}}
     (tmp / REFSET_FILE).write_text(paths.scrub_str(json.dumps(manifest, indent=1, default=_json_default)) + "\n")
     paths.check_output_path(final)
     final.parent.mkdir(parents=True, exist_ok=True)
     os.rename(tmp, final)                                   # fails if another process created it meanwhile
     sealed = provenance.make_read_only([p for p in final.iterdir() if p.is_file()]) if seal else []
-    log(f"[refset] created {final} ({len(manifest_arrays)} arrays){'; sealed read-only' if seal else ''}")
+    log(f"[refset] created {paths.portable(final)} ({len(manifest_arrays)} arrays){'; sealed read-only' if seal else ''}")
     return {"status": "created", "dir": str(final), "hashes": {k: v["sha256"] for k, v in manifest_arrays.items()},
             "manifest": manifest, "sealed": sealed}
 
@@ -664,6 +700,7 @@ def evaluate(model, name: str, stage: str, val_set, meta: Optional[Mapping] = No
            "val_nll_path": os.path.relpath(nll_t.path, env.results_dir),
            "val_nll_sha256": nll_t.sha256,
            "metric": METRIC_OF_RECORD,
+           "common_py_sha256": provenance.sha256_file(paths.MARTIN_DIR / "common.py"),
            "stream": {"stream_id": st["stream_id"], "points_id": provenance.points_id(pts), "points": pts,
                       "machine_id": m.id, "machine": m.fields},
            "trained_on": trained_on,
@@ -736,7 +773,10 @@ def latest(rows: Sequence[dict], stream: Optional[str] = "__all__") -> list:
 def registered_row(stage: str, name: str, *, stream_id: str, ckpt=None, need_guards: bool = False,
                    path: Optional[Path] = None) -> Optional[dict]:
     """The latest row of (stage, name) on the stream ``stream_id`` [with this checkpoint's SHA-256] [with guards]
-    (spec point 11). Rows of other streams - and the untagged laptop rows - never match."""
+    (spec point 11). Rows of other streams - and the untagged laptop rows - never match (``stream_id=None`` is
+    refused: review C5)."""
+    if not stream_id:
+        raise ValueError("registered_row needs a stream id (untagged laptop rows are never 'registered' here)")
     want = None
     if ckpt is not None:
         if not Path(ckpt).exists():

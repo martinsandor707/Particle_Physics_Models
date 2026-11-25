@@ -86,28 +86,35 @@ def check_output_path(p) -> Path:
 
 def portable(p) -> str:
     """A path string without the local directory layout: '<out>/...' under the output root (pristine mode),
-    '<repo>/...' inside the repository, otherwise the absolute path (temporary directories of tests)."""
+    '<repo>/...' inside the repository, otherwise the absolute path passed through ``scrub_str`` (placeholders for
+    SFM_USER_CACHE, the guarded area, TMPDIR and the home directory)."""
     p = Path(p)
     if pristine_mode() and _inside(p, OUT_ROOT):
         return "<out>/" + Path(os.path.relpath(p.resolve(), OUT_ROOT.resolve())).as_posix()
     if _inside(p, REPO_ROOT):
         return "<repo>/" + Path(os.path.relpath(p.resolve(), REPO_ROOT.resolve())).as_posix()
-    return str(p)
+    return scrub_str(str(p))
 
 
 def scrub_str(text: str) -> str:
     """Replace absolute local roots in a string (a JSON line, a report) by placeholders: the output root by '<out>'
-    (pristine mode), the repository by '<repo>', the home directory by '<home>'. Nothing that names the local
+    (pristine mode), the repository by '<repo>', SFM_USER_CACHE by '<cache>', the guarded area by '<area>', TMPDIR
+    by '<tmp>', the home directory by '<home>' (longest prefix first). Nothing that names the local
     directory layout (and with it a user name) is written to a file that may be committed."""
     reps = []
     if pristine_mode():
         reps.append((str(OUT_ROOT.resolve()), "<out>"))
     reps.append((str(REPO_ROOT.resolve()), "<repo>"))
+    for var, label in (("SFM_USER_CACHE", "<cache>"), ("SFM_GUARD_AREA", "<area>"), ("TMPDIR", "<tmp>")):
+        v = os.environ.get(var)
+        if v and v not in ("off", "/"):
+            reps.append((str(Path(v).expanduser().resolve()), label))
     home = os.path.expanduser("~")
     if home and home != "/":
         reps.append((str(Path(home).resolve()), "<home>"))
+    import re
     for a, b in sorted(reps, key=lambda x: -len(x[0])):
-        text = text.replace(a, b)
+        text = re.sub(re.escape(a) + r"(?=[/\\\"'\s,;:)\]]|$)", b, text)       # whole path components only
     return text
 
 

@@ -44,7 +44,7 @@ def setup(tmp_path):
             bench[b] = C.test_nll(m, val)
     env = RegistryEnv(results_dir=tmp_path / "results")
     res = registry.create_reference_set(ValidationSet(val, en), env=env, reference=ref,
-                                        bench_models=lambda: bench_models, guards=True, log=lambda *a: None)
+                                        bench_models=lambda: bench_models, guards=True, log=lambda *a: None, parity={"verdict": "PASS", "source": "unit test"})
     assert res["status"] == "created"
     return {"val": val, "en": en, "ref": ref, "env": env, "bench_models": bench_models, "bench": bench,
             "refset": res}
