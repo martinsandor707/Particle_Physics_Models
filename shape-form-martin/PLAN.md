@@ -1642,3 +1642,17 @@ mathematics worker; state in `src/sfm/sr/STATUS.md`):
 
 **Added to the Gate 2-pilot checklist of §7:** n_eff per momentum slice; the audit verdict of C2; the float32 error
 bound of the correction after the gauge mechanism; finite gradients of every operator at 0.
+
+### 17.6 Approvals given by the user before a four-hour absence (25 Nov 2026, about 16:30)
+
+- **H200 batch 1 — approved to run unattended, once the Fable review of the enabling code has passed with its required
+  fixes in and re-checked.** Content: `git pull` in the clone; two new folders in `<area>` (output root, cache root);
+  the test suite; validation parity and the reference arrays; re-scoring of the eight laptop-trained networks; and, only
+  if all of that passes, the three fine-tunes, the three `b0h_*` controls and the ensembles. One GPU job at a time,
+  10 GB GPU-memory cap, 4 CPU threads. Stop at the first failed check. Results come back with `scp` and are committed
+  on the laptop, labelled as not yet gated.
+- **Track A — approved to be written, reviewed by Fable and then started on the H200** (the list of `AUDIT.md` §4.1 in
+  full, one job at a time under the same caps, checkpointed, resumable), provided the review passes and batch 1
+  passed. The run stops before Stage 2: no combination (A11) is formed and no selection or gate decision is taken
+  before the user has seen the Stage-1 table. Gate 1 follows.
+- The geometry-arm questions G1–G3 of §17.3 remain open; nothing depends on them yet.
