@@ -1,0 +1,110 @@
+{
+ "name": "s2_seed13",
+ "stage": "m2b_mlp",
+ "config": "<repo>/shape-form-martin/configs/m2b/s2_seed13.toml",
+ "run_hash": "0354cc665e06bf4b",
+ "machine_tag": {
+  "id": "h200-g1056-97b197a7",
+  "fields": {
+   "cublas_workspace_config": null,
+   "cuda": "13.0",
+   "cudnn": 92400,
+   "deterministic": true,
+   "draw": "native",
+   "gpu_name": "NVIDIA H200",
+   "launch_grid": 1056,
+   "max_threads_per_sm": 2048,
+   "python": "3.13.12",
+   "sm_count": 132,
+   "tf32_cudnn": false,
+   "tf32_matmul": false,
+   "torch": "2.14.0+cu130"
+  },
+  "settings_sha8": "f03f136f"
+ },
+ "stream_id": "g1056-s12345-b128-iid-val731a1997@h200-g1056-97b197a7",
+ "batch": {
+  "what": "run_m2b_fit",
+  "machine_id": "h200-g1056-97b197a7",
+  "host_id": "d9e68da0aed7",
+  "caps": {
+   "gpu_mem_cap_gb": 10.0,
+   "cpu_threads": 4,
+   "device_total_gb": 139.80242919921875,
+   "gpu_mem_fraction": 0.07152951531156858
+  },
+  "git": {
+   "commit": "99e526d6be0c9a5e466ffaf9629d149bda28ac37",
+   "clean": true,
+   "n_changed": 0,
+   "upstream": "99e526d6be0c9a5e466ffaf9629d149bda28ac37",
+   "head_equals_upstream": true
+  },
+  "pristine_mode": true,
+  "out_results": "<out>/shape-form-martin/results",
+  "file_access_guard_active": true,
+  "laptop_of_record": false,
+  "env": {
+   "SFM_GUARD_AREA": "<area>",
+   "SFM_CPU_THREADS": "4"
+  }
+ },
+ "init_from": {
+  "run": "m2b_mlp/s1_seed13",
+  "factory": "from_run",
+  "file": "<repo>/shape-form-martin/results/m2b_mlp/s1_seed13/model.pt",
+  "file_sha256": "5e8e7ef9f434550cf60e65e5a7363b8c198a97be2d4893977e8bbcc58a2a22f6",
+  "weights_sha256": "ce1e8c6695cafc8b2e9bc96ccea88604b0d35060ee4d3062249446371893512c",
+  "trained_on": "laptop-rtx4060-g144 (untagged laptop record, 24 Nov 2026)",
+  "source_row": {
+   "stage": "m2b_mlp",
+   "name": "s1_seed13",
+   "timestamp": "2026-11-24T22:47:45+00:00",
+   "checkpoint_sha256": "5e8e7ef9f434550cf60e65e5a7363b8c198a97be2d4893977e8bbcc58a2a22f6",
+   "val_nll_sha256": "0d8ca31bd667a1d60bfbb873441260cec16bba8d29ad104a70b3ac703766b9a6"
+  }
+ },
+ "fit": {
+  "name": "s2_seed13",
+  "config_hash": "248acc033290e4f6",
+  "step": 6000,
+  "skipped_loss": 0,
+  "skipped_grad": 0,
+  "selection": "best_val",
+  "selected_step": 5750,
+  "selected_val": 18.126102472196852,
+  "final_val": 18.12613529600826,
+  "final_val_ema": null,
+  "best_val": 18.126102472196852,
+  "best_step": 5750,
+  "has_ema": false,
+  "resumed_from": null,
+  "seconds": 38.131102085113525,
+  "out_dir": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2b_mlp/s2_seed13",
+  "model_path": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2b_mlp/s2_seed13/model.pt"
+ },
+ "registered": true,
+ "val_mean": 18.118255781090777,
+ "seconds": 40.83838152885437,
+ "resources": {
+  "segments": [
+   {
+    "resumed_from_step": null,
+    "fit": {
+     "seconds": 38.99344849586487,
+     "peak_alloc_mb": 1669.087890625,
+     "peak_reserved_mb": 1792.0
+    },
+    "fit_seconds_total_in_run": 38.131102085113525,
+    "evaluate": {
+     "seconds": 1.5549910068511963,
+     "peak_alloc_mb": 1385.1669921875,
+     "peak_reserved_mb": 4424.0
+    },
+    "guards": true,
+    "finished_utc": "2026-11-25T20:35:24.173030+00:00"
+   }
+  ]
+ },
+ "finished_utc": "2026-11-25T20:35:24+00:00"
+}

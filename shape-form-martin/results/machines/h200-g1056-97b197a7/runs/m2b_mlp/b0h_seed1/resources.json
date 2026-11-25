@@ -1,0 +1,20 @@
+{
+ "segments": [
+  {
+   "resumed_from_step": null,
+   "fit": {
+    "seconds": 37.56882119178772,
+    "peak_alloc_mb": 1669.0908203125,
+    "peak_reserved_mb": 1792.0
+   },
+   "fit_seconds_total_in_run": 37.56225371360779,
+   "evaluate": {
+    "seconds": 1.5301260948181152,
+    "peak_alloc_mb": 1385.1669921875,
+    "peak_reserved_mb": 4424.0
+   },
+   "guards": true,
+   "finished_utc": "2026-11-25T20:38:16.147058+00:00"
+  }
+ ]
+}

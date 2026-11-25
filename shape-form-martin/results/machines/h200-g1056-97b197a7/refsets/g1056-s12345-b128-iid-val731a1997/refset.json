@@ -1,0 +1,236 @@
+{
+ "refset_schema": 1,
+ "machine_id": "h200-g1056-97b197a7",
+ "machine": {
+  "cublas_workspace_config": null,
+  "cuda": "13.0",
+  "cudnn": 92400,
+  "deterministic": true,
+  "draw": "native",
+  "gpu_name": "NVIDIA H200",
+  "launch_grid": 1056,
+  "max_threads_per_sm": 2048,
+  "python": "3.13.12",
+  "sm_count": 132,
+  "tf32_cudnn": false,
+  "tf32_matmul": false,
+  "torch": "2.14.0+cu130"
+ },
+ "points_id": "g1056-s12345-b128-iid-val731a1997",
+ "points": {
+  "grid": 1056,
+  "seed": 12345,
+  "K": 64,
+  "batch": 128,
+  "fold": "iid",
+  "split": "val",
+  "split_fingerprint": "731a199763cc31c498986574083e95c9c6c61e09d83f69b294cee13cf07858a7",
+  "subset": "all"
+ },
+ "stream_id": "g1056-s12345-b128-iid-val731a1997@h200-g1056-97b197a7",
+ "host_id": "d9e68da0aed7",
+ "created_utc": "2026-11-25T20:06:59+00:00",
+ "git": {
+  "commit": "247017d2f97a1284d4bb525d633624154b039bd1",
+  "clean": true,
+  "n_changed": 0,
+  "upstream": "247017d2f97a1284d4bb525d633624154b039bd1",
+  "head_equals_upstream": true
+ },
+ "metric": "common.test_nll (unmodified), K=64, CUDA generator seed 12345, batch 128, inside sfm.metric.deterministic()",
+ "validation": {
+  "fingerprint": "731a199763cc31c498986574083e95c9c6c61e09d83f69b294cee13cf07858a7",
+  "n_events": 14950,
+  "source": "cache pion_s1_trainval.pt (9984886fb902)"
+ },
+ "guards": true,
+ "guard_spec": {
+  "K": 1024,
+  "chunk": 64,
+  "seed": 12345,
+  "batch": 128,
+  "bulk": {
+   "z_cut": 1150.0,
+   "drop_rings": 1,
+   "renormalise": true,
+   "short": "raise"
+  },
+  "stratum": "zb >= 1221.0",
+  "val_fingerprint": "731a199763cc31c498986574083e95c9c6c61e09d83f69b294cee13cf07858a7",
+  "n_events": 14950,
+  "machine_id": "h200-g1056-97b197a7",
+  "machine": {
+   "cublas_workspace_config": null,
+   "cuda": "13.0",
+   "cudnn": 92400,
+   "deterministic": true,
+   "draw": "native",
+   "gpu_name": "NVIDIA H200",
+   "launch_grid": 1056,
+   "max_threads_per_sm": 2048,
+   "python": "3.13.12",
+   "sm_count": 132,
+   "tf32_cudnn": false,
+   "tf32_matmul": false,
+   "torch": "2.14.0+cu130"
+  },
+  "points_id": "g1056-s12345-b128-iid-val731a1997"
+ },
+ "n_stratum": 14784,
+ "arrays": {
+  "mlp_k64": {
+   "file": "mlp_val_nll.npy",
+   "sha256": "a945ce3a7422a571afdb57ff9f9b364354f2248e3c813b593951d1c341820cee",
+   "file_sha256": "da6248d9985bf4ec41bbdc2ddaaf777577f7adeacec811b1f79a840cc25bc463",
+   "mean": 18.118082943664348,
+   "n": 14950,
+   "points": {
+    "grid": 1056,
+    "seed": 12345,
+    "K": 64,
+    "batch": 128,
+    "fold": "iid",
+    "split": "val",
+    "split_fingerprint": "731a199763cc31c498986574083e95c9c6c61e09d83f69b294cee13cf07858a7",
+    "subset": "all"
+   }
+  },
+  "formula_k64": {
+   "file": "formula_val_nll.npy",
+   "sha256": "9221fdb6b6b77caaa8a17fe82648ea9d19250692faebc8e8088c18435dbb1abc",
+   "file_sha256": "8122b51d5a8d6c9d6e91e959e93b99e8d70c92bda3c35f4f59ae4cdf638928ae",
+   "mean": 18.120407366481512,
+   "n": 14950,
+   "points": {
+    "grid": 1056,
+    "seed": 12345,
+    "K": 64,
+    "batch": 128,
+    "fold": "iid",
+    "split": "val",
+    "split_fingerprint": "731a199763cc31c498986574083e95c9c6c61e09d83f69b294cee13cf07858a7",
+    "subset": "all"
+   }
+  },
+  "mlp_k1024": {
+   "file": "mlp_val_k1024.npy",
+   "sha256": "facb31878ea87ca7de01d572ed32565e35f9b3173db10d2422f5ca0ce52683af",
+   "file_sha256": "52c846fcc132e98e4dfa5d4f25ca664091c7e26088024bbf7df80106d92fa503",
+   "mean": 18.11555563547141,
+   "n": 14950,
+   "points": {
+    "grid": 1056,
+    "seed": 12345,
+    "K": 1024,
+    "batch": 128,
+    "fold": "iid",
+    "split": "val",
+    "split_fingerprint": "731a199763cc31c498986574083e95c9c6c61e09d83f69b294cee13cf07858a7",
+    "subset": "all",
+    "chunk": 64
+   }
+  },
+  "mlp_bulk_zb1221": {
+   "file": "mlp_val_bulk_zb1221.npy",
+   "sha256": "402ed01e88fb188acbb87bb24e921f3f7d0784ed76e17ae34f84e516fad1f872",
+   "file_sha256": "0987de3d8c9c892efa65df9392ac077451f21f8fd25546a95b6458b188a69cd3",
+   "mean": 18.042949706057964,
+   "n": 14784,
+   "points": {
+    "grid": 1056,
+    "seed": 12345,
+    "K": 64,
+    "batch": 128,
+    "fold": "iid",
+    "split": "val",
+    "split_fingerprint": "731a199763cc31c498986574083e95c9c6c61e09d83f69b294cee13cf07858a7",
+    "subset": "zb >= 1221 mm",
+    "bulk": {
+     "z_cut": 1150.0,
+     "drop_rings": 1,
+     "renormalise": true,
+     "short": "raise"
+    }
+   }
+  },
+  "formula_k1024": {
+   "file": "formula_val_k1024.npy",
+   "sha256": "a9946d72a66a756e83e17e13b479013c27f21739de2c5d07431a71936e1509c7",
+   "file_sha256": "85f0d838b9b7e503062158e25849cda1652d1bb140b4a9caed3d10ae87f9a8f3",
+   "mean": 18.11773643110907,
+   "n": 14950,
+   "points": {
+    "grid": 1056,
+    "seed": 12345,
+    "K": 1024,
+    "batch": 128,
+    "fold": "iid",
+    "split": "val",
+    "split_fingerprint": "731a199763cc31c498986574083e95c9c6c61e09d83f69b294cee13cf07858a7",
+    "subset": "all",
+    "chunk": 64
+   }
+  },
+  "formula_bulk_zb1221": {
+   "file": "formula_val_bulk_zb1221.npy",
+   "sha256": "92549ebe0ac00a1ea0d561a1ce35fa5bd6dd73caf6e137a293f93288b886a789",
+   "file_sha256": "3608dc273a41cff5d63c0e2db102c61ac8d9499eb76a872f7f96d4629015db7d",
+   "mean": 18.04487780168717,
+   "n": 14784,
+   "points": {
+    "grid": 1056,
+    "seed": 12345,
+    "K": 64,
+    "batch": 128,
+    "fold": "iid",
+    "split": "val",
+    "split_fingerprint": "731a199763cc31c498986574083e95c9c6c61e09d83f69b294cee13cf07858a7",
+    "subset": "zb >= 1221 mm",
+    "bulk": {
+     "z_cut": 1150.0,
+     "drop_rings": 1,
+     "renormalise": true,
+     "short": "raise"
+    }
+   }
+  }
+ },
+ "parity": {
+  "verdict": "PASS",
+  "report": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/checks/val_parity/report_20261125T195629Z_parity.json",
+  "report_sha256": "88789778bd416fee988992664e73a15789bb83f15d5996353631fe84bdfb5f68",
+  "items": [
+   "R0 generator check (EmulGen = torch.rand)",
+   "R1 second run bit-identical",
+   "R1 mlp_float32_mean",
+   "R1 formula_float32_mean",
+   "R1 formula_minus_mlp_mean",
+   "R1 formula_minus_mlp_se",
+   "R1 mlp_per_event_vs_laptop_emulated",
+   "R1 formula_per_event_vs_laptop_emulated",
+   "R1 emulated_equals_native",
+   "laptop record verified (SHA256SUMS): results/m0_parity/mlp_val_nll_ref1056.npy",
+   "laptop record verified (SHA256SUMS): results/m0_parity/formula_val_nll_ref1056.npy",
+   "R1b emulated grid 144 vs laptop array: mlp",
+   "laptop record verified (SHA256SUMS): results/m0_parity/mlp_val_nll.npy",
+   "R1b emulated grid 144 vs laptop array: formula",
+   "laptop record verified (SHA256SUMS): results/m0_parity/formula_val_nll.npy",
+   "R3 run-to-run outside deterministic(): mlp",
+   "R3 run-to-run outside deterministic(): formula"
+  ],
+  "machine_id": "h200-g1056-97b197a7",
+  "created_utc": "20261125T195629Z",
+  "git": {
+   "commit": "247017d2f97a1284d4bb525d633624154b039bd1",
+   "clean": true,
+   "n_changed": 0,
+   "upstream": "247017d2f97a1284d4bb525d633624154b039bd1",
+   "head_equals_upstream": true
+  }
+ },
+ "common_py_sha256": "ece3c67f89cd9f4792ccc0e50f3eea342180db72d0b55dfcfd3863c096dbebb3",
+ "benchmarks": {
+  "mlp": "mlp_std.pt (legacy.load_mlp_std)",
+  "formula": "new3_std_n3.pt (legacy.load_component_formula)"
+ }
+}

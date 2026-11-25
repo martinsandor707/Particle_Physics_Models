@@ -1,0 +1,46 @@
+{
+ "tag_schema": 1,
+ "array": "s2_11-14.npy",
+ "sha256": "321160788b9e7e31b981113b6f350cee5cedfb66333fbbb59505984b08c3257b",
+ "shape": [
+  14950
+ ],
+ "dtype": "float32",
+ "points": {
+  "grid": 1056,
+  "seed": 12345,
+  "K": 64,
+  "batch": 128,
+  "fold": "iid",
+  "split": "val",
+  "split_fingerprint": "731a199763cc31c498986574083e95c9c6c61e09d83f69b294cee13cf07858a7",
+  "subset": "all"
+ },
+ "points_id": "g1056-s12345-b128-iid-val731a1997",
+ "machine_id": "h200-g1056-97b197a7",
+ "machine": {
+  "cublas_workspace_config": null,
+  "cuda": "13.0",
+  "cudnn": 92400,
+  "deterministic": true,
+  "draw": "native",
+  "gpu_name": "NVIDIA H200",
+  "launch_grid": 1056,
+  "max_threads_per_sm": 2048,
+  "python": "3.13.12",
+  "sm_count": 132,
+  "tf32_cudnn": false,
+  "tf32_matmul": false,
+  "torch": "2.14.0+cu130"
+ },
+ "stream_id": "g1056-s12345-b128-iid-val731a1997@h200-g1056-97b197a7",
+ "label": "ensemble subset s2 (11, 14)",
+ "members": [
+  "repo:m2b_mlp/s2_seed11",
+  "out:machines/h200-g1056-97b197a7/runs/m2b_mlp/s2_seed14"
+ ],
+ "member_sha256": {
+  "repo:m2b_mlp/s2_seed11": "0a1c0f02c39349aa43459d10713db8e8b0f12d83a814c04133f4c652238cdf6d",
+  "out:machines/h200-g1056-97b197a7/runs/m2b_mlp/s2_seed14": "0eb39689025e0b9f9a4b9eb9c3a5d0ff1dc4aad21fc49ef13ba8016a63fdc315"
+ }
+}

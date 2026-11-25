@@ -1,0 +1,104 @@
+{
+ "name": "b0h_seed1",
+ "stage": "m2b_mlp",
+ "config": "<repo>/shape-form-martin/configs/m2b/b0h_seed1.toml",
+ "run_hash": "743d82b203f861e6",
+ "machine_tag": {
+  "id": "h200-g1056-97b197a7",
+  "fields": {
+   "cublas_workspace_config": null,
+   "cuda": "13.0",
+   "cudnn": 92400,
+   "deterministic": true,
+   "draw": "native",
+   "gpu_name": "NVIDIA H200",
+   "launch_grid": 1056,
+   "max_threads_per_sm": 2048,
+   "python": "3.13.12",
+   "sm_count": 132,
+   "tf32_cudnn": false,
+   "tf32_matmul": false,
+   "torch": "2.14.0+cu130"
+  },
+  "settings_sha8": "f03f136f"
+ },
+ "stream_id": "g1056-s12345-b128-iid-val731a1997@h200-g1056-97b197a7",
+ "batch": {
+  "what": "run_m2b_fit",
+  "machine_id": "h200-g1056-97b197a7",
+  "host_id": "d9e68da0aed7",
+  "caps": {
+   "gpu_mem_cap_gb": 10.0,
+   "cpu_threads": 4,
+   "device_total_gb": 139.80242919921875,
+   "gpu_mem_fraction": 0.07152951531156858
+  },
+  "git": {
+   "commit": "99e526d6be0c9a5e466ffaf9629d149bda28ac37",
+   "clean": true,
+   "n_changed": 0,
+   "upstream": "99e526d6be0c9a5e466ffaf9629d149bda28ac37",
+   "head_equals_upstream": true
+  },
+  "pristine_mode": true,
+  "out_results": "<out>/shape-form-martin/results",
+  "file_access_guard_active": true,
+  "laptop_of_record": false,
+  "env": {
+   "SFM_GUARD_AREA": "<area>",
+   "SFM_CPU_THREADS": "4"
+  }
+ },
+ "init_from": {
+  "run": null,
+  "factory": "field_mlp_std",
+  "file": "<repo>/shape-form-proton/results/particles/pion/mlp_std.pt",
+  "file_sha256": "ee1978a4b4cb3b3c1ea16d19e280327b4df433e24506f5a3f782f6d1fc120469",
+  "weights_sha256": "60f23193b997ca7ab5993581a98985c96764c7f1c362183c3790228b8742e76e",
+  "trained_on": "earlier study (shape-form-proton)",
+  "source_row": null
+ },
+ "fit": {
+  "name": "b0h_seed1",
+  "config_hash": "d7cdfec42d6186ca",
+  "step": 6000,
+  "skipped_loss": 0,
+  "skipped_grad": 0,
+  "selection": "best_val",
+  "selected_step": 6000,
+  "selected_val": 18.126042890261647,
+  "final_val": 18.126042890261647,
+  "final_val_ema": null,
+  "best_val": 18.126042890261647,
+  "best_step": 6000,
+  "has_ema": false,
+  "resumed_from": null,
+  "seconds": 37.56225371360779,
+  "out_dir": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2b_mlp/b0h_seed1",
+  "model_path": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2b_mlp/b0h_seed1/model.pt"
+ },
+ "registered": true,
+ "val_mean": 18.11818731575905,
+ "seconds": 39.359954595565796,
+ "resources": {
+  "segments": [
+   {
+    "resumed_from_step": null,
+    "fit": {
+     "seconds": 37.56882119178772,
+     "peak_alloc_mb": 1669.0908203125,
+     "peak_reserved_mb": 1792.0
+    },
+    "fit_seconds_total_in_run": 37.56225371360779,
+    "evaluate": {
+     "seconds": 1.5301260948181152,
+     "peak_alloc_mb": 1385.1669921875,
+     "peak_reserved_mb": 4424.0
+    },
+    "guards": true,
+    "finished_utc": "2026-11-25T20:38:16.147058+00:00"
+   }
+  ]
+ },
+ "finished_utc": "2026-11-25T20:38:16+00:00"
+}

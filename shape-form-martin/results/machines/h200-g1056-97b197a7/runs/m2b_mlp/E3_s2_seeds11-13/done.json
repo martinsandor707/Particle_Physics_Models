@@ -1,0 +1,73 @@
+{
+ "name": "E3_s2_seeds11-13",
+ "stage": "m2b_mlp",
+ "config": {
+  "factory": "ensemble",
+  "members": [
+   "repo:m2b_mlp/s2_seed11",
+   "repo:m2b_mlp/s2_seed12",
+   "out:machines/h200-g1056-97b197a7/runs/m2b_mlp/s2_seed13"
+  ],
+  "include_mlp_std": false,
+  "weights": "uniform (probability average)"
+ },
+ "model": "model.pt",
+ "model_sha256": "02668e0da687f9b70e8f1583d59c46a8c32b82e69824ea9fc98fdc27487febae",
+ "k": 11523,
+ "val_mean": 18.11806075858432,
+ "registry_timestamp": "2026-11-25T20:39:18+00:00",
+ "resources": {
+  "evaluate": {
+   "seconds": 2.007477045059204,
+   "peak_alloc_mb": 1052.93408203125,
+   "peak_reserved_mb": 2970.0
+  }
+ },
+ "machine_tag": {
+  "id": "h200-g1056-97b197a7",
+  "fields": {
+   "cublas_workspace_config": null,
+   "cuda": "13.0",
+   "cudnn": 92400,
+   "deterministic": true,
+   "draw": "native",
+   "gpu_name": "NVIDIA H200",
+   "launch_grid": 1056,
+   "max_threads_per_sm": 2048,
+   "python": "3.13.12",
+   "sm_count": 132,
+   "tf32_cudnn": false,
+   "tf32_matmul": false,
+   "torch": "2.14.0+cu130"
+  },
+  "settings_sha8": "f03f136f"
+ },
+ "stream_id": "g1056-s12345-b128-iid-val731a1997@h200-g1056-97b197a7",
+ "batch": {
+  "what": "run_m2b_ensembles",
+  "machine_id": "h200-g1056-97b197a7",
+  "host_id": "d9e68da0aed7",
+  "caps": {
+   "gpu_mem_cap_gb": 10.0,
+   "cpu_threads": 4,
+   "device_total_gb": 139.80242919921875,
+   "gpu_mem_fraction": 0.07152951531156858
+  },
+  "git": {
+   "commit": "99e526d6be0c9a5e466ffaf9629d149bda28ac37",
+   "clean": true,
+   "n_changed": 0,
+   "upstream": "99e526d6be0c9a5e466ffaf9629d149bda28ac37",
+   "head_equals_upstream": true
+  },
+  "pristine_mode": true,
+  "out_results": "<out>/shape-form-martin/results",
+  "file_access_guard_active": true,
+  "laptop_of_record": false,
+  "env": {
+   "SFM_GUARD_AREA": "<area>",
+   "SFM_CPU_THREADS": "4"
+  }
+ },
+ "finished_utc": "2026-11-25T20:39:19+00:00"
+}

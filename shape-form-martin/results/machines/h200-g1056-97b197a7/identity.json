@@ -1,0 +1,152 @@
+{
+ "machine": {
+  "id": "h200-g1056-97b197a7",
+  "fields": {
+   "cublas_workspace_config": null,
+   "cuda": "13.0",
+   "cudnn": 92400,
+   "deterministic": true,
+   "draw": "native",
+   "gpu_name": "NVIDIA H200",
+   "launch_grid": 1056,
+   "max_threads_per_sm": 2048,
+   "python": "3.13.12",
+   "sm_count": 132,
+   "tf32_cudnn": false,
+   "tf32_matmul": false,
+   "torch": "2.14.0+cu130"
+  },
+  "settings_sha8": "f03f136f"
+ },
+ "host_id": "d9e68da0aed7",
+ "platform": "Linux-5.15.0-1093-nvidia-x86_64-with-glibc2.35",
+ "python_executable": "<repo>/.venv/bin/python",
+ "cuda_available": true,
+ "device_count": 1,
+ "cuda_visible_devices": null,
+ "common_device": "cuda",
+ "device0": {
+  "name": "NVIDIA H200",
+  "total_memory_mb": 143157.6875,
+  "multi_processor_count": 132,
+  "max_threads_per_multi_processor": 2048,
+  "capability": "9.0"
+ },
+ "driver": {
+  "cuda_driver_version": null
+ },
+ "mig_suspected": false,
+ "versions": {
+  "numpy": "2.5.3",
+  "torch": "2.14.0+cu130",
+  "scipy": "1.18.1",
+  "pyarrow": null
+ },
+ "env_overrides": {
+  "SFM_DATA_DIR": null,
+  "SFM_RESULTS_DIR": null,
+  "SFM_CACHE_DIR": null,
+  "SFM_GPU_LOCK": null,
+  "SFM_OUT_ROOT": "<out>/.",
+  "CUBLAS_WORKSPACE_CONFIG": null
+ },
+ "caps": {
+  "gpu_mem_cap_gb": 10.0,
+  "cpu_threads": 4,
+  "device_total_gb": 139.80242919921875,
+  "gpu_mem_fraction": 0.07152951531156858
+ },
+ "pristine_mode": true,
+ "file_access_guard": {
+  "active": true,
+  "area_set": true,
+  "allowed_roots": [
+   "clone",
+   "output root",
+   "SFM_USER_CACHE"
+  ],
+  "deferred_names_released": false,
+  "parquet_reader_modules_loaded_before_guard": [],
+  "refusals_so_far": 2,
+  "log": "<out>/guard/guard.log"
+ },
+ "git": {
+  "commit": "247017d2f97a1284d4bb525d633624154b039bd1",
+  "clean": true,
+  "n_changed": 0,
+  "upstream": "247017d2f97a1284d4bb525d633624154b039bd1",
+  "head_equals_upstream": true
+ },
+ "generator_check": {
+  "grid": 1056,
+  "shapes": [
+   {
+    "shape": [
+     1000
+    ],
+    "equal": true
+   },
+   {
+    "shape": [
+     36863
+    ],
+    "equal": true
+   },
+   {
+    "shape": [
+     147457
+    ],
+    "equal": true
+   },
+   {
+    "shape": [
+     35000,
+     64,
+     3
+    ],
+    "equal": true
+   },
+   {
+    "shape": [
+     7,
+     16,
+     3
+    ],
+    "equal": true
+   },
+   {
+    "shape": [
+     41237,
+     64,
+     3
+    ],
+    "equal": true
+   },
+   {
+    "shape": [
+     5
+    ],
+    "equal": true
+   }
+  ],
+  "seeds": [
+   {
+    "seed": 0,
+    "equal": true
+   },
+   {
+    "seed": 1,
+    "equal": true
+   },
+   {
+    "seed": 12345,
+    "equal": true
+   },
+   {
+    "seed": 1099511627783,
+    "equal": true
+   }
+  ],
+  "pass": true
+ }
+}
