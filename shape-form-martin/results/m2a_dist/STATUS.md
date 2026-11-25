@@ -1,5 +1,16 @@
 # Track A (M2A) - status, 25 Nov 2026 (item E4 of PLAN.md section 16.7)
 
+**Update after the independent review of commit `c4f39fd` (`results/m2a_dist/REVIEW.md`: PASS WITH REQUIRED FIXES,
+no class-A finding).** The real run starts on the H200 from the reviewed files. The fixes B1-B5 and C2 (section 0)
+change only the report, the Stage-2 gate and an extra report option. **Nothing that any phase before `guards` fits or
+registers has changed, and neither has the run list:**
+- `run_m2a.py --list` is byte-identical before and after (SHA-256 of the output `8762ba00...`);
+- `run_m2a_lib.py`, `paramnet.py` and `dist_factory.py` are unchanged (SHA-256 as in REVIEW.md section 0);
+- the diff of `run_m2a.py` touches only `phase_report`, the new `stage2_approval` with `phase_stage2`, and `main()`
+  (the `--without-guards` option).
+
+The new report code is applied to the H200 run's registered arrays afterwards (`run_m2a.py report`).
+
 **State.** Track A is ready to run on the machine of record as ONE detached, resumable job (section 4). **No real Track
 A fit has been run anywhere.** Nothing was registered under `stage="m2a_dist"` in the campaign results. The laptop
 dry run went to a scratch output root (section 6). It covered templates and the step-0 parity for real, then every
@@ -10,6 +21,91 @@ the `fit_to` fix (section 2).
 
 Units: deltas are in nat per event. Tables use 1e-4 nat (the convention of AUDIT.md). `<repo>` is the clone and
 `<area>` is the user's folder on the H200.
+
+## 0. Fixes after the review of `c4f39fd` (B1-B5, C2), the reviewer's rulings, and what awaits the user
+
+| item | fix | where |
+|---|---|---|
+| B1 | When the doubled-step rerun pair (`<rung>_s<seed>_x2` vs `A2s_s<seed>_x2`) of a non-converged primary exists, it is the pair of that seed for keep, replication, equal NLL, "cleaner" and `kept_and_replicated`. Seeds may mix an original and a rerun, each paired with its own comparator. The table has a column "pairs used by the rules (s0 / s1)", and the original is printed as an extra row "original - not converged, NOT used by the rules"; it also appears in the secondary columns, labelled. `results.json` records the pairs used (`replication.pairs`). | `run_m2a_report.primary_pairs`, `collect`, `markdown` |
+| B2 | A new "Initialisation" table for every finished run: `kl_map` (nat) and its reference (`kl_ref`); the claim "exactly A2s" for A7, A8, A78, A7s, A8c and A12 (holds if \|kl_map\| <= 1e-6). For net runs: `rms_max` (column), the L-BFGS stop, and the flag **"warm start degraded - net column not interpretable for this run"** when `kl_map` > 1e-4 nat. Target columns of each net warm start are recomputed on the CPU from the fitted poly run (or from the legacy provider for A1), and those with relative spread sd / max(1, \|mean\|) between the 2^-20 floor and 1e-2 are listed in the table and in one summary line. Reporting only: `fit_to` is unchanged. | `warm_start_targets`, `initialisation_table` |
+| B3 | Printed beside the literal readings, labelled "alternative - decides nothing": (i) the two-seed mean also at <= -2 SE (a column in both Stage-1 tables, plus a second "kept and replicated" line); (ii) the G-region flagged share of the **hit-term total** with its margin (flagged - 0.5 hit term, SE) and "would pass". | `replication`, `g_region_block` |
+| B4 | Beside A3c / A3x, the template limitations are printed with the reviewer's measured sizes. Q1: the front-face z-bin and the 2 x 2-point rule (0.50 against 0.35; -0.10 / -0.16 / -0.14 at the legacy coefficients). Q2: computed from this machine's `templates_all.npz` - cells above 1.01 and the lowest z-bin centre where that happens, the maximum, the smallest denominator there, and the counts above 1 and 1.1; to be read with G-region `deep` and the `beyond_zb` monitor. On the laptop templates: 79 cells from z' = 1379 mm, maximum 1.81, denominator 0.186; 906 above 1, 56 above 1.1. These equal the review's numbers. | `template_limitations`, `TEMPLATE_NOTE_Q1/Q2` |
+| B5 | Stage 2 runs only with an approval file bound to the SHA-256 of the `results.json` the user saw (format below). It is refused if the file is absent, if the hash differs (the table was recomputed after the approval), if the replication reading is unknown, if the approved list differs from the list `results.json` gives under that reading, or if `approved_utc` / `approved_by` are missing. `stage2` stays outside the default phase list. | `run_m2a.stage2_approval`, `phase_stage2` |
+| C2 | `run_m2a.py report --without-guards` (also `run_m2a_report.py --without-guards`) writes the tables without guard columns to `RESULTS_without_guards.md` / `results_without_guards.json`, with a banner saying that no guard statement can be read from it. `results.json`, the file the Stage-2 approval binds, is written only by the full report. The full report now lists guard pairs whose guard data is missing instead of dropping them silently. The default command and its phases are unchanged. | `report(with_guards=...)`, `main` |
+| also (cheap, no rule) | C12: the kept line is split into primaries and exploratory; a multiplicity sentence; a footnote that the replication rule runs in seed order. B6 reading aid: the convergence movement of A2s_s0 / A2s_s1 is printed beside the primaries table. | `markdown` |
+
+**Stage-2 approval file** (written by the orchestrator after the user has approved; never by code):
+`R/machines/<machine id>/runs/m2a_dist/stage2_approval.json`
+
+```
+{"results_json_sha256": "<sha256sum of runs/m2a_dist/results.json as the user saw it>",
+ "replication_reading": "literal",            # or "two_se" (review ruling 5: [confirm] before Stage 2)
+ "kept_and_replicated": ["A7", "A8"],         # the list the user approved; must equal results.json under that reading
+ "approved_utc": "2026-11-26T10:00:00Z",
+ "approved_by": "user (recorded by the orchestrator)",
+ "notes": "free text"}
+```
+
+Then run `$L m2a_stage2 $P -B shape-form-martin/scripts/run_m2a.py stage2`. Any re-run of the full report rewrites
+`results.json`, so the approval has to be renewed. A11p is still not implemented, and `stage2_specs` must be reviewed
+before Stage 2 (review B5).
+
+**Verification of the fixes** (laptop, the second dry-run root of section 6, smoke rows, CPU-only report):
+- B1:
+  - The convergence rerun of A7_s0 was forced with a scratch harness that calls `run_m2a.rerun_specs` and
+    `run_m2a_lib.run_spec`, exactly as the driver does for a non-converged primary. It trained and registered
+    `A2s_s0_x2` and `A7_s0_x2`.
+  - The new report shows `A7 | rerun / original | +0.59 ± 0.18 | ...` (the review measured the same +0.59 ± 0.18),
+    with the row `A7 s0 original - not converged, NOT used by the rules | A7_s0 vs A2s_s0 | +0.55 ± 0.25`.
+  - Replication used the pairs `[A7_s0_x2, A2s_s0_x2]` and `[A7_s1, A2s_s1]`.
+- B2:
+  - "exactly A2s: yes" for A7/A8/A78/A7s/A8c/A12, with kl_map between -1.1e-8 and 3.4e-8 nat; A9 2.3e-4.
+  - All 14 smoke net runs are flagged "warm start degraded" (0.008-0.09 nat; the smoke warm start is 40 Adam steps
+    without L-BFGS, as the review predicted).
+  - No nearly-constant target column was found in the smoke targets.
+  - The A1 legacy-provider target: smallest relative spread 0.041, nothing nearly constant (unit test).
+- B3: both alternative columns and lines are printed; a unit test builds a case where the literal reading replicates
+  and the 2-SE alternative does not.
+- B4: as in the table above.
+- B5: unit test of every refusal and of acceptance.
+- C2: `run_m2a.py --smoke report --without-guards` wrote `RESULTS_without_guards.md` with the banner; the option is
+  refused with any other phase list.
+- Tests: `pytest tests/test_dist_factory.py tests/test_run_m2a.py tests/test_models.py` gives **85 passed, 3
+  skipped** (default output root, templates absent) and **88 passed, 0 skipped** (with `SFM_OUT_ROOT` = the dry-run
+  root).
+- Repository: `results/registry.jsonl` and `results/test_access.log` are unchanged, and nothing was written in the
+  clone.
+
+**The reviewer's rulings on the flagged readings** (REVIEW.md section 3; numbering of section 3 below):
+
+| # | reading | ruling |
+|---|---|---|
+| 1 | paired parity criterion | [within] - A6 revised point 4, verbatim |
+| 2 | drift rule, two-sided | [within] |
+| 3 | P-lr tie rule; net pilots fitted to A2s_s0 | [within] |
+| 4 | equal NLL one-sided; second seed on keep or one-seed equal NLL | [within] |
+| 5 | replication: two-seed mean <= -3, no 2-SE condition | [within] as the literal reading; **[confirm] before Stage 2** (it decides A11): both readings are now printed (B3), and the approval file names the reading |
+| 6 | kept and replicated | [within], with B1 (now fixed) |
+| 7 | convergence; reruns for the poly primaries only, from the original A2s | [within] |
+| 8 | guards on a superset (keep or equal NLL, plus comparators) | [within] |
+| 9 | G-region share of the total gain, margin form | [within]; the hit-term share is printed as well (B3) |
+| 10, 11 | G-mass per monitor without a threshold; G-bulk masking | [within] |
+| 12, 13, 14, 17 | secondary columns, "cleaner", no 1-SE in Stage 1, A9 step-0 rows | [within] |
+| 15 | A6b observed information on training events | [within] |
+| 16 | Stage 2 | not ruled; gated (B5) |
+| Q1, Q2 | templates | [within]: runs as registered, limitation printed (B4) |
+| `fit_to` fix | constant-column treatment | [within]; mathematics correct (two qualifications in REVIEW.md section 3) |
+
+**Awaiting the user (not implemented, by instruction):**
+1. **B6, a control "A2c"**: A2s continued unchanged (start = A2s of the same seed, T_A, seeds 0 and 1), to measure
+   the common "continued training" term of every rung that starts at A2s. It is not pre-registered, selects nothing,
+   and can be added at any time after A2s exists.
+2. **A scale floor in `fit_to`** for columns of small but non-zero relative spread, at about 2^-5 max(1, |mean|): the
+   review measured that such a column degrades every column of the warm start to 14-17 % of its spread. Until it is
+   decided, B2 makes an affected net run visible. If it is wanted later, only the flagged net runs would be refitted.
+3. **C1, "record a failed run and continue"** for a non-finite validation evaluation of an exploratory rung or a net
+   version. As coded, such a run stops the track and a restart stops at the same place. A pilot without finite scores
+   loses by the P-lr rule ([within]); for the other classes the user decides.
 
 ## 1. What changed
 
@@ -258,7 +354,7 @@ Do not set `SFM_M2A_SMOKE`, `SFM_ALLOW_DIRTY_CLONE`, `SFM_RESULTS_DIR`, `SFM_CAC
 
 | phase | acceptance (read in the log / decisions.json) | on failure |
 |---|---|---|
-| start | the line `[run_m2a] machine <id> ... file-access guard ACTIVE`, the same machine id as batch 1, `git ... clean: True` | DirtyClone / NoCUDA / NoReferenceSet: stop, report |
+| start | the line `[run_m2a] machine <id> ... file-access guard ACTIVE`, the same machine id as batch 1, `git ... clean: True` | any start-up exception of the base stops the job; report it: `NoCUDA`, `UnguardedStart` (output root inside the clone or guard not active off the laptop), `DirtyClone`, `InsufficientGPUMemory` (less than cap + 4 GB free; re-issue later), `NoReferenceSet`, `ReferenceSetNotLicensed` (set without a passing parity record), `ReferenceSetDisputed` (a recomputation differed; blocked until the user decides) |
 | templates | `templates.json` written. Expected from the laptop: fb vs stored abar mean 7.6e-4, max 0.146 in z-bin 14 only; back_corrected max 1.81 (z' >= 1385 mm); full_box <= 1. | - |
 | parity | `parity: A0 at step 0 - formula array = ... -> PASS`, i.e. max event <= 1e-4 and |mean| <= 1e-6. Laptop: -1.9e-8 +- 1.1e-8, max 1.34e-5. | STOP (SystemExit): report the numbers |
 | plr | `plr.json` has `lr_poly`, `lr_net` | - |
@@ -276,7 +372,13 @@ Volume (from `--list`):
 At laptop speed the AUDIT cost column gives about 4.0 h, plus up to 1.3 h of second seeds, plus reruns. **The H200
 speed is unknown.** Nothing is dropped and nothing depends on time.
 
-**Stage 2 is not started.** After the user has seen the Stage-1 table:
+**If the guards phase fails** (or before it has run), the Stage-1 tables can still be produced without guard
+columns: `$L m2a_report_ng $P -B shape-form-martin/scripts/run_m2a.py report --without-guards`. This writes
+`RESULTS_without_guards.md`, fits nothing and registers nothing (review C2). After the run, the reviewed report code
+(section 0) is applied with `$L m2a_report $P -B shape-form-martin/scripts/run_m2a.py report`.
+
+**Stage 2 is not started.** It needs the user's approval, recorded in `runs/m2a_dist/stage2_approval.json` and bound
+to the SHA-256 of the `results.json` the user saw (format in section 0). Only then:
 `$L m2a_stage2 $P -B shape-form-martin/scripts/run_m2a.py stage2`.
 
 **Copy back.** Copy the whole machine directory, as in ENABLING_STATUS.md section 3:
@@ -289,8 +391,11 @@ laptop repository root. The Track A part is `runs/m2a_dist/`:
 
 ## 5. Stopping and resuming
 
-- **Stop** only by the PID file:
-  - `kill "$(cat <area>/sfm_out/jobs/m2a_<UTC>.pid)"` (shared account: never by name);
+- **Stop** only with the base's stop helper and the job's PID file:
+  - `shape-form-martin/scripts/stop_job.sh <area>/sfm_out/jobs/m2a_<UTC>.pid`. It sends SIGTERM only if the PID still
+    belongs to that job (start time, working directory and command line are checked). Never stop a job by name;
+  - the driver has no signal handler, so a stop is a kill at an arbitrary point, which is the tested case (REVIEW.md
+    section 4);
   - the GPU lock (flock) is released when the process dies.
 - **Resume** by re-issuing exactly the same `$L m2a ...` line. Then:
   - finished runs are skipped by their `done.json`, which is refused if written by another machine;
@@ -377,13 +482,13 @@ first as machine `rtx-4060-laptop-gpu-g144-629104b0`, then as `...-76c0f59a` (th
 
 ## 7. Not tested, and open questions
 
-- **Q1 (templates, for the reviewer).** The ported `acceptances` (c_side.py, 2 x 2 sub-points per cell) resolve the
-  front-face step only to 1/2. In z-bin 14 (z' in [-19.5, -6.6) mm) they give 0.5 against 0.354 (stored abar) at
-  r = 0. This difference enters the numerator of back_corrected / full_box in that bin, so A3c/A3x mix the back-face
-  correction with this sampling error there. A finer z sampling (`nsub`) would change the reviewer's definition, so it
-  was **not changed**. The decision is needed before the real templates phase.
-- **Q2.** The literal back_corrected ratio exceeds 1 (maximum 1.81) in 56 cells at z' >= 1385 mm, where
-  mean 1[z' < zb] falls to 0.19. full_box stays <= 1. Accepted as defined, but flagged.
+- **Q1 (templates) - ruled [within] (REVIEW.md section 3); runs as registered, limitation printed with A3c/A3x (B4).**
+  The ported `acceptances` (c_side.py, 2 x 2 sub-points per cell) resolve the front-face step only to 1/2. In z-bin
+  14 (z' in [-19.5, -6.6) mm) they give 0.5 against 0.354 (stored abar) at r = 0. The effect on the validation NLL at
+  the legacy coefficients is -0.1 to -0.2 (review).
+- **Q2 - ruled [within]; printed (B4).** The literal back_corrected ratio is above 1 in 906 cells, above 1.01 in 79
+  cells (all at z' >= 1379 mm) and above 1.1 in 56 cells; the maximum is 1.81, where mean 1[z' < zb] is 0.186.
+  full_box stays <= 1.
 - Not run anywhere:
   - the real fits (by instruction);
   - the real guard evaluations on kept rungs (smoke only);
@@ -402,6 +507,12 @@ first as machine `rtx-4060-laptop-gpu-g144-629104b0`, then as `...-76c0f59a` (th
   with its primary.
 
 ## 8. Files for explicit staging
+
+**This round (review fixes B1-B5, C2):** `shape-form-martin/scripts/run_m2a_report.py`,
+`shape-form-martin/scripts/run_m2a.py`, `shape-form-martin/tests/test_run_m2a.py`,
+`shape-form-martin/results/m2a_dist/STATUS.md`. Nothing else was changed.
+
+The first round (commit `c4f39fd`), for reference:
 
 Modified: `shape-form-martin/src/sfm/models/paramnet.py`, `shape-form-martin/src/sfm/models/dist_factory.py`,
 `shape-form-martin/scripts/run_m2a.py`, `shape-form-martin/scripts/run_m2a_lib.py`,

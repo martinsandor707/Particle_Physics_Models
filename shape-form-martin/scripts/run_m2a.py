@@ -588,7 +588,10 @@ def phase_guards():
 
 def phase_report():
     import run_m2a_report as R
-    R.report()
+    R.report(with_guards=not REPORT_WITHOUT_GUARDS)
+
+
+REPORT_WITHOUT_GUARDS = False          # set by --without-guards (review C2; the "report" phase alone)
 
 
 # ---------------------------------------------------------------------------------------------------- stage 2 ---------
@@ -641,12 +644,54 @@ def stage2_specs(kept: list) -> list:
     return out
 
 
+STAGE2_APPROVAL = "stage2_approval.json"
+REPLICATION_READINGS = {"literal": "kept_and_replicated", "two_se": "kept_and_replicated_alternative_2se"}
+
+
+def stage2_approval() -> tuple:
+    """Review B5: Stage 2 runs only with an approval file written AFTER the user has seen the Stage-1 table and
+    approved it (created by the orchestrator, never by this code), in this stage's directory:
+
+        runs/<stage>/stage2_approval.json
+        {"results_json_sha256": "<SHA-256 of the results.json the user saw>",
+         "replication_reading": "literal" | "two_se",      # the user's choice (review ruling 5, [confirm])
+         "kept_and_replicated": ["A7", ...],               # the list the user approved, under that reading
+         "approved_utc": "2026-11-26T10:00:00Z", "approved_by": "user (recorded by the orchestrator)",
+         "notes": "..."}
+
+    Refused if the file is absent, if results.json is absent or its SHA-256 differs (the table was recomputed after
+    the approval), if the reading is unknown, or if the approved list differs from the list results.json gives
+    under that reading. Returns (approval, kept list, results.json SHA-256)."""
+    rf, af = L.out_dir() / "results.json", L.out_dir() / STAGE2_APPROVAL
+    if not rf.exists():
+        raise SystemExit("stage2 refused: the Stage-1 report (results.json) does not exist")
+    if not af.exists():
+        raise SystemExit(f"stage2 refused: no approval file {paths.portable(af)} (written after the user has seen and "
+                         "approved the Stage-1 table; format in run_m2a.stage2_approval)")
+    appr = json.loads(af.read_text())
+    sha = provenance.sha256_file(rf)
+    if appr.get("results_json_sha256") != sha:
+        raise SystemExit(f"stage2 refused: the approval names results.json {str(appr.get('results_json_sha256'))[:16]}"
+                         f"..., the file on disk is {sha[:16]}... (the table changed after the approval)")
+    reading = appr.get("replication_reading")
+    if reading not in REPLICATION_READINGS:
+        raise SystemExit(f"stage2 refused: replication_reading must be one of {sorted(REPLICATION_READINGS)}")
+    res = json.loads(rf.read_text())
+    kept = [r for r, v in (res.get(REPLICATION_READINGS[reading]) or {}).items() if v]
+    if sorted(appr.get("kept_and_replicated") or []) != sorted(kept):
+        raise SystemExit(f"stage2 refused: the approved list {appr.get('kept_and_replicated')} differs from the list "
+                         f"of results.json under the reading '{reading}': {kept}")
+    for k in ("approved_utc", "approved_by"):
+        if not appr.get(k):
+            raise SystemExit(f"stage2 refused: the approval file has no '{k}'")
+    return appr, kept, sha
+
+
 def phase_stage2():
-    res = L.read_json(L.out_dir() / "results.json")
-    if not res:
-        raise SystemExit("stage2 refused: the Stage-1 report (results.json) does not exist; the user sees the "
-                         "Stage-1 table before any combination is formed")
-    kept = [r for r, v in (res.get("kept_and_replicated") or {}).items() if v]
+    appr, kept, sha = stage2_approval()
+    note_decision("stage2_approval", {"results_json_sha256": sha, "replication_reading": appr["replication_reading"],
+                                      "approved_utc": appr["approved_utc"], "approved_by": appr["approved_by"],
+                                      "approval_file_sha256": provenance.sha256_file(L.out_dir() / STAGE2_APPROVAL)})
     note_decision("stage2_content", {"kept_and_replicated": kept,
                                      "A11": "A2s (no rerun)" if not kept else f"A2s + {kept}",
                                      "A11n": "A2n (no rerun)" if not kept else "net version of A11",
@@ -721,10 +766,18 @@ def main(argv=None) -> int:
     ap.add_argument("--smoke", action="store_true", help="end-to-end test with shortened fits (stage m2a_smoke; "
                                                          "needs SFM_M2A_SMOKE=1)")
     ap.add_argument("--list", action="store_true", help="print the real run list and exit (no GPU)")
+    ap.add_argument("--without-guards", action="store_true",
+                    help="only with the single phase 'report': the tables without guard columns, for a run whose "
+                         "guards phase failed or has not run (review C2); writes RESULTS_without_guards.md")
     args = ap.parse_args(argv)
     if args.list:
         print_listing()
         return 0
+    if args.without_guards:
+        if args.phases != ["report"]:
+            raise SystemExit("--without-guards goes with the single phase 'report' (run_m2a.py report --without-guards)")
+        global REPORT_WITHOUT_GUARDS
+        REPORT_WITHOUT_GUARDS = True
     phases = list(DEFAULT_PHASES) if (not args.phases or "all" in args.phases) else args.phases
     if "stage2" in phases and phases != ["stage2"]:
         raise SystemExit("stage2 runs only on its own (`run_m2a.py stage2`), after the user has seen the Stage-1 table")

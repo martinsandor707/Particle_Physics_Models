@@ -198,3 +198,106 @@ def test_source_runs_are_verified_by_sha256(tmp_path, monkeypatch):
     (d / "done.json").write_text(_json.dumps({"machine_id": "another-machine"}))
     with pytest.raises(RuntimeError, match="markers are never shared"):
         L.verify_sources({"start": "m2a_dist/A2s_s0"})
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# review fixes B1-B5, C2 (report and Stage-2 gate only; nothing before the guards phase changes)
+# ---------------------------------------------------------------------------------------------------------------------
+def test_b1_rerun_pair_replaces_the_non_converged_original(monkeypatch):
+    have = {"A7_s0", "A2s_s0", "A7_s0_x2", "A2s_s0_x2", "A7_s1", "A2s_s1"}
+    monkeypatch.setattr(R, "have", lambda n: n in have)
+    monkeypatch.setattr(R, "comparison", lambda run, comp, masks: {"run": run, "vs": comp})
+    c, orig = R.primary_pairs("A7", {})
+    assert c[0] == {"run": "A7_s0_x2", "vs": "A2s_s0_x2", "pair": "rerun"}
+    assert c[1] == {"run": "A7_s1", "vs": "A2s_s1", "pair": "original"}
+    assert orig == {0: {"run": "A7_s0", "vs": "A2s_s0", "pair": "original (not converged; not used by the rules)"}}
+    have.discard("A7_s0_x2")                                   # no rerun: the original is used
+    c, orig = R.primary_pairs("A7", {})
+    assert c[0]["run"] == "A7_s0" and orig == {}
+
+
+def _fake_tagged(monkeypatch, arrays):
+    from sfm.machine import MachineTag
+    mt = MachineTag.from_fields({"gpu_name": "test", "launch_grid": 1})
+    pts = provenance.points_tag(grid=1, K=64, split_fingerprint="f")
+    monkeypatch.setattr(L, "live_machine", lambda: mt)
+    monkeypatch.setattr(L, "tagged", lambda n, kind="k64": provenance.TaggedArray.make(arrays[n], pts, mt, label=n))
+
+
+def test_b3_replication_prints_the_two_se_alternative_beside_the_literal_reading(monkeypatch):
+    """Literal reading passes (seed 1 <= -1.5e-4 with the same sign, two-seed mean <= -3e-4); the alternative 2-SE
+    condition on the two-seed mean fails: printed beside it, it decides nothing."""
+    rng = np.random.default_rng(1)
+    n = 4000
+    base = 18.12 + 1e-3 * rng.standard_normal(n)
+
+    def zm(x):
+        return x - x.mean()
+    n0, n1 = zm(0.02 * rng.standard_normal(n)), zm(0.02 * rng.standard_normal(n))
+    arrays = {"A2s_s0": base, "A2s_s1": base, "X_s0": base - 3.5e-4 + n0, "X_s1": base - 3.5e-4 + n1}
+    _fake_tagged(monkeypatch, arrays)
+    c0 = {"paired": L.pd(provenance.paired_delta(L.tagged("X_s0"), L.tagged("A2s_s0")))}
+    c1 = {"paired": L.pd(provenance.paired_delta(L.tagged("X_s1"), L.tagged("A2s_s1")))}
+    rep = R.replication(c0, c1, "X_s0", "A2s_s0", "X_s1", "A2s_s1")
+    tsm = rep["two_seed_mean"]
+    assert tsm["mean"] == pytest.approx(-3.5e-4, abs=1e-9) and tsm["se"] > 1.75e-4
+    assert rep["replicated"] is True
+    assert rep["alternative_two_seed_mean_2se"] is False and rep["replicated_alternative_2se"] is False
+    assert rep["pairs"] == [["X_s0", "A2s_s0"], ["X_s1", "A2s_s1"]]
+
+
+def test_b5_stage2_needs_an_approval_bound_to_the_results_json(tmp_path, monkeypatch):
+    import json as _json
+    monkeypatch.setattr(L, "out_dir", lambda: tmp_path)
+    with pytest.raises(SystemExit, match="results.json\\) does not exist"):
+        M.stage2_approval()
+    res = {"kept_and_replicated": {"A7": True, "A8": False}, "kept_and_replicated_alternative_2se": {"A7": False}}
+    (tmp_path / "results.json").write_text(_json.dumps(res))
+    with pytest.raises(SystemExit, match="no approval file"):
+        M.stage2_approval()
+    sha = provenance.sha256_file(tmp_path / "results.json")
+    appr = {"results_json_sha256": sha, "replication_reading": "literal", "kept_and_replicated": ["A7"],
+            "approved_utc": "2026-11-26T10:00:00Z", "approved_by": "user (recorded by the orchestrator)"}
+    (tmp_path / M.STAGE2_APPROVAL).write_text(_json.dumps(appr))
+    a, kept, s = M.stage2_approval()
+    assert kept == ["A7"] and s == sha
+    for bad, msg in (({"results_json_sha256": "0" * 64}, "table changed after the approval"),
+                     ({"replication_reading": "loose"}, "replication_reading"),
+                     ({"kept_and_replicated": []}, "differs from the list"),
+                     ({"replication_reading": "two_se"}, "differs from the list"),
+                     ({"approved_by": ""}, "approved_by")):
+        (tmp_path / M.STAGE2_APPROVAL).write_text(_json.dumps({**appr, **bad}))
+        with pytest.raises(SystemExit, match=msg):
+            M.stage2_approval()
+    (tmp_path / M.STAGE2_APPROVAL).write_text(_json.dumps({**appr, "replication_reading": "two_se",
+                                                          "kept_and_replicated": []}))
+    assert M.stage2_approval()[1] == []
+    (tmp_path / "results.json").write_text(_json.dumps({**res, "x": 1}))       # the table was recomputed
+    with pytest.raises(SystemExit, match="table changed"):
+        M.stage2_approval()
+    assert "stage2" not in M.DEFAULT_PHASES
+
+
+def test_c2_without_guards_only_with_the_single_report_phase():
+    with pytest.raises(SystemExit, match="single phase 'report'"):
+        M.main(["--without-guards"])
+    with pytest.raises(SystemExit, match="single phase 'report'"):
+        M.main(["stage1x", "report", "--without-guards"])
+    assert M.REPORT_WITHOUT_GUARDS is False
+
+
+def test_b2_warm_start_targets_of_the_a1_control_on_the_cpu():
+    """A1 is fitted to the legacy provider: its 22 momentum-dependent columns have relative spreads >= 0.041 (review
+    section 3), none in the nearly-constant range (2^-20, 1e-2), none constant."""
+    done = {"spec": {"factory": "component", "kwargs": {"variant": "legacy_centre", "provider": "net"}},
+            "build_kwargs": {"variant": "legacy_centre", "provider": "net"}}
+    t = R.warm_start_targets(done)
+    assert t["constant"] == [] and t["nearly_constant"] == {}
+    assert 0.03 < t["smallest_varying"][1] < 0.05
+    assert R.KL_DEGRADED == 1e-4 and R.NEAR_CONSTANT_HI == 1e-2
+
+
+def test_b4_template_notes_carry_the_reviewers_numbers():
+    assert "0.50 against 0.35" in R.TEMPLATE_NOTE_Q1 and "-0.16 ± 0.02" in R.TEMPLATE_NOTE_Q1
+    s = R.TEMPLATE_NOTE_Q2.format(n101=79, z=1379, mx=1.81, den=0.186)
+    assert "79 cells at z' >= 1379 mm" in s and "`deep`" in s and "`beyond_zb`" in s
