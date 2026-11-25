@@ -48,15 +48,16 @@ Agreement of the three implementations
     The NumPy and torch functions use literally the formulas of the Julia strings (``softplus`` is *not*
     ``F.softplus``, whose threshold shortcut differs by 2e-9 relative). exp, tanh, atan, erf, erfc, log1p, sqrt and
     pow come from each library's libm and agree to a few ulp; ``tests/test_sr_operators.py`` checks NumPy against
-    torch at 1e-13 relative over |x| from 1e-300 to 1e300 including the overflow points. Agreement with Julia itself
-    cannot be tested here (no Julia in this process) and is a pilot-gate item.
+    torch at 1e-13 relative over |x| from 1e-300 to 1e300 including the overflow points. Agreement with Julia itself:
+    ``tests/test_sr_translate.py`` compares with PySR's own predictions on exported rows (1e-12, every operator of
+    the three vocabularies).
 
 Complexity (``complexity_of_operators``): PLAN "transcendental 2, erf/erfc 3". + - * square: 1; exp tanh atan
     softplus l1p ppow sin cos: 2; erf erfc: 3. Two choices beyond the plan's sentence: ``sqa`` and ``linv`` are
     algebraic but composite (sqrt(|x|) hides an abs, linv hides 1, +, *, /), so they cost 2 as well. Raw ``/`` and
     ``inv`` cost 1. Constants and variables cost 1.
 
-Not confirmable without Julia (pilot gate): see ``UNCONFIRMED``.
+Confirmed against Julia on 25 Nov 2026: see ``CONFIRMED_WITH_JULIA`` (``UNCONFIRMED`` is now empty).
 """
 from __future__ import annotations
 
@@ -73,7 +74,7 @@ __all__ = [
     "violations", "search_config", "WL2_ELEMENTWISE", "gauge_loss_julia", "wl2_loss_numpy", "gauge_loss_numpy",
     "MAXSIZE_1D", "MAXSIZE_ND", "PARETO_TIERS", "VARIABLE_NAMES", "ZETA_SCALE_MM", "RHO_SCALE_MM", "M_PION",
     "V0_PION", "VS_PION", "x_of_p", "extended_box", "data_box", "TRAJECTORY_BOX", "TRAIN_X_RANGE", "pareto_tier",
-    "SATURATING", "UNCONFIRMED", "AUDIT_ONLY_OPS",
+    "SATURATING", "UNCONFIRMED", "CONFIRMED_WITH_JULIA", "AUDIT_ONLY_OPS",
 ]
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -723,21 +724,27 @@ def search_config(stage: str = "stage1", ndim: int = 3, loss: str = "gauge", tem
     return cfg
 
 
-UNCONFIRMED: Tuple[str, ...] = (
-    "custom operator strings (ppow, softplus, l1p, sqa, linv) are accepted and keep the data precision",
+# Confirmed against PySR 2.7.3 / SymbolicRegression.jl 2.7.2 / Julia 1.13.4 with tiny fits on 25 Nov 2026
+# (src/sfm/sr/STATUS.md section 9; the evidence that can be kept is embedded in tests/test_sr_translate.py).
+CONFIRMED_WITH_JULIA: Tuple[str, ...] = (
+    "custom operator strings (ppow, softplus, l1p, sqa, linv) are accepted, in Float64 and in Float32 searches; "
+    "their values agree with numpy_impl to 1e-12 on exported rows",
     "nested_constraints / constraints / complexity_of_operators keyed by custom operator *names* are accepted",
-    "argument-size limits (constraints) are counted with the operator weights (compute_complexity), as "
-    "violates_constraints assumes, and not with unit weights",
-    "constraints['ppow'] = (7, 1) admits a single variable as exponent (it does at unit variable complexity): "
-    "members with a non-constant exponent are removed by operators.violations",
-    "elementwise weighted loss is normalised by sum(weights) (wl2_loss_numpy)",
-    "the full-objective gauge loss: Dataset fields X, y, weights, n; eval_tree_array(tree, X, options) for a tree "
-    "and for a template expression; value equals gauge_loss_numpy on the exported rows",
-    "batching=False keeps the full, slice-contiguous data set in every loss evaluation",
+    "argument-size limits (constraints) are counted with the operator weights (check_constraints rejects "
+    "exp(tanh(zt) + tanh(rh) + tanh(x)): weighted 11 > 9, unit count 8), as violates_constraints assumes",
+    "constraints['ppow'] = (7, 1) admits a single variable as exponent (check_constraints accepts ppow(zt, rh)): "
+    "members with a non-constant exponent have to be removed by operators.violations",
+    "nesting: flag_illegal_nests agrees with violates_nesting on 14 hand-made trees; compute_complexity agrees with "
+    "tree_complexity on all of them and on every hall-of-fame member seen",
+    "elementwise weighted loss is normalised by sum(weights) (wl2_loss_numpy equals the CSV loss to 1e-15)",
+    "the full-objective gauge loss (Dataset fields X, y, weights, n; eval_tree_array for a tree and, as "
+    "loss_function_expression, for a template expression) equals gauge_loss_numpy on the exported rows to 1e-15",
+    "batching=False: the reported loss is the loss on the full, slice-contiguous data set",
     "template combine strings: ValidVector arithmetic with numeric literals (0.3 *, 1 / (1 + e^2)), tanh and sin "
-    "of a ValidVector; Float32 searches need the 0.3f0 form (TemplateSpec.combine(32))",
+    "of a ValidVector; a Float32 search runs with the 0.3f0 form (TemplateSpec.combine(32))",
     "template complexity = sum of the sub-expressions' complexities (the combine function's own nodes are free)",
-    "hall_of_fame.csv prints constants with print_precision significant digits (set to 17)",
-    "multi-output fit: weights of shape (N, n_out), guesses as list[list[str]], one hall_of_fame_output{i}.csv "
-    "per output",
+    "hall_of_fame.csv prints constants with print_precision significant digits (17: exact round trip)",
+    "multi-output fit: weights of shape (N, n_out), guesses as list[list[str]] (a Horner cubic comes back with "
+    "complexity 13), one hall_of_fame_output{i}.csv per output",
 )
+UNCONFIRMED: Tuple[str, ...] = ()        # nothing left of the first session's list

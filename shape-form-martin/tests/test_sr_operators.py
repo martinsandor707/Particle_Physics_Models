@@ -291,3 +291,9 @@ def test_templates():
     assert "sin" not in O.VOCABULARIES[s2.vocabulary].names            # the template's sin cannot be nested
     with pytest.raises(ValueError):
         O.search_config("stage2", 3, "gauge", template="s2_modulation")
+
+
+def test_julia_confirmation_list():
+    """The first session's open list is closed: every item was confirmed with tiny fits (STATUS.md section 9)."""
+    assert O.UNCONFIRMED == () and len(O.CONFIRMED_WITH_JULIA) == 12
+    assert all(isinstance(s, str) and s for s in O.CONFIRMED_WITH_JULIA)

@@ -1,22 +1,30 @@
-# `sfm.sr` — status of the math-author modules at the checkpoint (25 Nov 2026)
+# `sfm.sr` — status of the math-author modules (second session, 25 Nov 2026)
 
-Written for whoever continues. Only `operators.py` exists and is tested. Everything else below is **design, not
-code**: nothing in it has been run, and no number is measured unless it says so.
+Written for whoever continues. All six modules are implemented; each section says what the code does, what was
+verified and what was not. Section 8 holds the decisions and the list of plan rules that need the user's
+confirmation; section 10 the interfaces for the runner. **Numbers are measured only where they say so.**
 
 ## 1. Status per module
 
-| Module | State | Notes |
-|---|---|---|
-| `operators.py` | **done**, 47 tests pass (`tests/test_sr_operators.py`, CPU, 1.5 s) | torch-free and pysr-free at import (checked in a subprocess) |
-| `translate.py` | not started | design in §3 |
-| `audit.py` | not started | algorithm and soundness argument in §4 |
-| `checks.py` | not started | check list and tolerances in §7 |
-| `targets.py` | not started | target (iii), Fisher weights, seed-null in §5 |
-| `refit.py` | not started | design in §6 |
-| `__init__.py` | empty, as required | |
+| Module | State | Tests | Notes |
+|---|---|---|---|
+| `operators.py` | done (first session); `UNCONFIRMED` emptied, `CONFIRMED_WITH_JULIA` added | 48 pass | every item of `UNCONFIRMED` is now confirmed against Julia, see §9 |
+| `translate.py` | **done** | 91 pass (`tests/test_sr_translate.py`, 1.3 s) | torch only on demand; checked against real PySR strings, predictions and losses |
+| `audit.py` | **done** | 68 pass (`tests/test_sr_audit.py`, 3.5 s) | NumPy only; gauge decision in §8 needs the user's confirmation |
+| `checks.py` | **done** | 8 pass (`tests/test_sr_checks.py`) | NumPy only; tolerances are arguments with stated defaults |
+| `targets.py` | **done**, not yet run on real data | 16 pass (`tests/test_sr_targets.py`) | constructions tested on synthetic maps; event-level estimators on synthetic showers (CPU child process) |
+| `refit.py` | **done except registration** (stub, by instruction) | 8 pass (`tests/test_sr_refit.py`, CPU child process) | constants recovered on synthetic showers; no real refit run |
+| `__init__.py` | empty, as `test_sr_package_init_is_empty` requires | | |
 
-No test files exist for the five unwritten modules. Nothing outside `src/sfm/sr/` and `tests/test_sr_operators.py`
-was touched; no git state changed; the test split was not opened; the GPU was not used.
+Run: `uv run pytest shape-form-martin/tests -q -k "sr_ and not search"` → 239 passed (about 12 s; the refit suite
+took up to a minute once, when the CPU was shared).
+
+Nothing outside the write set was touched; no git state changed; the test split was not opened; no `*.csv` was
+opened; no real data file was read at all (targets and refit were exercised on synthetic inputs only); the GPU was
+not used (everything that imports `common.py` runs in child processes with `CUDA_VISIBLE_DEVICES=""`); no
+likelihood of a candidate equation was computed; `sfm.registry` is not imported by any module here.
+Read-only exception to "no real file": `shape-form-proton/results/particles/*/sr_residual.json` was read once to
+copy the earlier study's four pion equations into the audit test.
 
 ## 2. `operators.py` — what is fixed (implemented)
 
@@ -89,182 +97,254 @@ arguments: operators, the three dictionaries, `maxsize` (18 / 30), loss string, 
 `precision=64`, `print_precision=17`. With `template=` it returns `cfg["template"]` = the keyword arguments of
 `pysr.TemplateExpressionSpec` (the runner builds the object).
 
-## 3. `translate.py` — design (not written)
+## 3. `translate.py` — implemented
 
-- **Tree.** Immutable node with `kind`, `name`, `args`, `value`, `fixed`. `fixed=True` marks structural literals
-  (template constants such as 0.3, integer exponents): not trainable, not counted in k.
-- **Parser.** Precedence climbing over `+ − * / ^ **`, unary sign, calls, numbers (`1e-05`, `1.5f0`, `Inf`, `NaN`),
-  identifiers, `#1` placeholders, `p[1]` template parameters. It must also read sympy-style strings, because the
-  known-bad equations in `sr_residual.json` are stored that way (`-1.943752e-5/(r - 1*0.017030673)`, `(...)**2`).
-  A sign in front of a literal folds into the constant; otherwise it is a `neg` node. `u^2` with a literal 2 →
-  `square(u)`; another literal integer exponent → `pow` with a fixed exponent (integer-power semantics); any other
-  exponent → real power (positive base required).
-- **Formats, from the installed package and from memory of SymbolicRegression.jl — none confirmed by a run.**
-  Ordinary: infix for `+ − * / ^` with parentheses around every binary sub-expression, call syntax otherwise,
-  outer parentheses stripped (PySR's own test files also show the older `"(f0 + 1.4724599)"`); constants printed
-  with `%.{print_precision}g`, so `1.2346e-05` occurs. CSV header `Complexity,Loss,Equation`; multi-output files
-  `hall_of_fame_output{i}.csv`; a `.bak` copy beside each. Template: `f = #1 + #2; g = exp(#1); p = [1.0, 2.0]`
-  (confirmed only in shape, by `pysr/test/test_main.py::test_equations_with_quoted_constants_are_read`); `#k` is the
-  k-th argument of that sub-expression, so translation needs `TemplateSpec.arguments`.
-- **Template translation.** Parse `combine` (same grammar plus `name = expr;` statements), substitute each parsed
-  sub-expression with `#k` → its argument.
-- **Outputs.** NumPy float64 evaluation (optionally recording the largest |intermediate|); torch `nn.Module` built
-  on demand with the k free constants as `nn.Parameter`; `complexity` through `operators.tree_complexity`; for a
-  template both the search's count (sum over sub-expressions) and the count of the substituted tree; printer using
-  `repr(float)`; round trip parse → print → parse and NumPy vs torch ≤ 1e-12 in float64.
-- Because the default CSV prints 5 digits, a translated equation reproduces the search loss only if
-  `print_precision=17` was set.
+- `Expr` (immutable; kinds const / var / param / op / sub; `fixed=True` = structural literal, not trained, not in k);
+  `parse` (precedence climbing; PySR strings, Julia combine strings, the sympy-style strings of the earlier study);
+  `parse_template(name, {sub: string})` and `parse_template_string(name, "u = ...; v = ...")`; `to_string` (PySR's own
+  format, reproduces PySR's strings character by character); `to_dict` / `from_dict` (lossless, keeps `fixed`);
+  `evaluate` (NumPy float64, optional record of the largest intermediate); `TorchExpr(expr, variable_names, dtype)`
+  (all k free constants in one `nn.Parameter` `c`, order of `constants(expr)`; no clamp, no `nan_to_num`;
+  `current_expr()` returns the tree with the present constants); `with_constants`; `round_trip(expr, X, names,
+  reference, tol=1e-5)`; `horner_string` (cubic: C = 13, k = 4); `expr_hash`.
+- Sign folding: `x * -1.5` has one constant; `-x^2 = -(x^2)`; `u^2` → `square(u)`; another literal integer exponent →
+  `pow` with a fixed exponent (integer-power semantics); any other exponent → real power (base > 0, audit-enforced).
+- **Verified against Julia** (fixture embedded in the test file: 24 rows, 7 runs, 26 equations, Float64 searches,
+  `print_precision=17`; plus 2 equations with `ppow` and `softplus` on 10 rows): translation equals PySR's own prediction to ≤ 1e-12 (rule: 1e-5), in float32 torch to
+  ≤ 1e-5; the recomputed loss equals the CSV loss to 1e-9 relative, for the weighted L2 and for the gauge loss, free
+  form and all four templates; `T.complexity` equals PySR's complexity column; for templates the column is the sum
+  over the sub-expressions. A Float32 template search (`0.3f0` literals) prints 8 digits and agrees to < 5e-6.
+- Not verified: template *parameters* (`p[1]`; parsed as `param` nodes, nothing downstream uses them — our templates
+  have none). A free constant exponent that happens to be an integer is re-read as a fixed integer power after
+  `to_string` (use `to_dict` for hand-over).
+- For the runner: the round-trip check of the plan needs the search's own predictions on the target rows; the runner
+  should export `model.predict(X, index=i)` per hall-of-fame member into the seed directory (NumPy, no torch), and
+  the check is `translate.round_trip(expr, X, names, reference=pred)`. Without predictions the loss comparison
+  (`operators.gauge_loss_numpy` on `translate.evaluate`) is the fallback; both were exercised in the tests.
 
-## 4. `audit.py` — algorithm (not written, not measured)
+## 4. `audit.py` — implemented
 
-Vectorised over boxes with NumPy; every node carries `(lo, hi)`, optionally gradient intervals `(N, d)`, and the
-largest magnitude in its subtree.
+`audit(expr_or_string, box=None, limit=1.0, gauge="oscillation")` → `AuditReport` (`passed`, `domain`, `magnitude`,
+`to_json()`, `summary()`); `domain_safety`, `magnitude_bound`, `enclose`, `audit_trajectory`, `audit_box(x_floor=)`.
+A template result is translated first (`translate.parse_template_string`), then audited like any tree.
 
-**Enclosures.** Float64 endpoints, rounded outward after every operation: one `nextafter` step for `+ − * /` and
-`sqrt` (correctly rounded), a relative margin of 64 ε ≈ 1.4e-14 plus one step for libm functions (not correctly
-rounded, not guaranteed monotone). Then intersected with the operator's mathematical range from `OPS` — needed so
-that `tanh` can be certified ≤ 1. Products use the convention 0·∞ = 0 (IEEE 1788), ∞ − ∞ → (−∞, ∞). `ppow` and real
-`pow` are monotone in each argument separately, so the four corners give the exact range. `sin`/`cos`: test for an
-interior extremum with a slightly enlarged interval. Overflow to ±∞ is a valid outward bound.
+**(a) Domain safety, sound.** Outward-rounded float64 interval arithmetic on every node (one ulp for + − * / sqrt, 64
+ulp + one for library functions), intersected with each operator's range; forbidden sets: 0 for `/`, `inv`, negative
+integer powers; (−∞, 0] for `log`, `sqrt`, real-power bases; (−∞, −1] for `log1p`; every node below
+`OVERFLOW_CAP = 1e30`. Forbidden sets are dilated by `τ = 1e-5·max(1, largest magnitude in the argument's subtree)`
+(float32 allowance; heuristic, more rejections only). Flagged boxes are bisected along the variables the offending
+node depends on, to 2⁻¹⁰ of a side or 200k boxes. Status `safe` / `unsafe_proven` (a point inside the dilated
+forbidden set or with an overflow; or a sign change of a denominator between corners of a box on which the
+denominator is continuous) / `not_proven_safe`. **Only `safe` passes.**
+- Verified: enclosures contain 600 random samples per case on several hundred random trees (700 drawn) over the
+  *whole* vocabulary (Stage 1, trig, raw arm, audit-only operators) on random sub-boxes over three decades of size, and the derivative enclosures
+  contain the autograd derivatives; each elementary enclosure is tight to 0.1 %; the four equations of the earlier
+  study (`c/(r − 0.017)` and its three descendants) are rejected as `unsafe_proven` within milliseconds; a pole whose
+  effect a 100001-point grid cannot see is rejected; 150 random poles inside the box are all rejected, 60 poles
+  outside are all accepted; box-edge pole, removable singularity, overflow, `log`/`sqrt`/power cases.
+- **False-rejection rate, measured:** of 307 random Stage-1 trees (depth ≤ 4, constants N(0, 1.5)), 302 stayed below
+  the cap in 4000 random evaluations each and the audit accepted all 302 (0 false rejections); the 5 rejections are
+  real overflows. This is for random trees, not for search output.
+- Limits: real arithmetic with the constants as parsed; library accuracy ≤ 64 ulp is assumed, not proven; `sqrt` at
+  exactly 0 is rejected by design (infinite slope) — this concerns raw `sqrt` only, `sqa` is total.
 
-**Domain safety (sound).** Forbidden sets: `/`, `inv`: 0; `log`, `sqrt`, real-power base: (−∞, 0] (0 excluded for
-`sqrt` because of the infinite slope); `log1p`: (−∞, −1]; negative integer power: 0. Plus a rule that applies to
-Stage 1 too: every node must stay below `OVERFLOW_CAP = 1e30` in magnitude. A box is certified when no enclosure
-touches a forbidden set dilated by `τ = 1e-5 · max(1, largest magnitude in the denominator's subtree)`. Flagged
-boxes are bisected (widest relative side) to a minimum size or a box budget; whatever is left **rejects**.
-Reported separately: *proven* (sign change of the denominator between corners of a box on which its own subtree is
-safe → a zero by the intermediate value theorem; or |denominator| ≤ τ at a sample point) and *not proven safe*.
-Two margins, to be stated as such: outward rounding makes the float64 enclosures rigorous; τ is an explicit,
-heuristic allowance for the float32 evaluation in the refit.
+**(b) Magnitude bound, tight.** Coarse grid → per box the natural enclosure ∩ centred form (forward-mode interval
+derivatives) → evaluation at centre and corners (a value above the limit **fails**, witness kept) → bisection along
+the side with the largest `sup|G_i|·w_i` → at 2⁻¹⁰ of a side or at the budget (60k boxes) a dense grid of n^d
+sub-cell centres with margin `Σ sup|G_i|·w_i/(2n)`. Status `certified` / `not_refuted` (no evaluation above the
+limit, but not certified either; `[sup_lower, sup_upper]` reported) / `failed`. As the plan says, only `failed`
+fails. Comparisons use `limit·(1 + 1e-9)`. The oscillation gauge (§8, D1) cuts the x-range into slabs adaptively
+and encloses the whole range of f on a slab in a window of width 2·limit; it fails only on a pair of evaluations
+at one x whose difference exceeds 2·limit. Top-level terms that depend on x alone are dropped first (exact).
+- Verified: known suprema (`0.9·tanh`, exact saturation at 1.0, oscillation on the asymmetric box); the dependency
+  case `0.9·(sin²(3ζ) + cos²(3ζ))·tanh(ϱ − 5)` (naive enclosure ±1.8, truth 0.9) is certified with upper bound
+  0.9971 after 2459 boxes in 20 ms; a bump of height 1.05 and width 0.025 × 0.25 that the coarse grid misses is found
+  and fails with a real evaluation, the same bump at 0.95 passes; brute-force agreement on random bounded trees;
+  the witness of an oscillation failure is a pair of evaluations at one x.
+- Trajectories: `audit_trajectory` (domain safety, rigorous range enclosure on 1024 slices, evaluated range on the
+  full interval and on the training range, their ratio, optional `value_range` check with the tight machinery).
 
-*Soundness argument.* Each elementary enclosure contains the exact range (rounding margin ≥ library error), so by
-induction the enclosure of every node contains its range on the box. A restricted operator is certified only if
-that enclosure is disjoint from its forbidden set. Bisection covers the parent (closed boxes sharing a face), so
-the certified leaves cover the box. Every other outcome rejects: over-estimation costs false rejections only.
-Limits: the statement is about the expression with the constants as parsed, in real arithmetic — **the refit moves
-the constants, so the audit has to be repeated on the refitted equation**; the plan only says "before any refit".
+## 5. `targets.py` — implemented (definitions as designed in the first session)
 
-**Magnitude bound (tight).** (0) Coarse grid over the whole box: an evaluation above the limit or non-finite fails
-at once. (1) For each box the natural enclosure intersected with the centred form
-`f(c) + Σ_i G_i(B)·[−h_i, h_i]` (`f(c)` as a thin interval, `G_i` from forward-mode interval derivatives). Certified
-if `sup|F| ≤ limit·(1 + 1e-9)`. (2) Otherwise evaluate at centre and corners: a value above the limit **fails**
-(witness kept). (3) Otherwise bisect the side with the largest `sup|G_i|·w_i`. (4) At the minimum size
-(2⁻¹⁰ of each side: 2.2 mm, 1.5 mm, 0.005 in x) or at the budget: `n^d` evaluations at sub-cell centres, margin
-`Σ_i sup|G_i|·w_i/(2n)`; a value above the limit fails, `max + margin ≤ limit` certifies, the rest is **undecided**
-with its location. Derivative ranges needed: `tanh′`, `atan′ = linv`, `erf′` even and decreasing in |x|;
-`softplus′` = sigmoid; `l1p′ = sign(x)/(1+|x|)`, `[−1, 1]` across 0; `sqa′` unbounded across 0 (centred form then
-unavailable, natural enclosure still valid); `linv′ = −2x/(1+x²)²` with extrema ∓3√3/8 at ±1/√3;
-`∂_x ppow = y·ppow·l1p′(x)`, `∂_y ppow = ppow·l1p(x)`.
+**Target (iii)** `build_residual_target(log_rho_teacher (M,S,NZ,NR), log_rho_base (S,NZ,NR), slice_p, energy_w,
+n_hits, z_mm, r_mm, response=, a_bar=, n_per_slice=650, gamma=0.5, halves=, seed=)`:
+`y_s(c′) = ln(R_s ρ_T)(c′) − ln(R_s ρ_B)(c′)`, teacher = probability mean of the members; abscissae = centroid of
+the tilted response `S = R ρ_B / (R ρ_B)`; `x = x(p_s)` identical within a slice; masks z′ < 1150 mm, first z row,
+last ring, `Ā > 0.05`, ≥ 30 training hits, teacher SE ≤ 0.05 nat (skipped and flagged for one teacher);
+`p_s ≥ 0.0895 GeV` enforced (raises); fixed-size systematic sampling with `π ∝ ω^γ`, HT weight `ω/π`; `y` has
+HT-weighted mean zero per slice; rows sorted by slice (contiguous). Seed-null `y_null = κ[ln R ρ̄_A − ln R ρ̄_B]`,
+`κ = sqrt((1/M)/(1/a + 1/b))`, same rows and weights. `event_slices(p, 12)`; `estimate_response(train, slice_of_event,
+S, K)` (sparse `R_s`, energy and hit counts per cell; torch, training split); `null_loss`; `save_target` (refuses
+non-contiguous slices) / `load_target_arrays`.
+- Verified on synthetic maps: fixed sample size; HT estimator unbiased (600 draws) and the unweighted mean biased;
+  every mask; weights = ω/π; the true δ has gauge loss < 1e-25 and stays there under `f + c(x)` while the plain L2
+  does not; the stored `y` is unchanged when a constant per slice is added to the teacher; the seed-null has the
+  noise sd of the full teacher (within 25 %) and no signal; response smoothing and centroid against a direct
+  computation; the file is read by `search.load_target`. On synthetic showers: rows of `R_s` sum to 1, energy per
+  slice = number of events (85 % of the response mass leaves the centre cell there — synthetic hits, not a
+  detector number).
+- **Not done:** no real target has been built — the final baseline (Track-A finalist) and the full teacher ensemble
+  do not exist yet. Not measured: the Jensen difference to the hit-level mean, the size of the centroid
+  approximation `Φ(f) − f(z̄, r̄)`, the number of cells that survive the masks per slice.
+- Caveat kept from the first session: slices at event quantiles are uniform in p, so the lowest slice spans roughly
+  x ∈ [−1, 0.1].
 
-**Gauge.** `sup|δ| ≤ 1 nat` is not defined for a search with the gauge-invariant loss: `f` and `f + c(x)` are the
-same model. Planned: drop top-level additive terms that depend on `x` alone, then bound
-`g = f − f(zt_ref, rh_ref, x)` with a reference point (default `(1, 1)` = 260 mm, 21.9 mm). This is exactly
-gauge-invariant. For the normalised correction `δ_eff = f − ln E_base[e^f]`: `|δ_eff| ≤ osc_x(f) ≤ 2 sup|g|`, so
-limit 1 on `g` guarantees `|δ_eff| ≤ 2`, limit 0.5 guarantees 1. `δ_eff` itself needs the baseline and belongs in
-`refit.py` / `checks.py`. Templates have a fixed form and use `gauge="none"`.
+**Target (i)** `fisher_scores(model, train, columns, provider_attr="provider")` → per-event
+`F_e,j = Σ_i w_i (∂_j ℓ_i)²` by central differences of the per-hit folded log-likelihood on common fold points
+(`hit_loglik` equals `common.event_nll` to 2e-5); `trajectory_weights` (points at event quantiles, `n_g·F_jj(x_g)`);
+`build_trajectory_target` → `X (G,1)`, `y (G,n_out)`, `weights (G,n_out)` (mean 1 per output, `nat_factor` back to
+nats), `guesses_json` = `list[list[str]]` of Horner cubics; points outside x ∈ [−1, 1] and outputs without Fisher
+information are refused.
+- Verified: **the weights are the expected Hessian, not the score covariance** — on Gaussian hits the estimator
+  equals the numerical Hessian of the loss (2 %) while the squared event score is smaller by `Σ w_i²`; on synthetic
+  showers drawn from a toy two-parameter model (300 events × 200 hits), `fisher_scores` gives 0.796 and 1.329
+  against second differences of the mean NLL of 0.802 and 1.341 (within 1 %; the test allows 15 %), while the
+  squared event score is 0.0045 and 0.0067 — smaller by the number of hits.
+- **Not verified:** `provider_attr` on a real Track-A model (`LastRing.provider` is a property there — the swap may
+  need a setter); the neglected off-diagonal Fisher terms; `E[score | x] = 0` at the finalist.
 
-**Trajectories.** Same machinery on `x ∈ [−4.2, 1.4]`: finiteness, numerical and enclosed value range on the full
-interval against `[−1, 1]`.
+**`.npz` schema** (`schema_version = "sfm.sr.target/1"`): `X`, `y`, `weights`, `variable_names`, `kind`, `loss`,
+`meta_json`; residual: `slice_id`, `slice_p`, `slice_x`, `cell_iz`, `cell_ir`, `pi`, `omega`, `seed_se`, `y_null`;
+trajectory: `output_names`, `nat_factor`, `event_fraction`, `fisher_diag`, `guesses_json`.
 
-**Required tests.** Reject `c/(r − 0.017)` in metres and `c/(rh − 0.7763)`; the four equations of
-`sr_residual.json`; pole between sample points, on a box edge (`1/rh`), removable singularity (`x/x` rejects by
-design), `ppow(zt, 400)` (overflow), `exp(square(zt)*rh)`; accept smooth Stage-1 expressions. **The
-false-rejection rate on random valid expressions was requested and has not been measured.**
+## 6. `refit.py` — implemented, registration is a stub
 
-## 5. `targets.py` — definitions (not written)
+- `CorrectedModel(base, correction, freeze_base=False)`: `log_softmax(log P_base + f(zt, rh, x))` at the cell
+  centres, f in float64 with all free constants trainable, no clamp, no `nan_to_num`; a non-finite f raises
+  `FloatingPointError`. `expression_correction(expr)`; `check_gradients(model, data)`.
+- `fit_candidate(model, train, val, FitConfig, label=)` = `sfm.train.fit` + **the audit of the refitted equation**
+  (`audit_refit`, `audit_passed` in the result). It refuses to run unless `SFM_SR_REFIT_ALLOWED=1` (to be set in
+  the H200 run-book) or `synthetic=True`.
+- Controls: `control_c1(base)` (baseline alone, all constants trainable, same `FitConfig`); `control_c2(base, k)`
+  (polynomial in rescaled `zt`, `sqrt(rh)` and `x`, first k monomials in graded order without the constant and the
+  pure powers of x, zero start); C3 is `targets.build_residual_target(halves=...)`.
+- `SubstitutedProvider(provider, {name: expr})` for trajectories, `k = provider − replaced rows + constants`.
+- `register_refit` raises `NotImplementedError`; its docstring lists what the H200 implementation must do.
+- Verified on synthetic showers (hits drawn from baseline × exp(0.8·tanh(1.5 zt − 1.5)), 500 events × 300 hits, CPU,
+  300 steps): from the start (0.5, 1.0, −1.0) the fit reaches (0.798, 1.499, −1.517), truth (0.8, 1.5, −1.5); NLL on
+  the synthetic validation set 16.39404 at the start, 16.36762 after the fit, 16.36755 for the generating model;
+  no skipped batch; the refitted tree passes the audit; C2 with 3 constants starts at the baseline and ends at
+  16.37578, worse than the equation; strict mode raises on `log(zt)`. (Synthetic numbers; one seed.)
+- **Not run:** any refit on real data, any validation likelihood of a candidate, any registry call.
+- Requires `SFM_ALLOW_CPU=1` for CPU tests since `sfm.train.fit` now refuses to run without CUDA.
 
-**Target (iii).** For slice `s` with momentum `p_s`:
-- (a) Teacher: probability mean of the ensemble, `ln P̄_T = logsumexp_m ln P_m − ln M`; `ρ = P/V_cell`.
-- (b) Smoothing by a train-estimated response matrix, energy-weighted, per slice:
-  `R_s[c′, c] = Σ_{i: cell(h_i)=c′} w_i · (1/K) Σ_k 1{cell(h_i + R_e u_ik) = c} / W_s(c′)`, with
-  `W_s(c′) = Σ w_i` over training hits of the slice's events centred in `c′`.
-  `y_s(c′) = ln (R_s ρ^T_s)(c′) − ln (R_s ρ^B_s)(c′)`, both maps evaluated exactly at `p_s`.
-  Chosen over the hit-level mean of `ln g_T − ln g_B` because it needs the maps at 12 momenta only, is
-  deterministic given `R`, and is reused unchanged for the seed-null. The two differ by a Jensen term (mean of logs
-  against log of mean within a cell) that cancels to first order in the difference; to be measured on a subsample.
-- Abscissae: not the cell centre but the centroid of the tilted response,
-  `S_s[c′, c] = R_s[c′, c] ρ^B_c / (R_s ρ^B)(c′)`, `(z̄, r̄)(c′) = Σ_c S_s[c′, c]·(z_c, r_c)`. `S` is the exact
-  derivative of `ln R(ρ_B e^f)` at `f = 0`, so this removes the first-order error; near the axis the box average
-  of r for a hit at r ≈ 0 is about 18 mm, not 0.
-- Weights: `ω_s(c′) = W_s(c′)/N_s` (energy share). Then the within-slice ω-weighted variance of the error is
-  ≈ 2·KL between the corrected baseline and the teacher, both folded (second order).
-- (c) Masks: z′ < 1150 mm, not the first z row, not the last ring (ring 0 kept), `Ā > 0.05`, a minimum hit count
-  per cell (about 30), standard error of the teacher mean `std_m(ln R ρ_m)/√M ≤ 0.05 nat` (skipped and flagged for
-  a single teacher), `p_s ≥ 0.0895 GeV` enforced.
-- (d) Twelve slices: events in quantile bin s, `p_s` = the bin median. About 650 cells per slice, fixed-size
-  systematic sampling with inclusion probability `π_c ∝ ω_c^γ` (γ = 0.5 proposed, so tail cells are represented;
-  units with π ≥ 1 taken with certainty), Horvitz–Thompson weight `ω_c/π_c`. The residual itself is not used in
-  the design.
-- (e) Gauge: the stored `y` has HT-weighted mean zero per slice, so the plain weighted L2 of `f ≡ 0` is the null
-  loss.
-- Approximation when the fitted correction is applied to the unsmoothed log-density: `Φ(f) := ln R(ρ_B e^f) −
-  ln R ρ_B` is replaced by `f` at the centroid — exact to first order, wrong by the curvature of `f` across the
-  tilted response. Measured as the weighted within-slice rms of `Φ(f)(c′) − f(z̄, r̄, x_s)` against the rms of `y`
-  and of the fit error. The likelihood refit uses the true fold, so the approximation affects the search target
-  only.
-- Caveat to raise: slices at event quantiles are uniform in p (the sample is balanced in p), so the first slice
-  spans roughly x ∈ [−1, 0.1], where AUDIT flags 12–13 put the headroom.
+## 7. `checks.py` — implemented
 
-**Seed-null (C3).** `y_null = κ·[ln R ρ̄_A − ln R ρ̄_B]` on the same rows and weights, `κ = sqrt((1/M)/(1/a + 1/b))`
-(= ½ for equal halves), so its noise variance equals that of the full-ensemble teacher.
+`sign_changes(v, min_peak)`, `count_extrema(v, prominence=0.01)`, `containment(P, z_edges, r_edges)` (r50, r90, z50,
+z90), `monotone_sequence(values, tol=0.5 mm)`, `slope_sign_changes(log_rho, coord, start)`, `modulation_expr`
+(f minus f with sin = cos = 0), `template_modulation`, `modulation_amplitude` (≤ 0.3 nat on the extended box with the
+audit's tight machinery; sign changes inside / outside the data box, lobes ≥ 0.003 nat, ≤ 4 inside and 0 outside),
+`trig_periods` (local period range of every sin / cos along z′ and r from interval derivatives of the phase),
+`period_check` (1650/k mm, k = 1…8, 3 %, > 570 mm = trend), `period_band_coverage`, `seed_null_comparison`.
+- Measured: the match bands of ±3 % cover between 25 % and 40 % of the testable period interval — the check has
+  weak specificity (a match is not proof of copying, a non-match is weak evidence).
+- **Not written:** the driver that evaluates a refitted model at 0.05, 0.1, 1, 5, 20, 30, 50 GeV and feeds these
+  functions (it needs the refitted model, i.e. the H200); the tail-slope check against the baseline; "constants
+  stable across seeds" (to be done as a comparison of the fitted functions on a common grid, §8.7).
 
-**Target (i), Fisher weights.** `ΔNLL ≈ ½ ∫ n(x) Σ_jk Δ_j F_jk Δ_k dx`. The curvature is the *expected Hessian*,
-which for the cross-entropy `−Σ_i w_i ℓ_i` (`ℓ_i = ln g_i − ln M_e`) is `F_jk(x) = E[Σ_i w_i ∂_jℓ_i ∂_kℓ_i | x]`;
-the covariance of per-event scores is **not** the same thing, because the event NLL is an energy-weighted
-pseudo-likelihood. Diagonal weights `w_gj = n_g·F_jj(x_g)`, `n_g` = event fraction at point g, so that
-`Σ_g w_gj Δ_j(x_g)² ≈ 2·ΔNLL_j`. Estimator from training batches: `F̂_jj = mean_e Σ_i w_i (∂_jℓ_i)²`, `∂_jℓ_i` by
-central differences of the per-hit folded log-likelihood with common fold points (a provider wrapper that adds a
-shift to column j). Assumes E[score | x] = 0 and neglects off-diagonal terms. Points at event quantiles of x;
-layout `X (N, 1)`, `y (N, n_out)`, `weights (N, n_out)` normalised to mean 1 per output with the factor to nats
-stored; guesses = weighted-least-squares cubics in Horner form, `list[list[str]]`.
+## 8. Decisions taken in this session (mathematics) and plan rules they touch
 
-**`.npz` schema** (planned): `X`, `y`, `weights`, `variable_names`, `slice_id`, `slice_p`, `slice_x`, `cell_iz`,
-`cell_ir`, `pi`, `omega`, `seed_se`, `kind`, `loss`, `schema_version`, `meta_json`; rows sorted by slice.
+**D1. Gauge of the magnitude bound.** Taken: `gauge="oscillation"`, limit 1 nat —
+`H = sup_x ½[sup_{z′,r} f − inf_{z′,r} f] ≤ 1`, i.e. the plan's `sup|δ| ≤ 1` in the most favourable gauge
+(`min_c sup|f − c(x)|`). Why not the earlier proposal `sup|f − f(ref, x)| ≤ 1`: it depends on the reference point by
+up to a factor 2 in the tested quantity and contradicts the templates — `0.99·tanh(ζϱx)` satisfies the plan's rule
+as written (|f| ≤ 0.99) and "fails" the reference rule at 1.98 with the reference (260 mm, 21.9 mm); it passes with
+the reference at the origin. The oscillation is reference-free, exactly gauge-invariant, and implied by both other
+readings, so the tanh templates pass by form. In every reading the guarantee on the normalised correction
+`δ_eff = f − ln E_base[e^f]` is the same: `|δ_eff| ≤ 2H ≤ 2 nat`; a guaranteed `|δ_eff| ≤ 1` needs `limit=0.5`.
+All three gauges are implemented (`gauge=`), the audit report records which one was used.
 
-## 6. `refit.py` — design (not written)
+**D2. Stage-2 template.** Taken: the registered Stage-2 form stays the literal `tanh(f) + 0.3·tanh(a)·env·sin(ph)`.
+It contains the Stage-1 form `tanh(f)` as the special case a → 0, so the ablation is nested and a gain can only come
+from the modulation; the `0.7·tanh(f)` variant caps the trend at 0.7 and would bias the comparison against Stage 2.
+`|δ| ≤ 1 nat` is therefore not guaranteed by the form (bound 1.3) and is decided per equation by the audit, as the
+plan's gate already lists it. `s2_modulation_unit` stays in the code as a labelled extra arm, not run unless the
+user asks.
 
-- `log_softmax(log P_base + f(zt, rh, x))` at the cell centres; all free constants trainable; a non-finite value
-  raises; also a gradient-finiteness check (`sqa` at exactly 0 gives a NaN gradient).
-- Trajectory substitution: replace chosen columns of a provider by translated expressions of x; k = provider count
-  minus the replaced rows plus the expressions' constants.
-- C1: the baseline alone on the same schedule. C2: tensor polynomial in `(zt, sqrt(rh), x)`, first k monomials in
-  graded order excluding pure powers of x (invisible to the softmax), inputs rescaled to [−1, 1], zero start.
+**D3. `ppow` exponent.** Confirmed with Julia that `constraints["ppow"] = (7, 1)` admits `ppow(zt, rh)`. Taken:
+`complexity_of_variables` stays 1 (the caps 18 / 30 and "a cubic is C = 13" depend on it); members with a
+non-constant exponent are removed by `operators.violations` before the audit, so no such equation is audited,
+refitted or counted. Consequence to report at Gate 2-pilot: the fraction of hall-of-fame members removed, and that a
+removed member can leave a hole in the front at its complexity.
 
-## 7. `checks.py` — checks and proposed tolerances (not written)
+**D4.** The audit is repeated on the refitted equation (`refit.fit_candidate`); already in A6 point 7.
+**D5.** Fisher weights = expected Hessian of the energy-weighted pseudo-likelihood (§5), tested against the score
+covariance.
 
-NumPy only; a grid baseline is extended by a power law in r and an exponential in z′ fitted to its last interior
-rings and rows.
+### Plan rules touched — for the user's confirmation
 
-| Check | Number | Proposed tolerance and reason |
-|---|---|---|
-| tails | largest `d ln ρ/d ln r` beyond 700 mm; largest `∂_z′ ln ρ` beyond 1450 mm | < −2 and < 0; also "not worse than the baseline" |
-| extrema along r and z′ | count per profile, corrected against baseline | turning point counted at prominence ≥ 0.01 nat (below the 0.02–0.05 nat reproducible ringing of AUDIT §3.5) |
-| sign changes of `∂_r ln ρ` (r > 200 mm), `∂_z′ ln ρ` (beyond z₉₀) at 0.05, 0.1, 1, 5, 20, 30, 50 GeV | count | zero, and not more than the baseline |
-| r50, r90, z50, z90 at 20 → 30 → 50 GeV | values | no reversal beyond 0.5 mm; direction compared with 10 → 20 GeV |
-| modulation amplitude | sup |m| on the extended box | ≤ 0.3 nat |
-| modulation sign changes | per z′ and r profile | lobes with peak ≥ 0.003 nat; ≤ 4 inside the data range, 0 outside |
-| period | nearest 1650/k, relative distance | match within 3 %; > 570 mm = trend; only k = 3…8 can match |
+1. **`sup|δ| ≤ 1 nat` (§7) is evaluated as the half-oscillation over (z′, r) at fixed x** (D1). Alternatives ready:
+   reference gauge at limit 1; `limit=0.5` for a guaranteed `|δ_eff| ≤ 1 nat`.
+2. **"An equation fails only if an actual evaluation exceeds the bound" is applied literally:** a result that is
+   neither certified nor refuted (`not_refuted`) passes, with its interval reported. Stricter alternative: require
+   `certified`.
+3. **Additions to the domain check that only reject more:** the overflow cap 1e30 on every node (applies to Stage 1,
+   which is pole-free but can overflow), the float32 allowance τ around forbidden sets, raw `sqrt` rejected at 0.
+4. **"Exponent of `ppow` a constant" is enforced after the search** (D3), not inside it.
+5. **"Probability-proportional sampling" uses the size measure ω^0.5** (`gamma=0.5`; ω = energy share), with exact
+   Horvitz–Thompson weights; `gamma=1` is the strict reading and is one argument away.
+6. **"Refit: all constants trainable" is read as baseline and equation together** (`freeze_base=False`), which is
+   what makes control C1 meaningful; k of the equation and k of the whole model are reported separately.
+7. **C2** is a polynomial in (ζ, √ϱ, x) with the equation's k, without the monomials the softmax cannot see — the
+   plan says only "smooth tensor polynomial with the same number of constants".
+8. **Complexity weights** (first session, still open): `sqa` and `linv` cost 2, not 1.
 
-## 8. Points where the plan is ill-posed (to raise)
+### Ill-posed points that remain (not decided here)
 
-1. `sup|δ| ≤ 1 nat` is gauge-dependent (§4).
-2. The literal Stage-2 template is bounded by 1.3, not 1.
-3. "Integrable tails" follows from the baseline's tail once `|δ| ≤ 1`; the slope criterion is a regularity
-   condition and the baseline itself may fail it.
-4. Checks at 0.05, 30 and 50 GeV evaluate the baseline outside its training range; only "no worse than the
-   baseline" is well defined there.
-5. Period check: bands of ±5 % around 1650/k cover 53 % of 190–570 mm, ±3 % about 32 % — weak specificity.
-6. "Modulation" is undefined for a free-form Stage-2 expression; proposed: f minus f with every sin/cos set to 0.
-7. "Constants stable across seeds" has no meaning across structurally different expressions; compare the fitted
-   functions on a common grid.
-8. Fisher weights: expected Hessian, not score covariance (§5).
-9. `ppow` exponent cannot be forced constant by `constraints` at unit variable complexity (§2).
+- "Integrable tails" follows from the baseline's tail once the correction is bounded; the slope criterion is a
+  regularity condition that the baseline itself may fail. Checks at 0.05, 30 and 50 GeV evaluate the baseline
+  outside its training range: only "not worse than the baseline" is well defined there.
+- "Modulation" for a free-form Stage-2 expression is defined here as f minus f with sin = cos = 0 (`checks`).
+- "Constants stable across seeds" has no meaning across structurally different expressions.
+- The gauge loss makes pure functions of x free: the confirmation run produced `… − x` and `… + 0.156` members with
+  unchanged loss at higher complexity. The hall of fame should be de-duplicated modulo gauge terms
+  (`audit.drop_gauge_terms`) before counting front members.
 
-## 9. To confirm with Julia (Julia was not installed in this session)
+## 9. Confirmed with Julia (25 Nov 2026; Julia 1.13.4, PySR 2.7.3, SymbolicRegression.jl 2.7.2, 4 threads, seconds each)
 
-`operators.UNCONFIRMED` lists them. In short: custom operator strings accepted and type-stable; the three
-dictionaries accepted with custom names; argument-size limits counted with operator weights; `ppow(·, variable)`
-admitted by `(7, 1)`; elementwise loss normalised by `Σw`; the gauge loss (fields `X`, `y`, `weights`, `n`,
-`eval_tree_array` on a tree and on a template expression) equal to `gauge_loss_numpy` on exported rows;
-`batching=False`; template combine arithmetic with literals and `^2`; template complexity; `print_precision` in the
-CSV; multi-output `weights (N, n_out)` and `guesses` as `list[list[str]]`; the string formats of §3.
+Scripts and raw output: scratch directory `sr_math/` of the session (`confirm_julia.py`, `fixture_julia.py`,
+`ppow_julia.py`; not kept in the repository — the durable evidence is the fixture inside `tests/test_sr_translate.py`).
+Every item of the first session's list is confirmed (`operators.CONFIRMED_WITH_JULIA`):
+
+| Item | Result |
+|---|---|
+| custom operators, three dictionaries keyed by custom names | accepted; Float64 and Float32 |
+| argument-size limits | counted with operator weights (`exp(tanh ζ + tanh ϱ + tanh x)` rejected at weighted 11 > 9, unit count 8) |
+| `ppow(·, variable)` | accepted by `(7, 1)` → scan needed (D3) |
+| nesting semantics, complexity | Julia's `check_constraints` / `compute_complexity` agree with `violations` / `tree_complexity` on 14 hand-made trees |
+| weighted elementwise loss | normalised by Σw (1e-15) |
+| gauge loss, tree and template expression, `batching=False` | equals `gauge_loss_numpy` (1e-15) |
+| template combine with literals, `^2`, `sin`, `0.3f0` | works; template complexity = sum over sub-expressions |
+| string formats | free form `tanh(zt) * 0.53`, `erf(zt + -0.25) * 0.53`; template `u = #1 * 0.6; v = 0.3; w = square(#1)`; 17 digits |
+| multi-output | `weights (N, n_out)`, `guesses list[list[str]]`, `hall_of_fame_output{i}.csv` |
+
+Not confirmed here (runner's items): kill-and-resume, `from_file` for templates, thread scaling, convergence.
+`search.py` defaults to `print_precision = 15`; `operators.search_config` asks for 17 — 15 digits are inside the
+1e-5 rule but not bit-exact.
+
+## 10. What the runner worker needs to know (interfaces)
+
+- Targets: `targets.save_target(path, target)` writes the `.npz` that `search.load_target` reads. Residual target:
+  `loss_function = operators.gauge_loss_julia(3)`, `batching=False`, rows already slice-contiguous. Trajectories:
+  `elementwise_loss = operators.WL2_ELEMENTWISE`, `guesses = json.loads(str(npz["guesses_json"]))`. The seed-null
+  search uses the same file with `y_null` in place of `y` (write a second file with `y := y_null`).
+- Hall-of-fame scan: `operators.violations(translate.parse(eq), vocabulary)`; for templates on every sub-expression
+  (`translate.split_template_string`, variables `#k`).
+- Translation: free form `translate.parse(eq, names)`; template `translate.parse_template_string(name, eq)` or
+  `parse_template(name, {sub: string})` from `hall_of_fame.json["subexpressions"]`.
+- Round trip (Gate 2-pilot): export `model.predict(X, index=i)` per member from the search process (NumPy), then
+  in a torch process `translate.round_trip(expr, X, names, reference=pred)`.
+- Audit of the front (laptop, no data): `audit.audit(expr).to_json()`; send only `passed` members to the H200 with
+  `translate.to_dict(expr)` (lossless, keeps the template's fixed literals) and `translate.expr_hash(expr)`.
+- H200: `refit.CorrectedModel(base, refit.expression_correction(translate.from_dict(d)))`,
+  `refit.fit_candidate(...)` with `SFM_SR_REFIT_ALLOWED=1`; controls `control_c1`, `control_c2(base, k)` with the same
+  `FitConfig`; registration to be written there (`register_refit` docstring).
+
+## 11. Not verified
+
+- Anything on real data: target construction end to end, mask survival, Fisher weights of a real Track-A model.
+- The audit on real search output (only on random trees, hand-made cases and the earlier study's equations).
+- Library accuracy ≤ 64 ulp (assumed for the interval margins); the τ allowance is heuristic.
+- The budget behaviour of the magnitude bound for size-30 expressions with high-frequency structure (60k boxes,
+  then `not_refuted`); the cases tried here took tens of milliseconds.
+- Template parameters `p[i]`; a real refit; the checks driver at the seven momenta.
