@@ -1677,3 +1677,29 @@ bound of the correction after the gauge mechanism; finite gradients of every ope
 | S3 | constants of stripped gauge terms are not trained and not counted in k | they have no effect on the density |
 | S4 | finalist tail thresholds: radial log-log slope ≤ −2, depth slope ≤ 0 | the worker's numbers, not the plan's wording |
 | S5 | derivative of `sqa` at exactly 0 defined as 0 | next to the cusp the slope is finite but can be very large; the harness clips and counts |
+
+### 17.8 Live PySR runner — smoke tests a–f pass (commit `a75dedb`)
+
+Synthetic targets only, 8 threads except one run at 20, about 18 minutes of search time in total; this is not the
+campaign pilot. Detail and evidence: `results/m3_sr/smoke/STATUS.md`, `results/m3_sr/smoke/evidence/`.
+
+- **Kill and resume:** after a SIGKILL in the middle of a chunk the resume restores populations and hall of fame
+  hash-identical to the last finished chunk (24 populations × 27 members); the killed chunk's front is salvaged as
+  guesses; the fallback restart from the saved hall of fame works when the checkpoint is damaged; extension continues
+  the same seed.
+- **Accepted by PySR 2.7.3:** the five custom operators, the three constraint tables, the gauge-invariant loss,
+  Float64 with 17 printed digits, a template with its own loss expression (restorable in a new process), and the
+  multi-output search with weights of shape (N, n_out) and guesses as a list of lists.
+- **Round trip** in a separate process: |torch − Julia| ≤ 8.9·10⁻¹⁶ over 138 live members (rule 10⁻⁵). No search
+  process ever had torch loaded.
+- **Threads:** 20 threads give 1.86 times the evaluations per second of 8 (populations fixed at 24, shared laptop).
+- **Timings:** a warm start costs 0.6–5 s per chunk, the first chunk of a process 8–27 s (compilation), a restart
+  15–30 s. With 5-minute chunks the overhead is below 2 % and a kill loses at most the chunk in flight.
+- **Not verified:** real targets, convergence per complexity tier, 5-minute chunks, a nesting violation in live
+  output (none occurred in about 140 members), the multi-output fallback restart, SIGTERM.
+
+**For Gate 2-pilot:** on a trajectory-like target PySR wrote `exp(0.5·x) − 1` as `ppow(c, x)`, i.e. with the variable
+in the exponent; the "exponent a constant" scan removed 4 of the 13 members of that output. The rule therefore removes
+legitimate exponential trajectories unless `exp` takes that role; the gate should look at this on the real
+trajectory targets. Under the gauge loss a bare constant drifted to 187.8, which confirms the need for the gauge
+stripping of §17.7.
