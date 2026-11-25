@@ -597,3 +597,91 @@ guarded evaluation 39 s.
   appears; the predicted table; `UnguardedStart` and `DirtyClone` with the real machine id and a clean clone;
   `setsid` and `/proc` as the launcher and the stop helper use them; whether 5b finishes inside the grace period
   there; the 10 GB cap with real jobs; `flock` on its file system; durations; steps 9-11 at full length.
+
+---
+
+## 6. Ruling on the step-5a failures on the H200 (25 Nov 2026)
+
+Subject: step 5a on the H200 at `4dbd0ac` ended 5 failed, 102 passed, all five in `tests/test_provenance.py`; the
+worker's diagnosis (test fixtures, not the safeguard) and its fix, commit `7fdf96c`. Reproducers:
+`<scratch>/r3/`. Nothing ran on the H200; the H200 facts are those relayed by the orchestrator.
+
+**Ruling: the diagnosis is right for all five. Step 5a may be re-run at `7fdf96c`. If it passes completely, the
+batch continues with 5b and 6-8 as in section 5.6. If any test fails, it stays stopped.**
+
+**A miss of mine first.** Section 5.5 said that step 5a is not affected off the laptop and that no test asserts it
+runs on the laptop. I had looked for assertions about the laptop and not for fixtures that use the H200's own
+values as "another machine". These five were there to be found by reading.
+
+### 6.1 The diagnosis, test by test
+
+- The ten identity fields reported from the H200 (GPU name `NVIDIA H200`, 132 SMs, 2048 threads per SM, grid 1056,
+  torch 2.14.0+cu130, CUDA 13.0, cuDNN 92400, Python 3.13.12, both TF32 flags false) hash to `97b197a7`: the id
+  `h200-g1056-97b197a7` is reproduced exactly on the laptop. Changing any one field gives another id. So the
+  literal values in the old fixtures are the H200's live values.
+- With the live identity replaced by these fields for the whole process, the pre-fix test file (taken from
+  `4dbd0ac`) fails on the laptop in exactly these five tests, with the messages of the H200 log.
+
+| Test (pre-fix) | The "other machine" | Why nothing is refused on the H200, and why that is correct |
+|---|---|---|
+| `test_machine_tag_fields_and_id` | `with_(launch_grid=1056)` | the live grid is 1056: the tag is unchanged, so the id is equal (`:66`) |
+| `test_the_delta_function_refuses_mixed_tags` | `fake_tag(gpu_name="NVIDIA H200")` | identical tag and identical points: a legitimate pair (`:183`). The loop stopped there, before its `draw="emulated"` case |
+| `test_reference_set_of_another_machine_is_not_used` | H200 name, grid, SM count, threads | the "foreign" set is the live machine's own set, so `evaluate` finds it (`:260`) |
+| `test_mixed_streams_untagged_rows_and_live_paths` | H200 name and grid | the third row is on the live stream; three rows of one stream may be selected together (`:301`) |
+| `test_fit_refuses_checkpoints_and_done_markers_of_another_machine` | H200 name, `deterministic=False` | the tag written into the checkpoint equals the one already there (`:349`) |
+
+None of the production paths these tests exercise (`provenance.check_pairable`, `registry.reference_set`,
+`registry.select_1se`, `train._check_machine`, `MachineTag.id`) contains a grid or a GPU name as a constant. I see no
+way for any of the five to be a real defect that only shows on a grid-1056 machine.
+
+### 6.2 Same fold points on a grid-1056 machine
+
+Executed with the H200 identity imitated and the real laptop record `mlp_val_nll_ref1056.npy`
+(`<scratch>/r3/pairing_1056.py`):
+
+- H200-native against laptop-emulated, points tags equal and even the same values: `MixedTags`, machine differs in
+  `draw`, `gpu_name`, `launch_grid` and others.
+- Native against emulated on the same machine (same machine id and same stream id since B1): `MixedTags`, machine
+  differs in `['draw']`.
+- The bare laptop record: `MixedTags` from the delta function; `UntaggedArray` from `load_tagged`.
+- The laptop's emulated arrays dropped at the live reference-set path: `NoReferenceSet`; with a hand-made
+  `refset.json` beside them: `UntaggedArray` (no sidecar).
+
+The one soft spot is N3 of section 5.4: `save_tagged` would accept an emulated array onto an existing native file
+if the values are bit-identical, which is exactly the grid-1056 case. The numbers are then identical by
+construction and only the label is wrong; no campaign code saves emulated arrays. It should still be fixed.
+
+### 6.3 Commit `7fdf96c`
+
+- **Tests only:** the commit changes `tests/test_provenance.py` and `transfer/ENABLING_STATUS.md`;
+  `git diff 4dbd0ac 7fdf96c` over `src/`, `scripts/`, `configs/` and `common.py` is empty.
+- **Nothing weakened.** Every scenario keeps its refusal assertions; the foreign machine is now the live tag with
+  GPU name, grid and SM count changed relative to their live values. The id test checks seven single-field changes
+  instead of four; the delta test gained a `deterministic=False` case. Fixed file in place on the laptop:
+  `20 passed`.
+- **The tests notice a broken safeguard** (each mutation applied to the fixed file, laptop):
+
+| Safeguard switched off | Tests that then fail |
+|---|---|
+| `check_pairable` compares nothing | delta test, mixed-streams test, both imitation cases |
+| pairing ignores the settings (`draw`, `deterministic`) | delta test, both imitation cases |
+| `fit` does not compare the machine of a checkpoint or marker | fit test, both imitation cases |
+| machine directories do not depend on the machine | reference-set test, both imitation cases |
+
+- **The imitation is faithful for what these tests use.** `test_scenarios_are_machine_independent[h200]` replaces
+  the live tag's identity by the ten fields above and asserts the id `h200-g1056-97b197a7`; I confirmed the hash
+  independently. It does not imitate the device (the generator still draws on grid 144), which none of the five
+  scenarios uses. It also sets the start-up policy aside, which is not their subject.
+- No other test file contains a literal H200 value.
+
+### 6.4 What the first run already settled, and what to read in the second
+
+- From the reported counts (102 passed, no skips, all failures in one file): on the H200 the launch grid is 1056,
+  `test_refstream.py` passes there, the emulator test among it, and the start-up policy and the guard let the suite
+  run under the launcher.
+- Second run of 5a: the eight files hold 109 tests at `7fdf96c` (107 before, plus the two imitation cases; counted
+  by collection on the laptop). Expect `109 passed`, no `failed`, no `error`, `.exit` = 0. A skip would be new and
+  should be read before going on.
+- Unchanged by this ruling: sections 5.4 and 5.6.
+
+`results/registry.jsonl`, `results/test_access.log` and `common.py` have the SHA-256 of the first pass.
