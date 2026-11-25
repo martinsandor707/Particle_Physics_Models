@@ -12,6 +12,8 @@ directory (reproducers and logs; not part of the repository).
 **STATUS OF THIS FILE: complete (25 Nov 2026). All tests of section 4 have finished.**
 **Addendum: section 7, re-check of commit `ee462fc` (the fixes for B1-B5 and C2) - GO for starting the real run at
 `ee462fc`.** Sections 0 to 6 are as written for `c4f39fd` and were not changed by the addendum.
+**Second addendum: section 8, re-review of commit `a05c86e` (A2c control, scale floor, divergence handling) - GO
+for `warmstart-check warmstart-rerun a2c report` after the present job has ended.**
 
 ## 0. Files reviewed (SHA-256 of the content in commit `c4f39fd`)
 
@@ -568,3 +570,204 @@ Nothing ran on the H200 and no real-length fit exists; the lists "by reading onl
 section 4 stand. Stage 2 was not started (the gate function was called; no A11 fit). The new report was exercised
 on smoke rows only: its real-run inputs (converged fits, real warm starts, the H200's templates) are first seen on
 the H200.
+
+## 8. Re-review of commit `a05c86e` (A2c control, scale floor, divergence handling)
+
+25 Nov 2026, same reviewer, same rules as before (read-only; scratch output roots with reference sets made by the
+two-step `val_parity.py`; smoke mode only; no test split; no real Track A fit). Decisions of record: PLAN 17.11.
+The worker's account: STATUS section R3. Code at `HEAD` (`aee67a6`) equals `a05c86e` in every script, module and
+test. The real job runs on the H200 from `5ddfd9f`, whose five Track A files are those of `ee462fc` (section 7).
+
+| File | SHA-256 in `a05c86e` |
+|---|---|
+| `scripts/run_m2a.py` | `0a38533507ef7ccb09df5230bf27fd57b1c111c74d743257f1401b28ccff6a9b` |
+| `scripts/run_m2a_lib.py` | `e65f1478ee36346c3dc567adf58ed016fb35ff115bb9e52111ab44026354a4ab` |
+| `scripts/run_m2a_report.py` | `9acb49a4717fe8af8f4135488e08543dc80c7c0948c3f741d92f2861d85b42a7` |
+| `src/sfm/models/paramnet.py` | `1cd02599d66b7f02397e551543e47de1847fabbb3987b90ec401978dd3737d1f` |
+| `src/sfm/models/dist_factory.py` | `09612b3fe25e5c8ac7aa7dc7ec4fee08087bec5bd53602e173e28bb964112b8d` |
+
+`common.py`, `results/registry.jsonl`, `results/test_access.log`: hashes of section 0, before and after.
+
+### 8.1 Verdict
+
+**GO for `run_m2a.py warmstart-check warmstart-rerun a2c report` on the H200 at `a05c86e`, after the present job
+has ended. Nothing must be fixed first.** The command leaves every run of the present job untouched (8.2), applies
+the PLAN 17.11 rule as written (8.5), and A2c is the control proposed in B6 (8.3).
+
+Conditions: (i) pull only after the job's process has exited (8.2, last row); (ii) the findings of class (B) below
+before Stage 2 - none of them concerns the planned command's numbers.
+
+### 8.2 Hard constraint: the runs of the present job
+
+| Check | Result |
+|---|---|
+| run list | `--list`: the 102 lines of the reviewed listing are byte-identical (SHA-256 `8762ba00...` for that part); the additions follow in a block of their own. `listing`, every spec builder, the rules, the thresholds, `DEFAULT_PHASES`, `main`, `fit_config`, `Spec`, `verify_sources`, `guard_targets`, `phase_guards`, `phase_parity`, `phase_templates` are identical syntax trees |
+| what changed in existing phases | `_plr_decide`, `phase_plr`, `phase_stage0`, `phase_stage1p`, `phase_stage1x`: branches that are entered only for a run without a registry row (diverged or blocked); with every run registered they compute and record what the reviewed code did. `stage1_comparisons`: maps a superseded network run to its re-run. `run_spec`: a done run is returned at its `done.json` before any new line |
+| execution: the planned command on a copy of a finished smoke state made by the code of `ee462fc` | exit 0; the 64 registry lines of the old state byte-identical, 16 appended (14 re-runs, 2 A2c); `done.json`, `model.pt`, `init.json`, `fit_done.json` of all old runs unchanged; all old tagged arrays unchanged; the old keys of `decisions.json` unchanged, four new keys; all Stage-1 comparisons of the polynomial rungs (pairs, deltas, flags, two-seed means, kept lists) identical in the new report |
+| the same command a second time | no fit started, registry unchanged, decisions identical, `results.json` byte-identical |
+| the existing phases `plr stage0 stage1p stage1x` issued with the new code on that finished state | no fit started, registry unchanged, `decisions.json` and `plr.json` identical |
+| would new code fit differently? (only relevant if the default list were re-issued with it) | a polynomial run retrained by the new `run_spec`: same weights and validation array as the old code's row; the 14 network re-runs (fit_to version 3, step-0 parity evaluated before training): bit-identical to their originals |
+| comparators | not changed for any existing run. Where a re-run exists, tables and guard pairs name it explicitly (`A4n_s0_ws vs A2n_s0_ws`), and the original pair stays as a labelled row |
+| **pulling while the job runs** | **do not.** The report module is imported only when the report phase starts: a pull before that makes the old process load the new report, which calls functions the old library in memory does not have - the report phase would end with an error (fits and rows intact, no table). And every row registered after the pull (guards phase) would record the new commit although old code computed it |
+
+### 8.3 A2c
+
+- *Definition.* `A2c_s0`, `A2c_s1`: the structure of A2s, coefficients copied from the fitted A2s of the same seed
+  (`kl_map` 0.0 in smoke), T_A with 4000 steps, the frozen `lr_poly`, the seed of the rung (hence the same batches
+  and fold points as the rungs of that seed), fresh optimiser and cosine cycle; class `control`; comparator A2s of
+  the same seed. **This is the control of B6 (ii), and it is what "trained for the matched longer step budget"
+  means:** A2s plus exactly what every matched rung gets on top of A2s. (A single 8000-step cycle from the legacy
+  coefficients would be the other reading; it would not match the optimiser restart that the rungs have.)
+- *No rule consumes it.* Keep, replication, equal NLL, "cleaner", the kept lists, the guard targets and
+  `stage2_specs` read the comparison against A2s (or the rerun pair) only; A2c appears in its own section, in the
+  column "control: Δ vs A2c" and in the Stage-2 precondition "A2c finished". The section says "No pre-registered
+  rule consumes it ... decides nothing" and the report carries "NOT FINAL" while A2c is missing. The column stands in
+  the table of the pre-registered comparisons; its header should say "(decides nothing)" as the alternative column
+  does (C).
+- *What it shows (smoke).* A2c_s0 - A2s_s0 = +0.51 ± 0.24: the offset that section 2 (B6) found common to the six
+  rungs starting exactly at A2s (+0.50 ± 0.24) is the continuation. Against A2c those rungs are at +0.03 ± 0.07
+  (A7), -0.01 ± 0.04 (A8), -0.01 ± 0.02 (A7s), +0.01 ± 0.06 (A78), -0.08 ± 0.05 (A12): the control comparison is
+  also two to ten times sharper than the one against A2s.
+- *Are A2c6k and A2c_x2 needed?* **Not for the 19 matched rungs, and not unconditionally.** Rule proposed here,
+  before any Track A result has been read by the reviewer: **A2c_x2** is needed if and only if the rules use a
+  doubled-step rerun pair for some primary (then that row has no matched control: 4000 + 8000 steps against a
+  comparator of 8000); **A2c6k** is needed if and only if a mixture rung (A10, A10-2, A10-4, A10-5, A10g) passes the
+  keep rule or the one-seed equal-NLL rule (a mixture far worse than A2s needs no control for its training budget;
+  it also does not continue A2s's weights, so the control would bound, not match, its budget effect). In either
+  case the control runs before the content of A11 is decided. Both are additions to the list: **[confirm]**.
+  Until then the report's "not matched (...)" in those cells is the correct statement.
+
+### 8.4 Scale floor (`fit_to` version 3) and step-0 parity
+
+- *Mathematics: correct.* For a varying column the weight is 1 / max(s_j, F)^2, F = 1e-2 in raw units, s_j the
+  float64 standard deviation over the grid; the detection `s_j < F` and the constant-column rule are disjoint;
+  columns with `s_j >= F` keep the float32 `1 / var_j` of version 2 through an unchanged tensor operation, so
+  nothing changes for them; the weight is continuous at `s_j = F`.
+- *An absolute floor is the right kind.* Reproducer `<scratch>/fit_to_v3.py` (CPU, the pre-registered call; six
+  ordinary columns plus one extra column): worst ordinary column, as a fraction of its spread -
+
+  | extra column: std (raw units) | at mean 2: version 2 / version 3 | at mean 0 | at mean 46 |
+  |---|---|---|---|
+  | 2e-6 ... 2e-3 (below the floor) | 17 %, 15 %, 14 % / 1.3 %, 0.5 %, 0.7 % | 11 % / 0.4 % (std 2e-3) | 14 % / 1.8 % (std 2e-3) |
+  | 5e-3 (below) | 4.3 % / 1.9 % | | |
+  | 1e-2 (just above: not floored) | 1.6 % / 1.6 % | 0.7 % | 1.8 % |
+  | 2e-2, 5e-2 | 0.7 % (2e-2) | 0.3 %, 0.2 % | 1.1 %, 0.9 % |
+  | no extra column | 0.04 % | | |
+
+  The damage follows the absolute spread, not the spread relative to the mean (same picture at mean 0, 2 and 46):
+  the optimiser's step acts in raw units. The user's absolute form is therefore better founded than the relative
+  one suggested in section 3. With the floor the worst case is of the size of the healthy A1 warm start (worst
+  column 1.1 %, `kl_map` 5.5e-6 nat). Units: of the 22 momentum-dependent legacy columns, 21 are logs, logits and
+  similar unconstrained arguments by their names (|mean| below 10, std 0.10 ... 3.8), where 1e-2 is about one per
+  cent of the constrained quantity; `zs` (mean 46, std 32.5) is a length, for which the floor is practically
+  inactive - consistent with the table: what counts is the spread in the units in which the network's output
+  layer works, and a column with std above 1e-2 is outside the badly damaged range whatever its mean.
+- *"Bit-identical for the existing targets": true where no column lies below the floor* - by construction, in all
+  nine such cases of the reproducer (state dictionaries equal), in the worker's test over the eight net models at
+  their starting coefficients, and in the execution of 8.2 (14 of 14 re-runs bit-identical). Whether a **fitted**
+  target of the job has a column below the floor is what `warmstart-check` finds out on the H200.
+- *Step-0 parity: correct.* The step-0 network is scored with the registry's computation (unmodified
+  `common.test_nll` inside `deterministic()`, same points), saved as a tagged array (not a registry row) and paired
+  through `provenance.paired_delta` with the registered array of its source: `net_from` for every run fitted to a
+  polynomial run (pilots and A2n: A2s of the seed; net versions: their polynomial primary), `A0_init` for A1 (the
+  legacy coefficients at step 0). Seen in the logs of 8.2 for all 14. It does not disturb the training (re-runs
+  bit-identical).
+
+### 8.5 `warmstart-check` and `warmstart-rerun`
+
+- *The rule is PLAN 17.11, verbatim, and nothing else:* `warmstart_affected` returns (a) "a varying target column
+  has std < 1e-2" - varying by `fit_to`'s own constant rule, std in float64 on `default_lnp(48)` with uniform
+  weights, target rebuilt from the source run - or (b) "recorded `kl_map` > 1e-4 nat", read from the run's
+  `init.json`. The rebuilt warm start and its step-0 parity are reported and do not enter the decision.
+- *The rebuild is faithful:* same seed, same order (seed, context, build) and same arguments as `run_spec`, with
+  `fit_to_scale_floor=None`; judged by equality of the rebuilt and the recorded `kl_map`: 14 of 14 on a state made
+  in another session by the code of `ee462fc`, and again identical on the second issue.
+- *Cascade.* Re-runs are named `<name>_ws`; pilots first; the fit target stays the (never superseded) polynomial
+  run; a net version is compared with `A2n_s0_ws` when A2n_s0 was re-run (order guarantees it exists); `A1_ws` with
+  A0, `A2n_ws` with A2s; the guards phase runs on the pairs with the superseding names; conditional second seeds
+  and convergence reruns do not depend on a network run. It cannot loop: only runs made with a `fit_to` before
+  version 3 are checked, re-runs never. Originals keep their rows and files, are labelled "superseded: warm start"
+  in the Stage-0 table, the net column and the Initialisation table, and leave the rules through one mapping
+  (`decisions.json: warmstart_rerun.superseded`).
+- *If a re-run pilot changes `lr_net`,* every other network run is re-run with the new rate ("dependent"). That
+  goes beyond "if and only if (a) or (b)" and is **[within]** the pre-registration all the same: P-lr freezes one
+  rate for all network runs. Two remarks: B8-1 and C8-2 below.
+
+### 8.6 Divergence handling - rulings on the worker's definitions
+
+| Definition | Ruling |
+|---|---|
+| (i) a non-finite validation mean anywhere in the fit history | literal to "non-finite value", **but not conservative in one corner: a fit whose validation was non-finite once and that ends finite and good is declared diverged, is not registered, and is terminal** (checked: history NaN at step 500, then 18.121, 18.1205, 18.1203 -> diverged). Proposed: (i) applies to the last value or to a fit that did not recover; an earlier non-finite value is reported with the run like isolated skipped batches. **[confirm]**; it cannot matter for the planned command unless a re-run or A2c shows it |
+| (ii) non-finite per-event value at registration | **[within]** - the case of C1 |
+| (iii) "frozen": at least half the batches of the last evaluation window skipped | **[within]**; unambiguous (window = the last two history points); a healthy fit has no skipped batch |
+| (iv) "blow-up": last value more than 1 nat above the lowest of history, step-0 value, comparator | **[within]** as a threshold: the worst smoke fit after 60 steps is 0.05 nat above A2s. Property to know: against the comparator it would also label a stable but very bad model "diverged" (checked with a constructed history); no model of the list is expected within a factor 20 of that |
+| classes: pilots lose; exploratory rungs and the net column "diverged", no second seed; primary, base, control, rerun "diverged - awaiting diagnosis", no rule marks them failed; dependents "blocked"; the independent rungs finish | **[within]** the user's decision. A diverged A0 seed makes the drift rule "not evaluable" and the list continues: the user's wording ("for primary comparisons and controls the independent rungs still finish"), although A0 is the control behind a pre-registered stop; in the present job A0 is finished |
+| Stage 2 refuses while a diagnosis is pending | **sound** - it only adds caution; see B8-2 for two cases in which it can never be lifted |
+
+Not dropped silently: a diverged or blocked run appears with its status in the primaries, net, exploratory,
+Stage-0, secondary and P-lr tables and in the section "Diverged and blocked runs" with its record; it has no row in
+the convergence and Initialisation tables (those list finished runs). Exercised in 8.8.
+
+### 8.7 Findings
+
+**(A) before the planned command:** none.
+
+**(B) before Stage 2:**
+- **B8-1. `plr.json` keeps the old `lr_net` when the re-run pilots change it.** `phase_warmstart_rerun` records
+  the new rate in `decisions.json` and passes it to the re-runs, but `frozen_lr("net")` - which every later network
+  run reads, A11n of Stage 2 among them - still returns the old one; and `stage2_specs` names `A2n_s<seed>` as
+  comparator, not its superseding run. Only if `lr_net` changes; to be fixed with the Stage-2 review of B5.
+- **B8-2. Two states that Stage 2 can never leave.** (i) A warm-start re-run that diverged has no registry row, so
+  "warm-start re-runs missing" is raised for ever (for the net column there is no diagnosis path at all). (ii) A
+  diverged A2c seed keeps "A2c is not finished" even after a diagnosis (seen: refused with exactly that message;
+  the report then says "NOT FINAL ... run a2c", which cannot help either). Both need a divergence in the planned
+  command to occur; the gate should accept "diverged and diagnosed (or exploratory)" as finished.
+- **B8-3. Rule lines for a primary with a diverged seed.** The kept line and "equal NLL (both)" print "no" for it
+  (`kept_and_replicated[r]` and `equal_both` are False when a seed has no comparison). "No rule marks it failed"
+  asks for "not evaluable" there. Cannot occur in the present job's primaries (all finished).
+
+**(C) not blocking:**
+- **C8-1.** Divergence criterion (i): ruling above.
+- **C8-2.** If the pilots are re-run under rule (b) alone (no column below the floor), version 3 does not change
+  their warm start and the re-runs are replicates; `lr_net` is then decided a second time on replicates. On the
+  laptop replicates are bit-identical (14 of 14), so nothing can change; should the H200 not train bit-reproducibly,
+  a near-tie could flip the rate and re-run the whole net column. Read the log line "lr_net after the warm-start
+  re-run"; a change without a below-floor column in the pilots' target is not caused by the fix and goes to the
+  user before the re-runs are used. Simplest guard: decide `lr_net` again only when a pilot was re-run under (a).
+- **C8-3.** Tagged step-0 arrays are written once: a restart of a network run killed between its step-0 array and
+  its first checkpoint, and every re-issue of `warmstart-check`, need the warm start to be rebuilt bit for bit
+  (true on the laptop, twice). Otherwise `save_tagged` refuses loudly; the run or the check then needs the stale
+  array moved aside by hand.
+- **C8-4.** A re-run that diverges still supersedes its original (`sup[name]` is set whatever the status): the
+  rules then see "diverged" where the original had numbers (seen with the injected case: all six net rows lost
+  their numbers to "comparator A2n_s0_ws: diverged"). Visible in the table; arguably right (the original's warm
+  start was flagged), but it should be said in the superseded row.
+- **C8-5.** A2c is not in the "exactly A2s" claims of the Initialisation table (its `kl_map` is printed: 0.0).
+  The header of the control column should carry "(decides nothing)".
+
+### 8.8 R1 to R8 of section 7
+
+| Remark | State |
+|---|---|
+| R1 alternative column | closed - the column is `replicated_alternative_2se`, headed "replicated under the alternative reading (literal conditions AND two-seed mean <= -2 SE; ...)" |
+| R2 G-region alternative | closed - requires a gain in the total, and says so |
+| R3 report before the guards phase | closed - "The guards phase has not run" when no guard targets are recorded |
+| R4 guard blocks of unused originals | closed - "(original, NOT the pair used by the rules)", also for superseded network runs |
+| R5 `rms_max`, template marks | closed - printed relative to the column's spread; "Q1, Q2" on A3c, "Q1" on A3x |
+| R6 gate bound to the arrays | closed - `stage2_preconditions` recomputes the report; a hand-edited `results.json` with a matching new approval is refused ("differs from the report recomputed from the registered arrays (keys ['kept_and_replicated'])"); the valid approval on a complete state is accepted (function calls only, no Stage-2 fit) |
+| R7 approval without the list | closed - refused |
+| R8 commit of the report code | closed - `results.json` and the header of `RESULTS.md` carry commit and clean flag; the gate's comparison therefore also binds Stage 2 to the commit of the report |
+
+### 8.9 What was verified, and how
+
+*By execution (laptop, smoke stage, scratch roots):* tests 110 passed, 0 skipped; the listing; the planned command
+on a copy of an old-code state, twice (8.2); one polynomial run retrained by the new code; the planned command with two divergences injected through the smoke-only hook - a re-run base (`A2n_s0_ws`) and one control seed (`A2c_s1`): both recorded as "diverged - awaiting diagnosis" with their records, the command ran on to its report (exit 0), the six net versions were trained and are shown as "comparator A2n_s0_ws: diverged - awaiting diagnosis", the report carries "NOT FINAL" and the diverged section, a second issue started no fit, Stage 2 was refused; the new report on the earlier state with a doubled-step rerun ("rerun / original", control "not matched (doubled-step rerun)", all numbers again equal to the numpy-only recomputation); the Stage-2
+gate (valid, missing key, forged table); `fit_to` versions 2 and 3 on 15 constructed targets; the divergence
+classifier on constructed histories; the syntax-tree comparison of driver and library with the running commit.
+
+*By reading only:* the branches of `phase_plr`, `phase_stage0`, `phase_stage1p`, `phase_stage1x` for diverged or
+blocked runs in a default list (the worker's fresh-root run exercised them; not repeated here); the `lr_net`-changed
+branch of `warmstart-rerun` (never taken in smoke: the rate did not change); Stage 2 itself.
+
+*Only on the H200:* whether a fitted target has a column below the floor; whether rebuilt warm starts and
+replicate trainings are bit for bit as on the laptop (C8-2, C8-3); the real `kl_map` values and step-0 parities.
