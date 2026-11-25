@@ -1884,3 +1884,40 @@ Track A finalist on the H200; density before the acceptance template):
 
 Caveat on S1: on a synthetic problem with a true correction of 0.8 nat (close to the bound) the bounded control fits
 0.011 nat worse than the plain polynomial; the two are close only for corrections well below 1 nat.
+
+### 17.13 User decisions on T1 and T2 (25 Nov 2026, late evening)
+
+Both recommendations of §17.12 are accepted, each with a tightening rule. In progress with the mathematics worker.
+
+**T1 — inheriting depth rule** `∂_z′ ln ρ_model ≤ max(0, ∂_z′ ln ρ_base)` beyond z_90.
+- The bound is computed against the **fixed non-SR baseline** (the Track A finalist / the C1 refit-only control), not
+  against the jointly refitted baseline parameters, so that a joint refit cannot bend the baseline upward to pass the
+  check. Every (p, z′, r) location where `∂_z′ ln ρ_base > 0` is logged, so that Fable can verify whether it is a
+  physical feature (Bragg shoulder, end component) or out-of-distribution polynomial drift.
+- Stage-2 sin/cos condition: the sign-change counts of model and baseline are printed side by side **and**
+  `sign_changes(model) ≤ sign_changes(baseline)` is enforced as an explicit pass condition, so that a negative
+  oscillation inside a region where the baseline rises cannot introduce new sign flips. The existing cap on the
+  modulation (at most 4 sign changes inside the data range, none outside) stays.
+
+**T2 — cusp-stall flag.**
+- The clip-independent "hovering near zero" indicator for `sqa(u)` inputs becomes part of the flag (Adam's second
+  moment can damp steps after near-zero spikes, and an exact u = 0 gives zero gradient without any clip).
+- The fractions of evaluations with u exactly 0 and with 0 < |u| < ε are reported separately, and benign structural
+  spatial crossings (for example `sqa(ϱ)` near r = 0, or the one-dimensional zero contour of `sqa(ζ − c)`) are
+  distinguished from actual optimisation stalling (late-step sign flipping, or a parameter stagnating near u = 0).
+  Only the second raises the flag.
+
+### 17.14 Track A on the H200 — progress, and the follow-up code
+
+- At 21:42 UTC the job was in phase `stage1x` with 57 runs registered. Recorded decisions so far: polynomial
+  learning rate 0.003, network learning rate 0.001; A0 drift 0.64 and 0.65 (10⁻⁴) on the two seeds, below the stop
+  threshold of 2, so the track continued.
+- The follow-up code for the user's decisions of §17.11 (A2c control, scale floor with step-0 parity, check and
+  re-run of affected network runs, divergence handling) is written (commit `a05c86e`) and with the Track A reviewer.
+  It is pulled to the H200 only after the present job has ended and the re-review has passed; then
+  `warmstart-check warmstart-rerun a2c report` runs as one job.
+- Points of that code that go to the reviewer and, where they change a registered meaning, to the user: A2c is
+  matched to the 19 component rungs that start from the fitted A2s at 4,000 steps; further controls for the mixtures
+  (6,000 steps) and for the convergence reruns are proposed, not implemented. The definitions of a divergence
+  (non-finite validation value; at least half the batches skipped in the last evaluation window; more than 1 nat per
+  event above the best of history, the step-0 value or the comparator). Stage 2 refuses while a diagnosis is pending.
