@@ -153,6 +153,11 @@ class ParamNet(ParamProvider):
                 f"depth={self.depth}, activation={self.activation}, v0={float(self.v0):.6g}, vs={float(self.vs):.6g}")
 
     # ------------------------------------------------------------------------------------------------------------------
+    # Scale floor of the column normalisation (see ``fit_to``): a column whose weighted standard deviation over the
+    # grid is at most SCALE_FLOOR_REL * max(1, |weighted mean|) is "constant in momentum" at float32 resolution
+    # (2**-20 = 8 float32 ulps of a number of magnitude 1, 2**-23 being the float32 machine epsilon).
+    SCALE_FLOOR_REL = 2.0 ** -20
+
     def fit_to(self, provider: nn.Module, lnp_grid: torch.Tensor, weights: Optional[torch.Tensor] = None,
                steps: int = 2000, lr: float = 1e-2, lbfgs_iter: int = 500, log=None) -> dict:
         """Function-space warm start: weighted least squares on another provider's trajectories.
@@ -160,7 +165,8 @@ class ParamNet(ParamProvider):
         target[g, j] = provider(lnp_grid)[g, name_j] for every name of this ParamNet (matched by name; the provider
         may have more names). Weights ``w[g, j]``:
           * ``None`` or shape (G,)  - per grid point (e.g. the momentum density); every column is then divided by
-            the weighted variance of its target (if > 0), so parameters of different scale count equally;
+            the weighted variance of its target, so parameters of different scale count equally (each column's
+            term is its fraction of unexplained variance) - except for constant columns, below;
           * shape (G, len(names)) - per point and name, in the order of ``self.names``, used as given (e.g. a
             diagonal Fisher information, which makes the loss ~ 2 x the NLL increase).
         Constants get the closed-form weighted mean of their target; the MLP starts from the weighted mean
@@ -170,7 +176,35 @@ class ParamNet(ParamProvider):
         this way (Adam alone: 1-3e-2); more iterations or float64 do not go further - that is the net's own limit.
         Seed the global torch RNG before building the ParamNet for a reproducible result.
 
-        Returns {"rms": {name: weighted rms error}, "max_abs": {name: max |error|}, "loss": final loss}.
+        Constant columns (scale floor; only with normalised weights, i.e. ``None`` or shape (G,)). With p_g the
+        point weights normalised to sum 1, the column's float64 weighted mean mu_j = sum_g p_g t_gj and standard
+        deviation s_j = sqrt(sum_g p_g (t_gj - mu_j)^2). Column j is constant iff
+            s_j <= SCALE_FLOOR_REL * max(1, |mu_j|)          (SCALE_FLOOR_REL = 2^-20).
+        For such a column the variance normalisation 1/s_j^2 is meaningless (s_j is float rounding: 1/s_j^2 ~ 1e15
+        was the earlier failure). It is treated as follows, which is exact for an exactly constant target t_gj = c:
+          * its value is set to round_f32(mu_j) (= c bit for bit when the target is bitwise constant): as a scalar
+            (names_const), or as the MLP output with last-layer row 0 and bias round_f32(mu_j) (names_net);
+          * it gets weight 0 in the MLP objective and in the reported loss (scale = infinity, not the floor). For a
+            net column the column's own term sum_g p_g (b_j + W_j h(x_g) - c)^2 is >= 0 and is 0 at (b_j, W_j) =
+            (c, 0) for EVERY value of the hidden layers h, and (b_j, W_j) enter no other column's term; so for any
+            weight lambda_j in [0, inf) the minimisers of the full objective are (c, 0) x the minimisers of the
+            remaining columns' objective. Weight 0 gives the same solution without the conditioning problem; the
+            row and the bias then get exactly zero gradient (Adam moves an entry with zero gradient by 0; L-BFGS
+            directions are linear combinations of past gradients and steps, all 0 in those entries), and they are
+            reset to (0, round_f32(mu_j)) at the end in any case.
+        Columns above the floor are normalised exactly as before (same float32 operations), so when no constant
+        column is present the result is bit-for-bit the earlier one.
+
+        L-BFGS guard: every chunk of at most 100 iterations runs inside try/except (an overflowing line search
+        raised "value cannot be converted to type float without overflow"); after each chunk the objective must be
+        finite. On an exception or a non-finite value the best state seen so far (start of the polish included) is
+        restored and the polish stops. The kept state is the last one whose loss is <= every earlier one (in the
+        normal, monotone case: the final state, as before). A non-finite loss during Adam raises
+        ``FloatingPointError`` (it would leave NaN weights).
+
+        Returns {"rms": {name: weighted rms error}, "max_abs": {name: max |error|}, "loss": final loss,
+        "constant_columns": [names], "near_floor_columns": {name: s_j / (floor * max(1,|mu_j|))} for non-constant
+        columns with that ratio below 1e3, "scale_floor_rel": SCALE_FLOOR_REL, "lbfgs": {...}}.
         """
         if not is_param_provider(provider):
             raise TypeError("fit_to: provider must be an nn.Module with a list of unique names")
@@ -206,19 +240,39 @@ class ParamNet(ParamProvider):
         if not (torch.isfinite(w).all() and (w >= 0).all() and (w.sum(0) > 0).all()):
             raise ValueError("fit_to: weights must be finite, non-negative and not all zero per column")
         w = w / w.sum(0, keepdim=True)
+        wp = w                                                                # point weights (sum 1 per column)
         mean = (w * target).sum(0)                                            # (P,)
+        const_mask = torch.zeros(P, dtype=torch.bool, device=dev)
+        near_floor = {}
         if normalise:
             var = (w * (target - mean) ** 2).sum(0)
-            w = w / torch.where(var > 0, var, torch.ones_like(var))
+            # scale floor (docstring): detection in float64, so that the summation rounding of the float32 mean
+            # cannot make a bitwise-constant column look varying
+            p64, t64 = wp.double(), target.double()
+            p64 = p64 / p64.sum(0, keepdim=True)                             # sum 1 in float64 (float32 1/G is not)
+            mu64 = (p64 * t64).sum(0)
+            s64 = torch.sqrt((p64 * (t64 - mu64) ** 2).sum(0))
+            floor64 = self.SCALE_FLOOR_REL * torch.clamp(mu64.abs(), min=1.0)
+            const_mask = s64 <= floor64
+            ratio = s64 / floor64
+            near_floor = {n: float(ratio[j]) for j, n in enumerate(self.names)
+                          if not bool(const_mask[j]) and float(ratio[j]) < 1e3}
+            w = w / torch.where(var > 0, var, torch.ones_like(var))         # unchanged for non-constant columns
+            if bool(const_mask.any()):
+                w = torch.where(const_mask[None, :], torch.zeros_like(w), w)
+                mean = torch.where(const_mask, mu64.to(torch.float32), mean)
+        constant_columns = [n for j, n in enumerate(self.names) if bool(const_mask[j])]
         col = {n: j for j, n in enumerate(self.names)}
+        net_idx = [col[n] for n in self.names_net]
         with torch.no_grad():
             for n in self.names_const:
                 self.const[n].copy_(mean[col[n]])
             if self.mlp is not None:
                 last = self.mlp[-1]
                 last.weight.zero_()
-                last.bias.copy_(mean[[col[n] for n in self.names_net]])
-        net_cols = torch.tensor([col[n] for n in self.names_net], device=dev, dtype=torch.long)
+                last.bias.copy_(mean[net_idx])
+        net_cols = torch.tensor(net_idx, device=dev, dtype=torch.long)
+        lbfgs_rep = None
         if self.mlp is not None and (steps > 0 or lbfgs_iter > 0):
             xg = self.x(lnp_grid)[:, None]
             tw, tt = w.index_select(1, net_cols), target.index_select(1, net_cols)
@@ -232,6 +286,9 @@ class ParamNet(ParamProvider):
                 sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=int(steps), eta_min=lr * 0.05)
                 for step in range(int(steps)):
                     loss = objective()
+                    if not bool(torch.isfinite(loss)):
+                        raise FloatingPointError(f"fit_to: non-finite weighted loss at Adam step {step} "
+                                                 f"(constant columns {constant_columns})")
                     opt.zero_grad(set_to_none=True)
                     loss.backward()
                     opt.step()
@@ -242,6 +299,7 @@ class ParamNet(ParamProvider):
                 saved = {k: v.detach().clone() for k, v in self.mlp.state_dict().items()}
                 with torch.no_grad():
                     before = float(objective())
+                best_state, best_loss = saved, before
                 opt2 = torch.optim.LBFGS(self.mlp.parameters(), lr=1.0, max_iter=min(100, int(lbfgs_iter)),
                                          history_size=50, line_search_fn="strong_wolfe", tolerance_grad=1e-12,
                                          tolerance_change=1e-15)
@@ -252,21 +310,50 @@ class ParamNet(ParamProvider):
                     loss.backward()
                     return loss
 
+                stopped, chunk_losses = None, []
                 for _ in range(math.ceil(int(lbfgs_iter) / 100)):
-                    opt2.step(closure)
-                with torch.no_grad():
-                    after = float(objective())
-                if not (math.isfinite(after) and after <= before):
-                    self.mlp.load_state_dict(saved)
-                    after = before
+                    try:
+                        opt2.step(closure)
+                        with torch.no_grad():
+                            cur = float(objective())
+                    except (RuntimeError, OverflowError, ValueError, FloatingPointError) as err:
+                        stopped = f"{type(err).__name__}: {err}"
+                        break
+                    chunk_losses.append(cur)
+                    if not math.isfinite(cur):
+                        stopped = "non-finite objective after an L-BFGS chunk"
+                        break
+                    if cur <= best_loss:
+                        best_state = {k: v.detach().clone() for k, v in self.mlp.state_dict().items()}
+                        best_loss = cur
+                if not (math.isfinite(best_loss) and best_loss <= before):           # cannot happen; kept for clarity
+                    best_state, best_loss = saved, before
+                self.mlp.load_state_dict(best_state)
+                after = best_loss
+                lbfgs_rep = {"before": before, "after": after, "chunk_losses": chunk_losses, "stopped": stopped}
                 if log:
-                    log(f"  fit_to L-BFGS: weighted loss {before:.3e} -> {after:.3e}")
+                    log(f"  fit_to L-BFGS: weighted loss {before:.3e} -> {after:.3e}"
+                        + (f" (stopped: {stopped})" if stopped else ""))
+            if constant_columns:                   # exact for constant net columns (zero gradient: a no-op anyway)
+                with torch.no_grad():
+                    last = self.mlp[-1]
+                    for n in constant_columns:
+                        if n in self.names_net:
+                            k = self.names_net.index(n)
+                            last.weight[k].zero_()
+                            last.bias[k] = mean[col[n]]
         with torch.no_grad():
             err = self(lnp_grid) - target
+            if not torch.isfinite(err).all():
+                raise FloatingPointError("fit_to: the fitted ParamNet gives non-finite values on the grid")
             wn = (w / w.sum(0, keepdim=True))
+            if constant_columns:                   # zero-weight columns: report the error with the point weights
+                wn = torch.where(const_mask[None, :], wp, wn)
             rms = torch.sqrt((wn * err ** 2).sum(0))
             mx = err.abs().max(0).values
             final = float((w * err ** 2).sum())
         return {"rms": {n: float(rms[j]) for j, n in enumerate(self.names)},
                 "max_abs": {n: float(mx[j]) for j, n in enumerate(self.names)},
-                "loss": final if math.isfinite(final) else float("nan")}
+                "loss": final if math.isfinite(final) else float("nan"),
+                "constant_columns": constant_columns, "near_floor_columns": near_floor,
+                "scale_floor_rel": self.SCALE_FLOOR_REL, "lbfgs": lbfgs_rep}

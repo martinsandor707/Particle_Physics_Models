@@ -111,6 +111,201 @@ def test_paramnet_fit_to_polynomial_trajectories():
         net.fit_to(target, grid, weights=torch.ones(3), steps=1)
 
 
+def _fit_to_before_fix(net, provider, lnp_grid, steps=2000, lr=1e-2, lbfgs_iter=500):
+    """ParamNet.fit_to as it was before the scale-floor fix (weights=None path), verbatim, for the bit-identity test."""
+    dev = net.v0.device
+    lnp_grid = torch.as_tensor(lnp_grid, dtype=torch.float32, device=dev).reshape(-1)
+    G = lnp_grid.numel()
+    provider.eval()
+    with torch.no_grad():
+        full = provider(lnp_grid).to(dev, torch.float32)
+    idx = torch.tensor([provider.names.index(n) for n in net.names], device=dev)
+    target = full.index_select(1, idx)
+    P = len(net.names)
+    w = torch.ones(G, P, device=dev)
+    w = w / w.sum(0, keepdim=True)
+    mean = (w * target).sum(0)
+    var = (w * (target - mean) ** 2).sum(0)
+    w = w / torch.where(var > 0, var, torch.ones_like(var))
+    col = {n: j for j, n in enumerate(net.names)}
+    with torch.no_grad():
+        for n in net.names_const:
+            net.const[n].copy_(mean[col[n]])
+        last = net.mlp[-1]
+        last.weight.zero_()
+        last.bias.copy_(mean[[col[n] for n in net.names_net]])
+    net_cols = torch.tensor([col[n] for n in net.names_net], device=dev, dtype=torch.long)
+    xg = net.x(lnp_grid)[:, None]
+    tw, tt = w.index_select(1, net_cols), target.index_select(1, net_cols)
+
+    def objective():
+        return (tw * (net.mlp(xg) - tt) ** 2).sum()
+
+    net.train()
+    opt = torch.optim.Adam(net.mlp.parameters(), lr=lr)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=int(steps), eta_min=lr * 0.05)
+    for _ in range(int(steps)):
+        loss = objective()
+        opt.zero_grad(set_to_none=True)
+        loss.backward()
+        opt.step()
+        sched.step()
+    saved = {k: v.detach().clone() for k, v in net.mlp.state_dict().items()}
+    with torch.no_grad():
+        before = float(objective())
+    opt2 = torch.optim.LBFGS(net.mlp.parameters(), lr=1.0, max_iter=min(100, int(lbfgs_iter)), history_size=50,
+                             line_search_fn="strong_wolfe", tolerance_grad=1e-12, tolerance_change=1e-15)
+
+    def closure():
+        opt2.zero_grad(set_to_none=True)
+        loss = objective()
+        loss.backward()
+        return loss
+
+    for _ in range(math.ceil(int(lbfgs_iter) / 100)):
+        opt2.step(closure)
+    with torch.no_grad():
+        after = float(objective())
+    if not (math.isfinite(after) and after <= before):
+        net.mlp.load_state_dict(saved)
+    with torch.no_grad():
+        err = net(lnp_grid) - target
+        wn = (w / w.sum(0, keepdim=True))
+        rms = torch.sqrt((wn * err ** 2).sum(0))
+    return {"rms": {n: float(rms[j]) for j, n in enumerate(net.names)}, "loss": float((w * err ** 2).sum())}
+
+
+V0, VS = -0.32585955, 3.31461334
+GRID = torch.linspace(math.log(0.0895), math.log(20.0), 120)
+
+
+def test_fit_to_without_constant_columns_is_bit_identical_to_the_code_before_the_fix():
+    """(iii) No column at the scale floor: the fix changes nothing, bit for bit (weights, rms, loss)."""
+    target = Poly(["mu", "log_s", "frac", "c2"], V0, VS)                       # four genuinely varying columns
+    torch.manual_seed(3)
+    a = ParamNet(["mu", "log_s", "frac"], ["c2"], v0=V0, vs=VS)
+    torch.manual_seed(3)
+    b = ParamNet(["mu", "log_s", "frac"], ["c2"], v0=V0, vs=VS)
+    ra = a.fit_to(target, GRID, steps=400, lbfgs_iter=200)
+    rb = _fit_to_before_fix(b, target, GRID, steps=400, lbfgs_iter=200)
+    assert ra["constant_columns"] == [] and ra["near_floor_columns"] == {}
+    sa, sb = a.state_dict(), b.state_dict()
+    assert all(torch.equal(sa[k], sb[k]) for k in sa)
+    assert ra["rms"] == rb["rms"] and ra["loss"] == rb["loss"]
+
+
+def test_fit_to_constant_net_column_is_reproduced_and_does_not_spoil_the_others():
+    """(i) + (ii) A net output whose target is constant in momentum (the A9n case: logit_dh, a degree-0 row among the
+    net outputs). Before the fix its normalisation weight was 1/(float rounding) ~ 1e14 and the other columns went
+    unfitted; now it is reproduced (to its own rounding) and the varying columns reach the accuracy of a fit without
+    it. A bitwise-constant target is reproduced bit for bit."""
+    poly = Poly(["mu", "log_s", "frac", "dh"], V0, VS)
+    c = torch.tensor(-4.3)
+
+    class Wobble(ParamProvider):                    # dh = c, every second grid point one float32 ulp higher
+        names = ["mu", "log_s", "frac", "dh"]
+
+        def forward(self, lnp):
+            out = poly(lnp).clone()
+            up = torch.nextafter(c, torch.tensor(math.inf))
+            out[:, 3] = torch.where(torch.arange(len(lnp)) % 2 == 0, c, up)
+            return out
+
+    target = Wobble()
+    with torch.no_grad():
+        t = target(GRID)
+    w = torch.ones(len(GRID), 4)
+    w = w / w.sum(0, keepdim=True)
+    mean = (w * t).sum(0)
+    var = (w * (t - mean) ** 2).sum(0)
+    assert 0 < float(var[3]) < 1e-12 and float(1 / var[3]) > 1e12             # the pathology: weight 1/rounding
+    torch.manual_seed(0)
+    net = ParamNet(["mu", "log_s", "frac", "dh"], [], v0=V0, vs=VS)
+    rep = net.fit_to(target, GRID, steps=1000, lbfgs_iter=500)
+    assert rep["constant_columns"] == ["dh"]
+    ulp = float(torch.nextafter(c, torch.tensor(math.inf)) - c)
+    with torch.no_grad():
+        out = net(GRID)
+        far = net(torch.log(torch.tensor([0.001, 0.05, 50.0, 500.0])))        # also outside the grid (row 0)
+    assert float((out[:, 3] - t[:, 3]).abs().max()) <= ulp and bool((far[:, 3] == out[0, 3]).all())
+    assert torch.equal(net.mlp[-1].weight[3], torch.zeros(16))
+    # bitwise-constant target: reproduced bit for bit
+    exact = Poly(["mu", "log_s", "frac", "dh"], V0, VS)
+    with torch.no_grad():
+        exact.coef.copy_(poly.coef)
+        exact.coef[3] = torch.tensor([float(c), 0.0, 0.0, 0.0])
+    torch.manual_seed(0)
+    net_e = ParamNet(["mu", "log_s", "frac", "dh"], [], v0=V0, vs=VS)
+    net_e.fit_to(exact, GRID, steps=50, lbfgs_iter=0)
+    with torch.no_grad():
+        assert torch.equal(net_e(GRID)[:, 3], exact(GRID)[:, 3])
+    spread = t.std(0)
+    assert all(rep["rms"][n] < 0.005 * float(spread[j]) for j, n in enumerate(["mu", "log_s", "frac"])), rep["rms"]
+    # the same varying columns fitted without the constant column (same hidden-layer initialisation)
+    sub = Poly(["mu", "log_s", "frac"], V0, VS)
+    with torch.no_grad():
+        sub.coef.copy_(poly.coef[:3])
+    torch.manual_seed(0)
+    ref = ParamNet(["mu", "log_s", "frac"], [], v0=V0, vs=VS)
+    rr = ref.fit_to(sub, GRID, steps=1000, lbfgs_iter=500)
+    # Same order of accuracy (the two optimisations are not bitwise equal: summation order in the shared layers
+    # differs and the fit is chaotic at the 1e-3-of-spread level of the net, see fit_to's docstring). Measured on
+    # the laptop CPU: mu 1.99e-4 vs 2.06e-4, log_s 9.6e-5 vs 2.9e-5, frac 2.09e-4 vs 1.82e-4.
+    for n in ("mu", "log_s", "frac"):
+        assert rep["rms"][n] <= 5.0 * rr["rms"][n], (n, rep["rms"][n], rr["rms"][n])
+        assert rr["rms"][n] < 0.005 * float(spread[["mu", "log_s", "frac"].index(n)])
+    assert math.isfinite(rep["loss"]) and rep["lbfgs"]["stopped"] is None
+    # gradients of the fitted net are finite (the old failure left NaN model gradients)
+    (net(GRID) ** 2).sum().backward()
+    assert all(torch.isfinite(p.grad).all() for p in net.parameters() if p.grad is not None)
+
+
+def test_fit_to_constant_scalar_column_and_floor_rule():
+    """A constant names_const column takes the float64 mean rounded to float32 = the target bit for bit; a column
+    that varies by a few ulps more than the floor is NOT constant; with per-(point, name) weights nothing changes."""
+    target = Poly(["mu", "k", "tiny"], V0, VS)
+    with torch.no_grad():
+        target.coef[1, 1:] = 0.0
+        target.coef[1, 0] = 0.123456789
+        target.coef[2] = torch.tensor([3.0, 1e-3, 0.0, 0.0])                 # varies by ~2e-3 over the grid
+    torch.manual_seed(1)
+    net = ParamNet(["mu", "tiny"], ["k"], v0=V0, vs=VS)
+    rep = net.fit_to(target, GRID, steps=200, lbfgs_iter=100)
+    with torch.no_grad():
+        t = target(GRID)
+        out = net(GRID)
+    assert net.names == ["mu", "tiny", "k"]
+    assert rep["constant_columns"] == ["k"] and torch.equal(out[:, 2], t[:, 1])
+    assert "tiny" not in rep["constant_columns"]
+    assert rep["near_floor_columns"].get("tiny") is None or rep["near_floor_columns"]["tiny"] > 1.0
+    # explicit (G, P) weights: used as given, no floor, no constant handling
+    torch.manual_seed(1)
+    net2 = ParamNet(["mu", "tiny"], ["k"], v0=V0, vs=VS)
+    rep2 = net2.fit_to(target, GRID, weights=torch.ones(len(GRID), 3), steps=10, lbfgs_iter=0)
+    assert rep2["constant_columns"] == []
+
+
+def test_fit_to_lbfgs_guard_restores_the_best_state(monkeypatch):
+    """An L-BFGS step that raises (the earlier overflow) restores the best state seen and stops the polish."""
+    target = Poly(["mu", "log_s"], V0, VS)
+    torch.manual_seed(2)
+    net = ParamNet(["mu", "log_s"], [], v0=V0, vs=VS)
+    calls = {"n": 0}
+    orig = torch.optim.LBFGS.step
+
+    def flaky(self, closure):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("value cannot be converted to type float without overflow")
+        return orig(self, closure)
+
+    monkeypatch.setattr(torch.optim.LBFGS, "step", flaky)
+    rep = net.fit_to(target, GRID, steps=100, lbfgs_iter=300)
+    assert rep["lbfgs"]["stopped"].startswith("RuntimeError") and len(rep["lbfgs"]["chunk_losses"]) == 1
+    assert rep["lbfgs"]["after"] <= rep["lbfgs"]["before"] and math.isfinite(rep["loss"])
+    assert rep["lbfgs"]["after"] == pytest.approx(rep["lbfgs"]["chunk_losses"][0])
+
+
 def test_centring_reproduces_the_formula_buffers():
     """v0, vs from the training ln p range, computed as the component formula does, equal its checkpoint buffers."""
     from sfm import data

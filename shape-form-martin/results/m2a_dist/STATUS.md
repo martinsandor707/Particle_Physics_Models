@@ -1,87 +1,411 @@
-# Track A (M2A) — status at the checkpoint of 25 Nov 2026
+# Track A (M2A) - status, 25 Nov 2026 (item E4 of PLAN.md section 16.7)
 
-**No GPU job has been run yet.** Nothing has been trained, nothing is registered under `stage="m2a_dist"`, and no
-checkpoint exists. The code is consistent and importable. The CPU tests pass.
+**State.** Track A is ready to run on the machine of record as ONE detached, resumable job (section 4). **No real Track
+A fit has been run anywhere.** Nothing was registered under `stage="m2a_dist"` in the campaign results. The laptop
+dry run went to a scratch output root (section 6). It covered templates and the step-0 parity for real, then every
+phase in smoke mode under the separate stage `m2a_smoke`, including a kill in the middle of a fit and a resume. In
+the repository, `results/registry.jsonl` and `results/test_access.log` are byte-identical, and nothing was written in
+the clone. The code is waiting for review: the Fable rule review of E4 and the independent mathematical review of
+the `fit_to` fix (section 2).
 
-## What is implemented and tested
+Units: deltas are in nat per event. Tables use 1e-4 nat (the convention of AUDIT.md). `<repo>` is the clone and
+`<area>` is the user's folder on the H200.
 
-| File | Content | State |
-|---|---|---|
-| `src/sfm/models/dist_factory.py` (new) | factories `component` and `mixture`, registered in `sfm.models.FACTORIES` on import; providers `poly` (start = copy by name from a finished run) and `net` (ParamNet + `fit_to`); initialisers `init_shower_long` and `init_from_target`; `kl_map` recorded in `model.init_info`; templates `back_corrected` / `full_box` (`acceptances` and `exit_depth` ported from `results/m1_audit/checks/c_side.py`, cited in the docstring); the `LastRing` wrapper for A12 | done; CPU-tested |
-| `tests/test_dist_factory.py` (new) | all 29 model structures of the list build on the CPU, are normalised (\|logsumexp\| < 1e-5), have finite gradients, and have the pre-registered constant counts: A0 101, A1 699, A2e 101, A2s 101, A2n 699, A4 93, A5 101, A7 103, A8 102, A9 104, A10 74, A4t 89, A5h 97, A6i/A6l 97, A6b 98, A7s/A7l/A8c 102, A78 104, A9r 98, A3* 101, A10-2/4/5 48/100/126, A10g 98, A12 102. Also tested: net versions of A4/A7/A9/A10; `legacy_centre` = the legacy formula's map; the stored template = the legacy logA; A7/A8/A78/A7s/A8c start exactly on A2s (A7l within KL 6e-5); the LastRing wrapper; copy by name; the degree override; the geometry port at normal incidence; `exit_depth` | **40 passed, 3 skipped**. The skipped tests are A3c, A3x and the template-range test; they need the templates file, which has not been computed yet |
-| `scripts/run_m2a_lib.py` (new) | `Spec`; T_A `fit_config` (weight decay 0 for poly, 1e-4 for net; lr from `plr.json`); `run_spec`, which does: under `gpu_lock` with a free-memory check → build → `init.json` → optional step-0 registry row → `sfm.train.fit` (resumable) → `registry.evaluate` (with a duplicate check by checkpoint SHA-256) → `done.json`; GPU-time log `gpu_time.jsonl` | importable; **not yet exercised on the GPU** |
-| `scripts/run_m2a.py` (new) | phases `templates`, `parity`, `plr`, `stage0`, `stage1p` (with the convergence reruns), `stage1x` (seed 1 on keep/equal-NLL; budget check with the drop order) | importable; run list verified by listing (below); **not yet run** |
-| `scripts/run_m2a_report.py` | rules, guards (G-K / G-bulk / G-mass through `registry.evaluate(guards=True)`, plus G-region from `metric.event_nll_multi(return_parts=True)`), secondary columns, Fisher information of k for A6b, Stage 2, RESULTS.md | **not written yet**. The `guards` and `stage2` phases of `run_m2a.py` import it lazily, so `run_m2a.py all` would fail at `guards`; run the first six phases explicitly |
+## 1. What changed
 
-Run names: Stage 0 `A0_s0/1, A1_s0/1, A2e_s0/1, A2s_s0/1/2, A2n_s0/1/2`; primaries `A4/A5/A7/A8/A9/A10_s0/_s1`, nets
-`A4n…A10n_s0`; exploratory `<rung>_s0` (and `_s1` if passing); pilots `plr_A2s_lr{0.003,0.01,0.03}`,
-`plr_A2n_lr{0.001,0.003,0.01}`; step-0 rows `A0_init`, `A9_s0_init`, `A9_s1_init`; convergence reruns `<name>_x2`.
-
-## Execution order — state
-
-| Step | State |
+| File | Change |
 |---|---|
-| 1. tests | **done** (CPU) |
-| 2. step-0 parity of A0 (18.120061 to 1e-5) | implemented (`parity` phase); not run |
-| 3. learning-rate pilot | implemented (`plr` phase); not run |
-| 4. Stage 0 | implemented; not run |
-| 5. primaries | implemented; not run |
-| 6. exploratory | implemented; not run |
-| 7. rules, guards, secondary columns | not written |
-| 8. Stage 2 | not written |
-| 9. RESULTS.md | not written |
+| `src/sfm/models/paramnet.py` | `ParamNet.fit_to`: a scale floor for columns that are constant in momentum, and a guarded L-BFGS (section 2). The return value also carries `constant_columns`, `near_floor_columns`, `scale_floor_rel` and `lbfgs`. |
+| `src/sfm/models/dist_factory.py` | The replica workaround is **removed**: `_fit_to_robust`, `_degenerate_net_columns` and `_fit_target` are deleted, and `make_paramnet` calls `fit_to` directly. The fit report records the constant columns. The templates now live **per machine**: `template_dir()` is `OUT_RESULTS/machines/<id>/runs/m2a_dist/templates` (pristine-clone rule). `set_template_dir()` points the factory elsewhere, for example to rebuild A3c/A3x/A9 from a machine directory copied back to the laptop. `TEMPLATE_DIR` and `THETA_FILE` stay readable as module attributes (PEP 562). New keyword arguments `fit_to_steps` and `fit_to_lbfgs` (defaults 2000 / 500, the AUDIT values) are used only by the smoke mode. |
+| `scripts/run_m2a_lib.py` | Rewritten for the provenance/registry/paths API. All outputs go to `R/machines/<id>/runs/<stage>/`. `start()` calls `machine.startup`. `registered_row` carries the live stream id. `tagged()` uses `registry.row_array` (tag and SHA-256 checked). `paired()` uses `provenance.paired_delta`, against a run or against **this machine's formula reference array** (`registry.reference_set().bench["formula"]`). A done-marker from another machine is refused. `on_gpu` follows the rule of `run_m2b_lib.run_on_gpu`: a capped device refuses at once, the laptop releases the lock and retries. Smoke mode: `configure(smoke=True)` is refused unless `SFM_M2A_SMOKE=1`; it uses stage `m2a_smoke`, steps divided by 100, and shortened factory initialisations. |
+| `scripts/run_m2a.py` | Rewritten. One command runs the default phases `templates parity plr stage0 stage1p stage1x guards report` in order, in one process. `--list` gives a dry listing. `--smoke` selects smoke mode. `stage2` runs only on its own and is refused before `results.json` exists. Every laptop constant is gone (`FORMULA_OF_RECORD`, the absolute drift threshold), and so are the budget and drop logic (`BUDGET_S`, `DROP_ORDER`, `_est_seconds`, `_reserve_seconds`). `decisions.json` records `dropped: []` and the reason. New in the guards phase: the G-region arrays and the A6b Fisher information. |
+| `scripts/run_m2a_report.py` (new) | The rules applied to registered arrays, the guard tables, the secondary columns, RESULTS.md and results.json. It runs on the CPU only. |
+| `tests/test_models.py` | Four new `fit_to` tests (section 2). |
+| `tests/test_dist_factory.py` | The net-version test now checks constant-column reproduction and fit quality, with no replica. New test: constant and varying columns are far apart in all 8 net models. The template tests now read this machine's directory and assert what was measured (section 7, Q1 and Q2). |
+| `tests/test_run_m2a.py` (new) | The run list equals AUDIT 4.1. No laptop constant, budget or drop order remains. Outputs go to the machine directory. Smoke mode is refused without its switch. Stage 2 is not in the default list. Also covered: the rule constants, the Stage-2 merge, and the G-region classes. |
 
-## Decisions taken where the list was ambiguous (most literal reading)
+Tests: `uv run pytest shape-form-martin/tests/test_dist_factory.py shape-form-martin/tests/test_run_m2a.py
+shape-form-martin/tests/test_models.py -q` gives **79 passed, 3 skipped** (after the review's batch-1 fixes had
+landed). The 3 skips are the template tests: with
+the default output root the templates do not exist. With `SFM_OUT_ROOT=<scratch dry root>`,
+`test_dist_factory.py` gives **51 passed, 0 skipped**.
 
-1. **ParamNet names.** The audit puts the radial shape names into `names_const`, but they also belong to
-   `model.momentum_dependent`. They are therefore removed from `names_net`. `logit_dh` (A9) stays a net output: it is
-   in `momentum_dependent` and is not a radial shape name.
-2. **ParamNet names for the mixture**, which has no legacy split: `names_net` = the rows of polynomial degree > 0;
-   `names_const` = the `c{k}_lat_*` rows.
-3. **Net runs with `net_from`** rebuild the whole fitted poly model first. Scalars outside the provider (DetHalo L, R
-   in A9) therefore start at their fitted values.
-4. **P-lr for A2n.** "fit_to A2s (same seed)" is read as fit_to the Stage-0 run `A2s_s0`. The order is: poly pilots →
-   lr_poly frozen → `A2s_s0` (a Stage-0 run, executed early) → net pilots → lr_net frozen. The pilots are registered;
-   the decision uses the registered validation means. Winner = the smallest lr within 0.5e-4 of the lowest.
-5. **A0 drift rule.** The table's "|Δ| > 2: stop" is applied to the trained A0 − formula on both seeds.
-6. **A0 step-0 parity** is registered once (`A0_init`); seeds 0 and 1 have the same initialisation.
-7. **Convergence.** |val(last) − val(last − 1000)| < 0.5e-4 from the fit history. Doubled-step reruns are done only
-   for **poly** primaries (the pre-registered comparisons): primary and A2s of the same seed, the same initialisation,
-   steps doubled. The net column is exploratory, so non-converged nets are not rerun.
-8. **A10 and its net/exploratory variants** (A10n, A10-2/4/5, A10g) use 6000 steps ("as A10"). For the mixtures,
-   `init_from_target` uses A2s of the same seed as the target.
-9. **Depth-family swaps** (A4t, A5h, A6i, A6l, A6b) use `init_shower_long` as A4/A5 do.
-10. **A9r** `logit_dh` initial value = logit of the mean over the training events of σ(logit_far(p)) of A2s_s0. DetHalo
-    L and R stay at their defaults (the list names only logit_dh).
-11. **`kl_map`** for every run = mean over `default_lnp(48)` of KL(P_ref ‖ P_model). The reference is the run it was
-    started / initialised / fitted from, or the legacy formula for runs that start from the legacy coefficients.
-12. **Templates.** Training events. 1[z′ < zb_e] is averaged over the same two z sub-points per cell as A.
-    `stored` uses the legacy checkpoint's logA (1-ulp identical to ln abar.pt).
-13. **Stage-2 plan (not yet coded).** If nothing is kept, A11 = A2s (no rerun) and A11n = A2n (no rerun). A11k = A2s
-    from the legacy coefficients with `k_train = 64` (seeds 0, 1), compared with A2s of the same seed. Guards will also
-    be run on the comparators (A2s / A2n of the same seed), so that guard deltas against the base can be paired.
+### 1a. Adaptations to the batch-1 review (coordinator's message during this item)
 
-## Bugs and workarounds
+The batch-1 modules are being fixed by the independent review. They were not edited here. Track A was adapted to
+the announced changes:
 
-- **`sfm.models.paramnet.ParamNet.fit_to`** (not patched). With `weights=None` it divides each target column by its
-  variance whenever var > 0. A column that is constant in momentum has a float-rounding variance (~1e-15) and
-  receives a weight of ~1e15. The other columns then go unfitted (rms errors ~1 on the shower parameters, NaN model
-  gradients afterwards), and the L-BFGS polish raises "value cannot be converted to type float without overflow".
-  In the run list this affects A9n (`logit_dh` is degree 0). Workaround in `dist_factory.make_paramnet`: when such a
-  column exists (detected with fit_to's own float operations), a line-by-line replica of `fit_to` is used. Its only
-  changes are a variance floor of 1e-12·max(1, mean²) and guarded L-BFGS chunks. Otherwise `fit_to` itself runs.
-  `init_info["fit_to"]["fit_to_workaround"]` records which path was taken.
-- `fit_to`'s reported `loss` includes the constant columns weighted by 1/var(rounding). This is cosmetic (e.g. 12.0
-  for A7n at the legacy coefficients).
+1. **Machine identity comes from the API.** `run_m2a_lib.MACHINE_DIR = machine.machine_dir_live()` and
+   `MACHINE_ID = MACHINE_DIR.name`. `dist_factory.template_dir()` uses `machine_dir_live()` too. A run's scores
+   directory is read from its registry row (`val_nll_path`) and is never rebuilt from an id.
+   - The derived tagged arrays (G-region, mass monitors) carry the registry's live tag (`registry.live_stream()`).
+   - Markers record `machine_id` and are checked against it.
+   - `live()` checks that `registry.RegistryEnv().machine_dir` is the driver's directory.
+   - The settings tag is recorded only (`machine_tag`, `startup_tag`).
+2. **The reference set** comes only from `registry.reference_set()` (`NoReferenceSet` otherwise). There is no
+   fallback.
+3. **Fail-closed start-up.** Every entry point (`run_m2a.py` and `run_m2a_report.py`) goes through
+   `run_m2a_lib.start()`, which calls `machine.startup()`. Nothing bypasses the start-up checks. The smoke switch
+   only selects a stage and shortened fits. It touches neither the guard, the output root nor the clone check.
+4. **Starting points verified by SHA-256** (`run_m2a_lib.verify_sources`, called in every `run_spec` before the
+   factory reads any weights). Every `start` (copy by name), `init_ref` (init_shower_long reference, mixture
+   init_from_target target) and `net_from` (fit_to target and rebuilt poly model) must be:
+   - a finished run of this machine (its done.json carries this machine id);
+   - whose `model.pt` SHA-256 matches a registry row on the live stream;
+   - whose weight tensors match that row's `weights_sha256`.
 
-## Commands that continue from here (from the repo root)
+   What is recorded (model SHA-256, weights SHA-256, machine id, row stage / name / timestamp / stream /
+   val_nll_sha256 / checkpoint SHA-256) goes into `init.json`, into the registry row (`extra.sources`) and into
+   `done.json` (`sources_verified`). Tested in `test_source_runs_are_verified_by_sha256`. This covers the six
+   primaries, the 18 exploratory rungs, A2n / A1 / the net pilots, the reruns and Stage 2. Convergence reruns keep
+   the primary's original source.
+5. **Launcher.** Stop only by the PID file, or with the review's stop helper (`scripts/stop_job.sh`, new and
+   untracked at the time of writing; not used here). The commands of section 4 are unchanged.
+6. **No raw pairing.** The parity criterion, the drift rule, P-lr, keep / equal / replication, the report tables,
+   the guards and the secondary columns all form their deltas with `provenance.paired_delta` (or
+   `paired_difference` for per-event values), against the live reference set or registered runs. The
+   laptop-array pairing that was formerly at `run_m2a.py:172` is gone (`test_no_budget_no_drop_order_no_laptop_constants` checks
+   for `m0_parity/formula`).
+   - The two-seed replication mean is a `paired_delta` between the averaged tagged arrays, after `check_pairable`
+     of all four.
+   - The pre-registered *margins* (G-K / G-bulk persistence; the G-region flagged - 0.5 main) are computed with
+     `stats.guard_persistence` / `stats.paired` from tag-checked `paired_difference` outputs. This is the pattern of
+     `sfm.registry._guards`. The two terms cannot form one TaggedArray pair, because their subsets differ by
+     construction.
+
+## 2. The `ParamNet.fit_to` fix - mathematics (for the independent reviewer)
+
+**Problem.** The warm start minimises a weighted least-squares objective over the momentum grid {x_g}. Let p_g be
+the point weights, normalised to sum 1, and t_gj the target trajectories. The objective is
+
+  L = sum_j lambda_j sum_g p_g (f_j(x_g) - t_gj)^2,   with lambda_j = 1 / Var_p(t_j)
+
+for normalised weights (weights=None or shape (G,)). Each column's term is then its fraction of unexplained
+variance. The output is f_j(x) = b_j + W_j . h(x), where h is the shared hidden layer, W_j is row j of the last
+layer, and b_j is its bias.
+
+Some columns are constant in momentum: A9n's `logit_dh`, and degree-0 rows in general. For those, Var_p(t_j) is pure
+float32 summation rounding, about 1e-15, so lambda_j is about 1e14 to 1e15. That one column then dominates the
+gradient of the shared layers, the varying columns go unfitted, and the strong-Wolfe line search of L-BFGS
+overflowed. The old code only covered Var = 0 exactly.
+
+**Rule.** Column statistics are computed in float64, with p renormalised to sum 1 in float64:
+
+  mu_j = sum_g p_g t_gj,   s_j = sqrt(sum_g p_g (t_gj - mu_j)^2).
+
+Column j is **constant** iff
+
+  s_j <= tau * max(1, |mu_j|),   tau = 2^-20 (= 8 float32 ulps at magnitude 1; float32 epsilon = 2^-23).
+
+The scale is relative above 1 and absolute below 1, because raw parameters are logs and logits. float64 is needed
+because the float32 mean of a bitwise-constant column differs from the value by a few ulps.
+
+**Treatment of a constant column.** Its scale is set to infinity (weight 0), not to the floor:
+
+1. Its value is set to round_f32(mu_j). For a bitwise-constant target (t_gj = c for all g), round_f32(mu_j) = c
+   exactly: the float64 sum is c(1 + O(G * 2^-53)), which rounds back to the float32 c. A names_const column becomes
+   that scalar. A net column gets W_j = 0 and b_j = round_f32(mu_j).
+2. The column gets weight 0 in the MLP objective and in the reported loss.
+
+*Why weight 0 changes nothing (exactly constant target t_gj = c).* (b_j, W_j) appear in column j's term only, and the
+hidden parameters theta reach column j only through W_j . h_theta. So for any weight lambda_j >= 0:
+
+  L(theta, b, W) = L_rest(theta, b_-j, W_-j) + lambda_j sum_g p_g (b_j + W_j . h_theta(x_g) - c)^2.
+
+The second term is >= 0, and it equals 0 at (b_j, W_j) = (c, 0) for **every** theta. So the set of minimisers is
+{(c, 0)} x argmin L_rest, which is the same set for every lambda_j in [0, inf). (If h_theta has a constant direction,
+there are more zero sets, but (c, 0) is always among them.) Weight 0 therefore picks a solution of the original
+problem, and it avoids the conditioning catastrophe of a finite lambda_j around 1e14.
+
+*Exactly zero gradient.* With weight 0, dL/dW_j = 0 and dL/db_j = 0 identically.
+- Adam keeps (m, v) = (0, 0) for those entries, so each step is lr * 0 / (0 + eps) = 0.
+- L-BFGS directions are linear combinations of the current gradient and of past steps s_k and gradient differences
+  y_k. All of these are 0 in those entries, so the entries never move.
+- At the end, (W_j, b_j) is reset to (0, round_f32(mu_j)) anyway, which is a bitwise no-op.
+
+*Target constant up to rounding* (|t_gj - c| <= a few ulps). Any finite lambda_j would only fit float rounding noise
+through the shared layers. Setting the column to round_f32(mu_j) leaves an error <= max_g |t_gj - mu_j|, a few ulps.
+The test bounds this at 1 ulp for a column alternating between c and c + 1 ulp.
+
+**Columns above the floor** keep exactly the old float32 operations: `w / torch.where(var > 0, var, 1)`. So when no
+constant column is present, the weights, the optimisation and the outputs are **bit-for-bit those of the old
+code**. This is tested against a verbatim copy of the old function on CPU, comparing all weights, rms and loss.
+
+**Margin of the rule on the real trajectories.** Test `test_constant_and_varying_columns_are_far_apart` covers the 8
+net models of the list (A1, A2n, A4n, A5n, A7n, A8n, A9n, A10n) at their starting coefficients:
+- every column has either s_j <= floor (exactly 0 or rounding),
+- or s_j / floor >= 42,889 (the smallest varying column).
+- `fit_to` reports any varying column within a factor 1e3 of the floor (`near_floor_columns`); there are none.
+
+**Guarded L-BFGS.**
+- Each chunk of at most 100 iterations runs inside `try/except` (RuntimeError, OverflowError, ValueError,
+  FloatingPointError), and the objective must be finite after each chunk.
+- On failure, the best state seen so far is restored (the start of the polish included) and the polish stops.
+- The kept state is the last one whose loss is <= every earlier loss. In the normal monotone case that is the final
+  state, as before. This is part of the bit-identity test.
+- A non-finite loss during Adam raises `FloatingPointError`, a loud failure instead of NaN weights.
+
+**Tests** (`tests/test_models.py`):
+- (iii) `..._bit_identical_to_the_code_before_the_fix`: 4 varying columns; state dict, rms and loss are identical.
+- (ii) and (i), `..._constant_net_column_is_reproduced_...`:
+  - The column alternates by 1 ulp. Old weight 1/var > 1e12. Now: reproduced within 1 ulp, row = 0, constant outside
+    the grid too.
+  - A bitwise-constant column is reproduced bit for bit.
+  - The varying columns reach rms < 0.5 % of their spread and stay within a factor 5 of a fit without the constant
+    column. Measured: mu 1.99e-4 vs 2.06e-4, log_s 9.6e-5 vs 2.9e-5, frac 2.09e-4 vs 1.82e-4.
+  - The two optimisations are not bitwise equal: the summation order in the shared layers differs, and the fit is
+    chaotic at the net's 1e-3-of-spread limit.
+- `..._constant_scalar_column_and_floor_rule` (names_const; a column varying by 2e-3 is not constant; explicit (G, P)
+  weights are left untouched).
+- `..._lbfgs_guard_restores_the_best_state` (an injected overflow in chunk 2).
+- `tests/test_dist_factory.py::test_net_versions_of_the_primaries`:
+  - A9n: `logit_dh` is constant and reproduced bit for bit.
+  - Varying net columns reach rms/spread <= 1.1 %. A7n is the worst case: 22 outputs, and since it has no constant
+    net column its MLP part is identical to the old code.
+
+**Choice recorded.** The replica in `dist_factory` is removed, not bypassed. `init_info["fit_to"]` now reports
+`constant_columns`, `near_floor_columns`, `scale_floor_rel` and `lbfgs_stopped` instead of `fit_to_workaround`.
+
+## 3. Readings of the rules (most literal reading; each one flagged)
+
+1. **Parity, paired form** (A6 revised, point 4). The A0_init array must equal this machine's formula reference array
+   (refset, K = 64) within 1e-4 for every event and within 1e-6 on the mean. It is evaluated with
+   `provenance.paired_delta` / `paired_difference`. Failure stops the run.
+2. **Drift rule.** |paired_delta(A0_s, formula array)| > 2e-4 on either seed stops the run. Same as before, now on
+   this machine's arrays.
+3. **P-lr.** The lowest last-iterate validation mean wins; within 0.5e-4 of it the smaller lr wins. The difference
+   is formed as a paired delta against the lowest. Its mean equals the difference of the means, and the SE is
+   recorded. The pilots are registered (stage m2a_dist, names `plr_*`).
+4. **Equal NLL, one seed:** Delta <= +1 SE and Delta < +1e-4. A seed-1 exploratory run is triggered by keep **or**
+   seed-0 equal NLL (AUDIT 4.1). "Equal NLL" in the tables requires both seeds; with one seed it is shown as "-".
+5. **Replication.** Seed 1: Delta <= -1.5e-4, with the same sign as seed 0. Two-seed mean: the mean over events of
+   (d0 + d1)/2 must be <= -3e-4. I read "meets the threshold" as the magnitude part of the keep rule (-3e-4). The
+   two-seed SE is printed, but no 2-SE condition is applied to the mean. **Flag:** the stricter reading would also
+   require <= -2 SE.
+6. **Kept and replicated**, the input of Stage 2: keep on seed 0, plus replication. This is computed in the report
+   (`results.json: kept_and_replicated`). No combination is formed.
+7. **Convergence:** |val(last) - val(last - 1000)| < 0.5e-4, from this machine's fit history (same points, K = 64).
+   Reruns with doubled steps apply only to the six **poly** primaries, together with A2s of the same seed (`_x2`; the
+   comparator rerun is shared per seed). Net primaries are exploratory (AUDIT 4.1), so they are reported and not
+   rerun.
+8. **Guards: which runs.** AUDIT 4.0 says "kept rungs". I apply the guards (G-K, G-bulk, G-mass, G-region) to every
+   run of a rung that passes keep **or** one-seed equal NLL on any registered seed, and to each comparator (same
+   seed). This is a superset of the literal set. Guards never select, and on equal-NLL rungs the persistence checks
+   fail on `main_is_gain` by construction; this is reported as measured. The net column counts as its own rung.
+9. **G-region.**
+   - The hit term is attributed by **hit centre**, using the partition of `results/m1_audit/checks/c_gap.py`:
+     - deep: z' >= 1221 mm;
+     - border: last ring (r >= R_EDGES[31]) or the first / last z-bin;
+     - low acceptance: stored Abar <= 0.3 in the hit-centre cell;
+     - "flagged" = the union of these; "inner" = the rest.
+   - The normalisation term is its own row.
+   - Pass: the flagged hit term is <= 50 % of the **report-metric gain**, read as the margin flagged - 0.5 * main >= 0
+     (with gain < 0). The margin's SE is reported, and the result counts as resolved at |z| >= 2. The persistence
+     margin form for G-region is my extension of the refined definition, which states it for G-K and G-bulk.
+   - **Flag:** the denominator is the total gain, not the hit-term gain.
+10. **G-mass.** The per-event monitors of `registry.evaluate(guards=True)` (npz, file SHA-256 checked against the row)
+    are wrapped as TaggedArrays with subset `mass_monitor:<key>` and paired. There is no pass/fail threshold, because
+    the plan states none.
+11. **G-bulk** uses the stratum zb >= 1221 mm (amendment A4) and excludes events whose bulk NLL is non-finite in
+    either run (the count is printed). The short events (zb < 1221 mm) get their own report-metric row.
+12. **Secondary columns:** p < 2 GeV vs p >= 2 GeV, and contained vs side-leaking. An event is side-leaking when the
+    axis exit depth from `dist_factory.exit_depth` (port of `c_side.py`) is < 1450 mm. Rows exist for every Stage-1
+    comparison.
+13. **"Cleaner"** (AUDIT, Stage 2) is shown per rung:
+    - by gain: Delta vs this machine's formula array <= -3e-4 (A6 revised, point 4);
+    - by constants: k <= 0.9 * 101 together with equal NLL on both seeds.
+14. **1-SE:** the list applies it only to the Stage-2 finalist, so it is not applied in the Stage-1 report.
+15. **A6b "Fisher information of k".** This is the observed information of the raw coefficient of `sh_rk` (degree 0,
+    one coefficient) on the **training** events: the second central difference (h = 0.01) of sum_e nll_e at fixed
+    fold points (K = 16, seed 12345, deterministic), with SE = 1/sqrt(I). **Flag:** the alternatives are the
+    expected (squared-score) information, or the information on validation.
+16. **Stage 2** (separate, explicit phase; refused before `results.json` exists).
+    - If nothing is kept: A11 = A2s and A11n = A2n (no reruns), and A11k = A2s with k_train = 64 (seeds 0, 1).
+    - Otherwise: A11 merges the component keyword arguments of the kept and replicated rungs. A conflict (two depth
+      families, say), a mixture rung or A12 is refused, and the content is the user's decision. A11 runs seeds 0, 1, 2;
+      A11k is A11 with k_train = 64 (seeds 0, 1); A11n is its net version (seeds 0, 1).
+    - **A11p (pruning) is not implemented.**
+17. **The step-0 rows A9_s0_init / A9_s1_init** ("record Delta at step 0") are paired against A2s of the same seed in
+    the report.
+18. **Smoke mode only:**
+    - fits run steps / 100, with validation every steps / 4;
+    - factory loops are shortened (fit_to 40 Adam steps and no L-BFGS; init_from_target 15 + 15 steps, 8 search
+      points);
+    - guards are limited to 2 rungs (or the first rung, if none passes, so that the code path runs);
+    - **the parity and drift stops are recorded but not enforced.** The first smoke attempt stopped at the drift rule:
+      A0_s1 was +2.83e-4 after 40 steps, which is correct behaviour for an unconverged fit.
+    - None of this exists in the real mode.
+
+## 4. On the H200: command line, acceptance per phase, copy-back
+
+Preconditions: batch 1 has passed (ENABLING_STATUS.md, steps 5-11), above all step 6-7, which creates this machine's
+reference set. The Fable review of E4 has passed. The user has approved the run (PLAN 16.10, rules 5 and 9; 17.6).
+There is one GPU job at a time, the cap is 10 GB, and 4 threads.
 
 ```
-uv run python -B -m pytest -q shape-form-martin/tests/test_dist_factory.py -p no:cacheprovider     # CPU, ~10 s
-uv run python -B shape-form-martin/scripts/run_m2a.py templates parity plr stage0 stage1p stage1x
+cd <repo>
+export SFM_OUT_ROOT=<area>/sfm_out          # outside the clone (the same root as batch 1)
+export SFM_USER_CACHE=<area>/sfm_cache
+L=shape-form-martin/scripts/launch.sh
+P=.venv/bin/python
+$P -B shape-form-martin/scripts/run_m2a.py --list            # optional: the run list (no GPU, writes nothing)
+$L m2a $P -B shape-form-martin/scripts/run_m2a.py            # the default phases, in order, in one process
 ```
 
-Every phase skips finished runs (`results/m2a_dist/<name>/done.json`) and resumes interrupted fits from
-`checkpoint.pt`. The `parity` phase stops the track if A0 at step 0 differs from 18.120061 by more than 1e-5, and
-`stage0` stops it if |A0 − formula| > 2e-4. Still to write before steps 7–9: `scripts/run_m2a_report.py` (rules,
-guards with G-region, secondary columns, A6b Fisher information, Stage 2, RESULTS.md).
+Do not set `SFM_M2A_SMOKE`, `SFM_ALLOW_DIRTY_CLONE`, `SFM_RESULTS_DIR`, `SFM_CACHE_DIR`, `SFM_DATA_DIR`,
+`SFM_ALLOW_CPU` or `SFM_ALLOW_RECORD_WRITER`. Each phase prints `=== phase <name> ===`, and the job ends with
+`=== finished [...] ===`.
+
+| phase | acceptance (read in the log / decisions.json) | on failure |
+|---|---|---|
+| start | the line `[run_m2a] machine <id> ... file-access guard ACTIVE`, the same machine id as batch 1, `git ... clean: True` | DirtyClone / NoCUDA / NoReferenceSet: stop, report |
+| templates | `templates.json` written. Expected from the laptop: fb vs stored abar mean 7.6e-4, max 0.146 in z-bin 14 only; back_corrected max 1.81 (z' >= 1385 mm); full_box <= 1. | - |
+| parity | `parity: A0 at step 0 - formula array = ... -> PASS`, i.e. max event <= 1e-4 and |mean| <= 1e-6. Laptop: -1.9e-8 +- 1.1e-8, max 1.34e-5. | STOP (SystemExit): report the numbers |
+| plr | `plr.json` has `lr_poly`, `lr_net` | - |
+| stage0 | `A0 drift: ... -> continue`, i.e. both seeds within 2e-4 of the formula array | STOP: report (harness or optimum differs) |
+| stage1p | 18 rows (12 poly, 6 net) and the step-0 rows A9_s0_init / A9_s1_init; `decisions.json: convergence_primaries`, plus `_x2` reruns where needed | - |
+| stage1x | 18 seed-0 rows, plus seed-1 rows where triggered; `decisions.json: dropped = []` | - |
+| guards | a guard row (`guards` not null) and `g_region.json` for each run in `decisions.json: guard_targets`; `fisher/A6b_s0_sh_rk.json` | - |
+| report | `report: .../RESULTS.md and results.json written` | - |
+
+Volume (from `--list`):
+- 54 unconditional fits with 224,000 training steps (batch 256, K = 16);
+- at most 32 conditional fits (18 seed-1 runs, 12 primary reruns, 2 comparator reruns) with at most 200,000 more steps;
+- in total at most 86 fits, 424,000 steps.
+
+At laptop speed the AUDIT cost column gives about 4.0 h, plus up to 1.3 h of second seeds, plus reruns. **The H200
+speed is unknown.** Nothing is dropped and nothing depends on time.
+
+**Stage 2 is not started.** After the user has seen the Stage-1 table:
+`$L m2a_stage2 $P -B shape-form-martin/scripts/run_m2a.py stage2`.
+
+**Copy back.** Copy the whole machine directory, as in ENABLING_STATUS.md section 3:
+`tar -C <area>/sfm_out -cf machine.tar shape-form-martin/results/machines/<machine id>`, then unpack it at the
+laptop repository root. The Track A part is `runs/m2a_dist/`:
+
+| tracked (JSON / MD) | git-ignored, copy by hand |
+|---|---|
+| `plr.json`, `decisions.json`, `gpu_time.jsonl`, `results.json`, `RESULTS.md`, `templates/templates.json`, `fisher/*.json`; per run `done.json`, `fit_done.json`, `init.json`, `scores/<points id>/*.tag.json`, `g_region.json`; `registry.jsonl` (machine root) | `templates/*.pt`, `templates/*.npz`, `templates/train_theta.npy`; per run `model.pt`, `scores/<points id>/*.npy`, `val_mass_monitors.npz`; `fit.log` if a gate wants the curves (not `checkpoint.pt`) |
+
+## 5. Stopping and resuming
+
+- **Stop** only by the PID file:
+  - `kill "$(cat <area>/sfm_out/jobs/m2a_<UTC>.pid)"` (shared account: never by name);
+  - the GPU lock (flock) is released when the process dies.
+- **Resume** by re-issuing exactly the same `$L m2a ...` line. Then:
+  - finished runs are skipped by their `done.json`, which is refused if written by another machine;
+  - an interrupted fit resumes from its own `checkpoint.pt`: `train.fit` checks the config hash and the machine tag,
+    and checkpoints are written every 500 steps;
+  - a registry row is not written twice for the same `model.pt` (SHA-256 on the live stream);
+  - a step-0 row that is missing after training began raises an error rather than registering a trained model as
+    step 0;
+  - the decisions are recomputed from the registered arrays (the same numbers) and rewritten.
+- A run killed between `model.pt` and its registry row is registered on resume. A run killed between the row and
+  `done.json` is found by its checkpoint SHA and not evaluated again.
+- Guard rows and G-region arrays are redone only if missing. Tagged arrays are never overwritten (an identical
+  recomputation is accepted).
+- On the shared H200 a job is **refused, not queued**, when less than cap + 4 GB is free at the start of a GPU job
+  (`InsufficientGPUMemory`, the batch-1 rule). The process then exits, and the remedy is to re-issue the same command
+  later.
+
+**The listing compared with AUDIT 4.1** (`run_m2a.py --list`, 97 rows):
+
+| AUDIT 4.1 | in the listing |
+|---|---|
+| step-0 parity of A0 | `A0_init` |
+| P-lr pilots | A2s lr 0.003 / 0.01 / 0.03 and A2n lr 0.001 / 0.003 / 0.01, seed 0, 3000 steps |
+| Stage 0 | A0, A1, A2e at seeds 0 and 1; A2s, A2n at seeds 0, 1 and 2 (A2s_s0 before the net pilots) |
+| six primaries | poly at seeds 0 and 1 (A9 with step-0 rows), then net at seed 0, all 4000 steps (A10: 6000) |
+| convergence reruns | 12 conditional `_x2` reruns plus 2 comparator reruns, doubled steps |
+| 18 exploratory rungs | all at seed 0; seed 1 conditional on keep or equal-NLL; 4000 steps (the A10 family: 6000) |
+| Stage 2 | separate explicit phase |
+
+Every rung and seed of the list is present. Nothing is dropped, and no budget logic remains.
+
+## 6. Laptop dry run (evidence)
+
+Scratch output root `<scratch>/m2a_dry` (pristine mode, `SFM_ALLOW_DIRTY_CLONE=1`, because other workers' files are
+uncommitted), grid 144. The dry run was done **twice**, because the review's identity change landed in between:
+first as machine `rtx-4060-laptop-gpu-g144-629104b0`, then as `...-76c0f59a` (the machine directory now comes from
+`machine_dir_live()`).
+
+**First run** (old identity, code before the coordinator's adaptations):
+1. `val_parity.py --create-refset`: ALL PASS.
+2. Real templates + parity: PASS, same numbers as below.
+3. Smoke through the launcher, with the **file-access guard active**:
+   - killed by its PID file after A0_s0 had logged step 20 of 40;
+   - the same command resumed it (`resuming from step 20 of 40`);
+   - the next attempt stopped at the drift rule (A0_s1 +2.83e-4 after 40 steps). This led to smoke reading 18;
+   - the third issue ran templates through stage1x and the guard evaluations of 6 runs (A7_s0/s1, A9_s0/s1 and
+     A2s_s0/s1);
+   - it then failed at the A6b Fisher step: its output directory was not created. Fixed: `write_json` now creates
+     parent directories.
+
+**Second run** (new identity, the final code):
+1. `val_parity.py --create-refset`: `ALL APPLICABLE CHECKS: PASS`; the reference set was created in the new machine
+   directory.
+2. **Real** `run_m2a.py templates parity` (stage m2a_dist):
+   - templates computed: fb vs stored abar mean 7.6e-4, max 0.146 (Q1);
+   - **parity: A0 at step 0 - formula array = -1.869e-08 +- 1.1e-08 (n 14950), max |event| 1.34e-05 -> PASS** (the
+     paired criterion, 1e-4 per event and 1e-6 on the mean).
+3. **Smoke**, `SFM_M2A_SMOKE=1 launch.sh m2a_smoke2 .venv/bin/python -B .../run_m2a.py --smoke` (guard active):
+   - killed by its PID file at `[A0_s0] step 20` of 40;
+   - **resumed with the same command**: `[A0_s0] built ... resuming`, `resuming from step 20 of 40`;
+   - the drift stop was recorded and not enforced (smoke only);
+   - source verification passed for every run started from another run (the plr net pilots, A2n, primaries,
+     exploratory rungs);
+   - result: every phase ran to `=== finished [templates, parity, plr, stage0, stage1p, stage1x, guards, report] ===`.
+     - 55 finished runs: the 54 unconditional fits plus `A9r_s1`, triggered because A9r_s0 passed the one-seed
+       equal-NLL rule. 64 `m2a_smoke` rows and 1 `m2a_dist` row (A0_init), all on one stream
+       (`g144-s12345-b128-iid-val731a1997@<machine id>`).
+     - `decisions.json` holds `dropped: []` and the budget reason.
+     - Guard rows and G-region arrays were made for 6 runs (A7 and A9 at seeds 0 and 1 with their A2s comparators;
+       the smoke limit is 2 rungs).
+     - A6b Fisher information: 1443 (SE of the coefficient 0.026, smoke weights).
+     - RESULTS.md / results.json hold all the tables and 4 guard blocks. In the G-region block for A7_s0 vs A2s_s0,
+       the hit term + the normalisation term reproduce the main delta to 1.5e-5. G-mass is per monitor.
+   - In this run the job also **waited correctly for the GPU lock** while another worker's `val_parity` held it
+     (about 4 min).
+   - `run_m2a_report.py --smoke` on its own rewrote the report. Without `SFM_M2A_SMOKE=1` it is refused.
+4. **Nothing in the repository.**
+   - `results/registry.jsonl` and `results/test_access.log` have the same SHA-256 before and after (checked after
+     each run).
+   - No `results/machines/` exists in the clone. The only clone-side write is the git-ignored `cache/gpu.lock`.
+   - No JSON or registry line in the scratch machine directory contains `/home/` or the scratch path (checked);
+     paths are written as `<out>/...` and `<repo>/...`.
+   - The first run's outputs (old identity) were moved aside to `<scratch>/m2a_dry_firstrun_629104b0`.
+
+## 7. Not tested, and open questions
+
+- **Q1 (templates, for the reviewer).** The ported `acceptances` (c_side.py, 2 x 2 sub-points per cell) resolve the
+  front-face step only to 1/2. In z-bin 14 (z' in [-19.5, -6.6) mm) they give 0.5 against 0.354 (stored abar) at
+  r = 0. This difference enters the numerator of back_corrected / full_box in that bin, so A3c/A3x mix the back-face
+  correction with this sampling error there. A finer z sampling (`nsub`) would change the reviewer's definition, so it
+  was **not changed**. The decision is needed before the real templates phase.
+- **Q2.** The literal back_corrected ratio exceeds 1 (maximum 1.81) in 56 cells at z' >= 1385 mm, where
+  mean 1[z' < zb] falls to 0.19. full_box stays <= 1. Accepted as defined, but flagged.
+- Not run anywhere:
+  - the real fits (by instruction);
+  - the real guard evaluations on kept rungs (smoke only);
+  - Stage 2 (only its spec construction is unit-tested);
+  - the A6b Fisher information (smoke only).
+- Nothing ran on the H200: the capped-memory path of `on_gpu` and the clean-clone refusal are exercised there only.
+- **Proposed change to a module under review (not made).** `src/sfm/train.py` lines 452, 491 and 619 (after the review edits) print absolute
+  paths (`model_path`, `ck_path`) into `fit.log`. On the H200 that writes the `<area>` path into a file that may be
+  copied back (fit.log is git-ignored, so it is not committed). Exact diff:
+  `{model_path}` -> `{paths.portable(model_path)}` (lines 452 and 619), `({ck_path})` -> `({paths.portable(ck_path)})`
+  (line 491). Cosmetic: the fit log lines carry a second, local-time stamp.
+- `scripts/make_transfer_package.py list` cites `run_m2a.py:43`, `:44`, `:172` and `run_m2a_lib.py:121`, `:166`.
+  Those constants are removed, so `list` will report the rows as moved. The section 16.7 table rows for run_m2a are
+  resolved by this item.
+- The listing shows comparator `A2e_s<seed>` for the `A2s_s<seed>_x2` rerun rows. This is cosmetic: the rerun pairs
+  with its primary.
+
+## 8. Files for explicit staging
+
+Modified: `shape-form-martin/src/sfm/models/paramnet.py`, `shape-form-martin/src/sfm/models/dist_factory.py`,
+`shape-form-martin/scripts/run_m2a.py`, `shape-form-martin/scripts/run_m2a_lib.py`,
+`shape-form-martin/tests/test_dist_factory.py`, `shape-form-martin/tests/test_models.py`,
+`shape-form-martin/results/m2a_dist/STATUS.md`.
+New: `shape-form-martin/scripts/run_m2a_report.py`, `shape-form-martin/tests/test_run_m2a.py`.
+Nothing else was written in the repository. The dry-run outputs are in the scratch directory only.

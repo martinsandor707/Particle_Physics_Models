@@ -43,7 +43,15 @@ Acceptance templates (``acceptance_template``)
     ``::exit_depth`` (M1-d reviewer code; geometry: box |X|, |Y| <= 54 cells = 2624.4 mm, front face half a layer in
     front of the first-layer centre, back face at z_back, straight line from the global origin; 2 x 2 sub-points per
     cell and 24 azimuth nodes). 1[z' < zb_e] is averaged over the same two z sub-points per cell. The results are
-    stored once in ``results/m2a_dist/templates/`` (``scripts/run_m2a.py templates``) and read from there.
+    stored once per machine (``scripts/run_m2a.py templates``) in ``template_dir()`` =
+    ``OUT_RESULTS/machines/<machine id>/runs/m2a_dist/templates/`` (pristine-clone rule: under the output root, never
+    in the clone) and read from there. ``set_template_dir(path)`` points the factory elsewhere (e.g. to a machine
+    directory copied back to the laptop, to rebuild an A3c / A3x / A9 model there).
+
+ParamNet warm start: ``make_paramnet`` calls ``ParamNet.fit_to`` directly. The replica of fit_to that worked around
+the constant-column bug (a column constant in momentum, e.g. logit_dh of A9n, received a weight 1/(float rounding))
+was REMOVED on 25 Nov 2026 when fit_to itself got the scale floor (``sfm.models.paramnet.ParamNet.fit_to``); the
+fit report records the constant columns (``init_info["fit_to"]["constant_columns"]``).
 
 Last-ring wrapper (rung A12): ``LastRing(base)`` adds one trainable scalar (start 0) to the log-probabilities of
 ring 31 and renormalises: log P' = log_softmax(log P + d 1[ring = 31]).
@@ -66,14 +74,40 @@ from .field import C as _C
 from .field import acceptance_template as _field_acceptance_template
 from .paramnet import ParamNet
 
-__all__ = ["TEMPLATE_DIR", "NEW_TEMPLATES", "acceptance_template", "acceptances", "exit_depth", "compute_templates",
-           "LastRing", "radial_shape_names", "net_name_split", "make_paramnet", "copy_coefficients_by_name",
-           "kl_map", "legacy_core", "THETA_FILE"]
+__all__ = ["template_dir", "theta_file", "set_template_dir", "NEW_TEMPLATES", "acceptance_template", "acceptances",
+           "exit_depth", "compute_templates", "LastRing", "radial_shape_names", "net_name_split", "make_paramnet",
+           "copy_coefficients_by_name", "kl_map", "legacy_core"]
 
 STAGE = "m2a_dist"
-TEMPLATE_DIR = paths.RESULTS_DIR / STAGE / "templates"
-THETA_FILE = TEMPLATE_DIR / "train_theta.npy"
 NEW_TEMPLATES = ("back_corrected", "full_box")
+_TEMPLATE_DIR_OVERRIDE: Optional[Path] = None
+
+
+def set_template_dir(path) -> None:
+    """Read (and write) the Track A templates in ``path`` instead of this machine's directory (None: reset)."""
+    global _TEMPLATE_DIR_OVERRIDE
+    _TEMPLATE_DIR_OVERRIDE = Path(path) if path is not None else None
+
+
+def template_dir() -> Path:
+    """OUT_RESULTS/machines/<live machine id>/runs/m2a_dist/templates (or the ``set_template_dir`` override)."""
+    if _TEMPLATE_DIR_OVERRIDE is not None:
+        return _TEMPLATE_DIR_OVERRIDE
+    from ..machine import machine_dir_live              # the machine directory comes from the API, never built here
+    return Path(machine_dir_live()) / "runs" / STAGE / "templates"
+
+
+def theta_file() -> Path:
+    """The training events' theta (for the detector-frame halo), next to the templates."""
+    return template_dir() / "train_theta.npy"
+
+
+def __getattr__(name):                     # PEP 562: the former module constants, now per machine
+    if name == "TEMPLATE_DIR":
+        return template_dir()
+    if name == "THETA_FILE":
+        return theta_file()
+    raise AttributeError(name)
 
 # geometry of results/m1_audit/checks/c_side.py
 Z_BACK, X_E, LAYER = 4882.15, 54 * 48.6, 20.5
@@ -173,9 +207,10 @@ def acceptance_template(kind: str = "stored", device=None) -> torch.Tensor:
     device = device or _C.DEVICE
     if kind not in NEW_TEMPLATES:
         return _field_acceptance_template(kind, device)
-    f = TEMPLATE_DIR / f"{kind}.pt"
+    f = template_dir() / f"{kind}.pt"
     if not f.exists():
-        raise FileNotFoundError(f"{f} missing: run `uv run python -B shape-form-martin/scripts/run_m2a.py templates`")
+        raise FileNotFoundError(f"{paths.portable(f)} missing: run `uv run python -B shape-form-martin/scripts/run_m2a.py "
+                                "templates`")
     A = torch.load(f, map_location=device, weights_only=False)
     if A.shape != (_C.N_Z, _C.N_R) or not torch.isfinite(A).all():
         raise ValueError(f"template {kind}: bad shape {tuple(A.shape)} or non-finite values")
@@ -269,118 +304,10 @@ def make_paramnet(model, poly, lnp_grid=None, steps: int = 2000, lbfgs_iter: int
     rep = None
     if fit:
         grid = default_lnp(48, device=dev) if lnp_grid is None else lnp_grid
-        degenerate = _degenerate_net_columns(net, poly, grid)
-        if not degenerate:
-            rep = net.fit_to(poly, grid, steps=steps, lbfgs_iter=lbfgs_iter, log=log)
-            rep["fit_to_workaround"] = False
-        else:
-            # WORKAROUND for a bug in sfm.models.paramnet.ParamNet.fit_to (not patched here): with weights=None it
-            # divides every target column by its variance whenever var > 0. A column that is constant in momentum
-            # (e.g. logit_dh, a degree-0 row that the audit's names_net places among the net outputs) has a variance
-            # of float32 rounding (~1e-15) and then receives a weight ~1e15: the other columns are not fitted
-            # (rms errors ~1 on the shower parameters) and the L-BFGS polish overflows ("value cannot be converted
-            # to type float without overflow"). Replica of fit_to with one change - a column whose variance is below
-            # 1e-12 * max(1, mean^2) counts as constant (weight 1/G, as fit_to does for var == 0) - and the L-BFGS
-            # chunks guarded. Used only when such a column exists; otherwise fit_to itself runs.
-            rep = _fit_to_robust(net, poly, grid, steps=steps, lbfgs_iter=lbfgs_iter)
-            rep["fit_to_workaround"] = f"constant net target columns {degenerate}: robust replica of fit_to used"
+        # fit_to itself handles columns that are constant in momentum (scale floor, sfm.models.paramnet); the replica
+        # that worked around the earlier bug is gone (module docstring)
+        rep = net.fit_to(poly, grid, steps=steps, lbfgs_iter=lbfgs_iter, log=log)
     return net, rep
-
-
-def _fit_target(net, poly, lnp_grid):
-    dev = net.v0.device
-    lnp_grid = torch.as_tensor(lnp_grid, dtype=torch.float32, device=dev).reshape(-1)
-    with torch.no_grad():
-        full = poly(lnp_grid).to(dev, torch.float32)
-    idx = torch.tensor([poly.names.index(n) for n in net.names], device=dev)
-    return lnp_grid, full.index_select(1, idx)
-
-
-def _degenerate_net_columns(net, poly, lnp_grid) -> list:
-    _, target = _fit_target(net, poly, lnp_grid)
-    w = torch.ones_like(target)                                    # the float operations of fit_to (weights=None)
-    w = w / w.sum(0, keepdim=True)
-    mean = (w * target).sum(0)
-    var = (w * (target - mean) ** 2).sum(0)
-    bad = (var > 0) & (var <= 1e-12 * torch.clamp(mean * mean, min=1.0))
-    return [n for j, n in enumerate(net.names) if n in net.names_net and bool(bad[j])]
-
-
-def _fit_to_robust(net, poly, lnp_grid, steps: int = 2000, lr: float = 1e-2, lbfgs_iter: int = 500) -> dict:
-    """``ParamNet.fit_to(poly, lnp_grid, weights=None, steps, lr, lbfgs_iter)`` line by line, except for the
-    variance floor of the column normalisation and the guarded L-BFGS chunks (see ``make_paramnet``)."""
-    lnp_grid, target = _fit_target(net, poly, lnp_grid)
-    dev = net.v0.device
-    G, P = target.shape
-    w = torch.ones(G, P, device=dev)
-    w = w / w.sum(0, keepdim=True)
-    mean = (w * target).sum(0)
-    var = (w * (target - mean) ** 2).sum(0)
-    w = w / torch.where(var > 1e-12 * torch.clamp(mean * mean, min=1.0), var, torch.ones_like(var))
-    col = {n: j for j, n in enumerate(net.names)}
-    with torch.no_grad():
-        for n in net.names_const:
-            net.const[n].copy_(mean[col[n]])
-        last = net.mlp[-1]
-        last.weight.zero_()
-        last.bias.copy_(mean[[col[n] for n in net.names_net]])
-    net_cols = torch.tensor([col[n] for n in net.names_net], device=dev, dtype=torch.long)
-    xg = net.x(lnp_grid)[:, None]
-    tw, tt = w.index_select(1, net_cols), target.index_select(1, net_cols)
-
-    def objective():
-        return (tw * (net.mlp(xg) - tt) ** 2).sum()
-
-    net.train()
-    if steps > 0:
-        opt = torch.optim.Adam(net.mlp.parameters(), lr=lr)
-        sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=int(steps), eta_min=lr * 0.05)
-        for _ in range(int(steps)):
-            loss = objective()
-            opt.zero_grad(set_to_none=True)
-            loss.backward()
-            opt.step()
-            sched.step()
-    chunks_ok, before = 0, None
-    if lbfgs_iter > 0:
-        saved = {k: v.detach().clone() for k, v in net.mlp.state_dict().items()}
-        with torch.no_grad():
-            before = float(objective())
-        opt2 = torch.optim.LBFGS(net.mlp.parameters(), lr=1.0, max_iter=min(100, int(lbfgs_iter)), history_size=50,
-                                 line_search_fn="strong_wolfe", tolerance_grad=1e-12, tolerance_change=1e-15)
-
-        def closure():
-            opt2.zero_grad(set_to_none=True)
-            loss = objective()
-            loss.backward()
-            return loss
-
-        for _ in range(math.ceil(int(lbfgs_iter) / 100)):
-            last_ok = {k: v.detach().clone() for k, v in net.mlp.state_dict().items()}
-            try:
-                opt2.step(closure)
-                with torch.no_grad():
-                    ok = math.isfinite(float(objective()))
-            except RuntimeError:
-                ok = False
-            if not ok:
-                net.mlp.load_state_dict(last_ok)
-                break
-            chunks_ok += 1
-        with torch.no_grad():
-            after = float(objective())
-        if not (math.isfinite(after) and after <= before):
-            net.mlp.load_state_dict(saved)
-    with torch.no_grad():
-        err = net(lnp_grid) - target
-        wn = w / w.sum(0, keepdim=True)
-        rms = torch.sqrt((wn * err ** 2).sum(0))
-        mx = err.abs().max(0).values
-        final = float((w * err ** 2).sum())
-    return {"rms": {n: float(rms[j]) for j, n in enumerate(net.names)},
-            "max_abs": {n: float(mx[j]) for j, n in enumerate(net.names)},
-            "loss": final if math.isfinite(final) else float("nan"), "lbfgs_before": before,
-            "lbfgs_chunks_ok": chunks_ok}
 
 
 @torch.no_grad()
@@ -438,10 +365,11 @@ def _poly_for_component(model, core, degrees: Optional[dict]):
 
 
 def _theta_train():
-    if not THETA_FILE.exists():
-        raise FileNotFoundError(f"{THETA_FILE} missing: run `uv run python -B shape-form-martin/scripts/run_m2a.py "
+    f = theta_file()
+    if not f.exists():
+        raise FileNotFoundError(f"{paths.portable(f)} missing: run `uv run python -B shape-form-martin/scripts/run_m2a.py "
                                 "templates` (stores the training events' theta for the detector-frame halo)")
-    return np.load(THETA_FILE)
+    return np.load(f)
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -453,7 +381,7 @@ def component(ctx: BuildContext, variant: str = "survival_exact", provider: str 
               far: bool = True, det_halo: bool = False, template: str = "stored", start: Optional[str] = None,
               degrees: Optional[dict] = None, coef_shift: Optional[dict] = None, logit_dh_from_far: bool = False,
               init: str = "none", init_ref: Optional[str] = None, net_from: Optional[str] = None,
-              last_ring: bool = False):
+              last_ring: bool = False, fit_to_steps: int = 2000, fit_to_lbfgs: int = 500):
     """ComponentModel of AUDIT 4.1 (module docstring). Keyword arguments beyond the audit's list:
     lat_family_kw      ``family_kw`` of ``legacy_shower_lateral`` (A7l), used with a tuple ``shower_lat``
     degrees            polynomial degrees of new rows (A6b: {"sh_rk": 0})
@@ -462,6 +390,8 @@ def component(ctx: BuildContext, variant: str = "survival_exact", provider: str 
     init, init_ref     "none" | "shower_long" (reference run ``init_ref``, default ``start``)
     net_from           provider="net": the finished poly run to fit the ParamNet to (None = legacy provider)
     last_ring          wrap in ``LastRing`` (A12)
+    fit_to_steps, fit_to_lbfgs   Adam steps / L-BFGS iterations of the ParamNet warm start (AUDIT 4.1: 2000 / 500;
+                       other values only in the smoke mode of scripts/run_m2a.py, registered under another stage)
     """
     from ..families import build_variant
     from ..families.components import init_shower_long
@@ -476,7 +406,8 @@ def component(ctx: BuildContext, variant: str = "survival_exact", provider: str 
                                                 skip_init=True, results_dir=ctx.results_dir)).train()
         base = model.base if isinstance(model, LastRing) else model
         poly = base.provider
-        net, rep = make_paramnet(base, poly, fit=not ctx.skip_init, log=None)
+        net, rep = make_paramnet(base, poly, fit=not ctx.skip_init, log=None, steps=fit_to_steps,
+                                 lbfgs_iter=fit_to_lbfgs)
         ref = None
         if not ctx.skip_init:
             import copy
@@ -553,7 +484,8 @@ def component(ctx: BuildContext, variant: str = "survival_exact", provider: str 
         model = LastRing(model).to(dev)
     if provider == "net":                         # net_from is None: fit to the model's own (legacy) provider
         base = model.base if isinstance(model, LastRing) else model
-        net, rep = make_paramnet(base, base.provider, fit=not ctx.skip_init)
+        net, rep = make_paramnet(base, base.provider, fit=not ctx.skip_init, steps=fit_to_steps,
+                                 lbfgs_iter=fit_to_lbfgs)
         base.set_provider(net)
         info.update({"net_from": None, "fit_to": _fit_report(rep)})
     if ref is not None:
@@ -567,7 +499,8 @@ def component(ctx: BuildContext, variant: str = "survival_exact", provider: str 
 def mixture(ctx: BuildContext, K: int = 3, long="emg", long_kw: Optional[dict] = None, lat="burr",
             lat_kw: Optional[dict] = None, depth: str = "linear", order: bool = True, fine: bool = True,
             template: str = "stored", provider: str = "poly", init: str = "target", init_ref: Optional[str] = None,
-            init_steps: Sequence[int] = (1500, 1500), init_search: int = 400, net_from: Optional[str] = None):
+            init_steps: Sequence[int] = (1500, 1500), init_search: int = 400, net_from: Optional[str] = None,
+            fit_to_steps: int = 2000, fit_to_lbfgs: int = 500):
     """MixtureModel of AUDIT 4.1 (A10 and its exploratory variants). The PolyProvider has degree 3 for every row and
     degree 0 for the c{k}_lat_* shape rows, starts at the family defaults (v0, vs, mass of the legacy fit), and is
     moved onto the map of ``init_ref`` by ``init_from_target`` on the core maps (before the acceptance)."""
@@ -583,7 +516,7 @@ def mixture(ctx: BuildContext, K: int = 3, long="emg", long_kw: Optional[dict] =
         model = load_run(net_from, BuildContext(device=dev, train=ctx.train, seed=ctx.seed, log=ctx.log,
                                                 skip_init=True, results_dir=ctx.results_dir)).train()
         poly = model.provider
-        net, rep = make_paramnet(model, poly, fit=not ctx.skip_init)
+        net, rep = make_paramnet(model, poly, fit=not ctx.skip_init, steps=fit_to_steps, lbfgs_iter=fit_to_lbfgs)
         ref = None
         if not ctx.skip_init:
             import copy
@@ -629,6 +562,9 @@ def _fit_report(rep):
     if rep is None:
         return None
     rms = rep["rms"]
+    lb = rep.get("lbfgs") or {}
     return {"loss": rep["loss"], "rms_max": max(rms.values()) if rms else None,
             "rms_max_name": max(rms, key=rms.get) if rms else None,
-            "fit_to_workaround": rep.get("fit_to_workaround", False)}
+            "constant_columns": rep.get("constant_columns"), "near_floor_columns": rep.get("near_floor_columns"),
+            "scale_floor_rel": rep.get("scale_floor_rel"), "lbfgs_stopped": lb.get("stopped"),
+            "fit_to": "sfm.models.paramnet.ParamNet.fit_to (scale floor; no replica)"}
