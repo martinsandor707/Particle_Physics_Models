@@ -778,7 +778,7 @@ the machine). Where this section and those files disagree, the files hold the de
 | P5 | **Accepted.** The H200 controls are `b0h_seed0`, `b0h_seed1`, `b0h_seed2`; `b0_seed0` stays untouched as the archived laptop record | — | §13, A6 revised, point 5; E6 |
 | P6 | **Modified.** Authoritative H200 results are never placed inside the git-ignored `cache/` | either the machine tag is added to the array and registry schema before anything is synced back, or results are staged under `shape-form-martin/results/h200_records/` (tracked) and promoted only with a machine tag before Gate 1 / Gate 2c | §16.6; E1 |
 
-Reading of two points, to be corrected by the user if wrong:
+Reading of two points, **confirmed by the user on 25 Nov 2026**:
 - **P3, mean-parity bound.** The user wrote "≤ 5e-5". The mean clause already in the stop rule is the C1 criterion of
   4e-6, which is tighter and therefore satisfies that bound; it is kept. (C1 measured 3e-8.)
 - **P6, which of the two routes.** The first is taken: the machine tag goes into the schema before anything is
@@ -1360,3 +1360,45 @@ Tests of the campaign suite on an H200:
   but not run in that state. For the Parquet file, which is opened from C++ without a Python audit event, the
   check was repeated under `strace` for the code paths exercised.
 - **Concurrency on the H200:** nothing measured there; the laptop result (no gain) may not transfer.
+
+### 16.9 Sequence for the user: what is copied when
+
+Three copies in one direction, and results coming back in between. Commands are run from the repository root on the
+laptop unless marked; `<user>@<h200>` and `<repo>` are the H200 login and the path of the clone there.
+
+**Copy 1 — any time from now (70 files, 394,801,974 bytes).** Prerequisite: the branch `shape-form-martin` cloned on the
+H200 at commit `7b4407e` or later. It makes the environment and identity checks possible; no campaign step can run
+yet (§16.7).
+
+```
+ssh <user>@<h200> "mkdir -p <repo>/shape-form-martin/cache/laptop_records"
+rsync -a --files-from=shape-form-martin/transfer/files_b_inputs.txt ./ <user>@<h200>:<repo>/
+rsync -a --files-from=shape-form-martin/transfer/files_b_laptop_records.txt ./ <user>@<h200>:<repo>/shape-form-martin/cache/laptop_records/
+```
+
+Then on the H200, from `<repo>` (results to be reported back; they decide how the enabling code is written):
+
+```
+uv sync --python 3.12
+uv run python -B shape-form-martin/scripts/make_transfer_package.py verify
+uv run python -B -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available(), torch.cuda.get_device_name(0), torch.cuda.device_count())"
+nvidia-smi
+gcc --version
+uv run python -B -c "import sys; sys.path.insert(0,'shape-form-martin/src'); from sfm import refstream; print('launch grid:', refstream.local_grid())"
+uv run pytest shape-form-martin/tests/test_refstream.py -q -k emulation_reproduces_torch_rand_bitwise
+```
+
+Expected: `verify` PASS with "deferred files absent: yes (8 checked …)"; torch `2.14.0+cu130 13.0 True`, one GPU;
+launch grid 1056; the emulator test passes. Nothing else is to be run there yet: no fit, no `run_m2*` script, never
+`scripts/parity.py` or `scripts/build_cache.py`.
+
+**Start of the GPU work on the H200 — not before the enabling code of §16.7 is written, reviewed and pushed.** The
+user is then given a commit to pull and the exact commands for run-book steps 6–11 (validation parity and pairing
+arrays, guard references, re-scoring, the Track B fits and controls, ensembles), later for Track A, the remaining
+Track B list, the PySR refits and the θ track.
+
+**Results back** after each batch (§16.6): tracked files by `git push` / `git pull`; per-event arrays and checkpoints
+by hand, machine-tagged.
+
+**Copy 2 — only after Gate 2c has passed (8 files, 2,674,270,935 bytes):** the two deferred lists and
+`verify --after-gate2c` (§16.2), immediately before the single final run.
