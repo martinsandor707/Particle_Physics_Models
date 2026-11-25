@@ -1615,3 +1615,30 @@ benchmark MLP and the component formula standing in for the finalists; unit 10�
 ### 17.4 Live PySR runner tests — running
 
 Smoke tests a–f on synthetic targets (`results/m3_sr/smoke/STATUS.md`), at most 8 threads, not the campaign pilot.
+
+### 17.5 User decision on the eight readings of §17.1 (25 Nov 2026)
+
+**All eight readings are accepted**, with four confirmations to be built in before the PySR pilot (in progress with the
+mathematics worker; state in `src/sfm/sr/STATUS.md`):
+
+1. *Readings 1 and 3.* The half-swing limit stays 1 nat, stated as "up to 2 nat after normalisation". To confirm: that
+   a bound on the raw, unshifted correction prevents float32 cancellation from large pure-x gauge terms, and that
+   `sqa(x)` cannot give an infinite or undefined gradient at x = 0 in a refit. **Orchestrator's first check:** the
+   overflow cap of reading 3 is 10³⁰, which prevents overflow but not cancellation, so the first point is probably
+   not met as the code stands and needs its own mechanism; `d/dx sqrt(|x|)` at 0 is 0 · ∞ in automatic differentiation
+   unless guarded.
+2. *Readings 2 and 6.* A **proven** magnitude bound is required for finalists, together with the domain and tail
+   checks, and they are run again **after** the joint likelihood refit, on the fitted constants. Search-stage screening
+   keeps the literal rule (an undecided result passes, with its interval reported).
+3. *Reading 4.* The post-search scan for constant-only exponents stays, and the search itself limits the exponent of
+   `ppow` to size 1. The Stage-1 configuration already has `ppow: (7, 1)`: exponent of size 1, base of at most 7
+   nodes. The user wrote `(-1, 1)`; the stated purpose (no compound exponents) is met by the existing setting, and
+   `(-1, 1)` would only remove the base-size limit that §7 asks for, so `(7, 1)` is kept unless the user wants the
+   base unrestricted.
+4. *Readings 5 and 7.* Gate 2-pilot logs the effective sample size per momentum slice under the size measure ω^0.5.
+   The weighted-variance loss is a nonlinear function of weighted sums: it is design-consistent (asymptotically
+   unbiased), not unbiased — the wording "unbiased" in §17.1, row 5, is corrected by this. For the control C2, the same
+   extended-box audit is applied and its verdict is reported beside Δ(SR) − Δ(C2).
+
+**Added to the Gate 2-pilot checklist of §7:** n_eff per momentum slice; the audit verdict of C2; the float32 error
+bound of the correction after the gauge mechanism; finite gradients of every operator at 0.
