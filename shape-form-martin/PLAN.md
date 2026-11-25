@@ -1439,3 +1439,62 @@ Gate 1. Python 3.13 changes no pinned package: the environment markers of the re
 below 3.12 (numpy 2.5.3, scipy 1.18.1 and contourpy 1.4.0 apply from 3.12 on), so the H200 has the laptop's package
 versions under another interpreter. The interpreter version becomes part of the machine tag (E1). Nothing else has
 been run on the H200; the GPU work waits for the enabling code of §16.7 and the user's go-ahead.
+
+### 16.10 Go-ahead, operating rules on the H200, and first look (25 Nov 2026)
+
+**Go-ahead (user, 25 Nov 2026).** The enabling code of §16.7 is started (first batch: E1, E2, E3, E5, E10 and the
+`b0h_*` part of E6), together with two of the paused laptop items of §15: the PySR mathematics modules and the
+detector-geometry audit. Status files: `transfer/ENABLING_STATUS.md`, `src/sfm/sr/STATUS.md`,
+`results/m2c_theta/geometry/STATUS.md`. Still paused: Track B and Track A fits (they wait for the enabling code and
+run on the H200), the live PySR runner tests.
+
+**Who runs the H200.** The orchestrator runs the H200 commands itself over ssh, under rules the user set in an
+interview on 25 Nov 2026. The repository is public: the host address, the port and the location of the private key
+are never written into it. Below, `<area>` is the user's own folder inside a shared account on the H200 and `<repo>`
+the clone inside it.
+
+| # | Rule |
+|---|---|
+| 1 | Reading and writing only inside `<area>`. One exception: the Python interpreter of the account's miniforge installation may be executed to create virtual environments inside `<area>`. No root. Where access is refused: accept it, try something that does not circumvent it, or ask the user with recommendations |
+| 2 | Jobs are started directly from the shell, detached; there is no scheduler |
+| 3 | The machine is shared and another process is always on the GPU: read `nvidia-smi` before every start, do not wait for an empty GPU, never touch other users' processes or files, keep CPU and GPU use reasonable |
+| 4 | Caps for the campaign's jobs together: at most 4 GPU jobs, 40 GB of GPU memory, 16 CPU threads — and more than one job at a time only if the throughput test of §16.5 shows a gain. Anything above needs the user's explicit permission |
+| 5 | Read-only commands and the campaign commands of a batch the user approved in advance run without asking; anything else (a new kind of command, an install, a deletion, a git change) is asked first |
+| 6 | Deleting or overwriting: only scratch files the orchestrator created itself (transfer archives after unpacking, scratch and benchmark directories). Never result files, checkpoints or logs; never anything it did not create |
+| 7 | Git in the H200 clone: fetch, pull, status, log, diff on branch `shape-form-martin`. No commit, push, reset, stash or branch switch. Results come back with `scp` and are committed from the laptop |
+| 8 | Every command redirects caches and temporary files into `<area>` (pip cache, XDG cache, matplotlib, CUDA cache, `TMPDIR`). `pip` only into the clone's `.venv`, only from `transfer/requirements-h200.txt`, after telling the user |
+| 9 | Jobs may run unattended only as part of an approved batch and after the user was told what runs, for how long, where the log is and how to stop it |
+| 10 | The login is a shared account, so other people's processes carry the same user name. Only processes whose PID the campaign recorded in a PID file inside `<area>` are ever signalled, after checking command line and working directory; nothing is selected by name or user |
+| 11 | The H200 is reachable only with the user's VPN active; if it is not reachable the user is asked and nothing else is tried |
+| 12 | The eight deferred files are copied only after Gate 2c and the user's explicit OK at that time. Anything unexpected stops the work and is reported |
+
+**Consequences for this plan**
+- *§16.5 (P1).* The caps of rule 4 replace "first use: N ≤ 8" and the static memory rule: N ≤ 4, 10 GB per worker (set
+  with `torch.cuda.set_per_process_memory_fraction` from the measured device total), 16 threads in total. "Exclusive"
+  means exclusive among the campaign's own jobs, as the lock always did; other users' processes cannot be excluded.
+  They should not change results (on the laptop, evaluations inside `deterministic()` were bit-identical with other
+  processes on the GPU; on the H200 this is checked by the bit-identical second run of step 6) but they change
+  timings, so the throughput test needs interleaved repeats.
+- *§16.6 (results back).* Nothing is committed on the H200. The clone there stays pristine — an empty `git status` and
+  a `HEAD` equal to a pushed commit are recorded with every batch — so every pull is a fast-forward. The campaign
+  therefore writes no tracked file and no later-tracked path inside the clone on the H200: its outputs go to an output
+  root inside `<area>` but outside the clone, come back with `scp`, and are placed on the laptop in a machine-tag-named,
+  tracked location below `results/` (P6) and committed there. This replaces "committed on the H200 and pulled on the
+  laptop" in §16.6; the design is part of E1.
+- *§16.3.* Commands use absolute paths below `<area>` and the cache redirections of rule 8; each job writes a PID file.
+
+**First look over ssh (read-only, 25 Nov 2026, 15:13).** Clone at `1f94b57`, working tree clean. GPU "NVIDIA H200",
+143,771 MiB, of which 20.4 GB were in use by one process of another user; 224 CPU threads, load 14; 11 TB free on the
+file system.
+
+**Finding: copies of deferred material are on the H200 outside the clone.** `<area>` holds, from before the
+campaign's transfer, a file with the name of the deferred Parquet raw table (dated 23 Nov, 3,417,528,546 bytes — not
+the laptop's 2,604,833,654 bytes, so another encoding of presumably the same events), an archive
+`shape-form-proton.zip` (which may contain the earlier study's stored per-event test arrays) and a second pion hit
+table. The orchestrator listed the folder and opened none of them. `make_transfer_package.py verify` did not see them:
+it searches the clone, and for name **and** size. The statement of §13 (A6 revised, point 8) and §16.1 that "before
+Gate 2c the H200 holds no test-event hits or scores in any form" is therefore **not true for the machine**. It is true
+for the clone, which is all the campaign code reaches through its repository-relative paths. Decision pending with the
+user: move these files off the H200 until Gate 2c, or restate the guarantee as "absent from the clone, and no campaign
+process opens a path outside the clone and its output root" and enforce that technically. No GPU step is run on the
+H200 before this is settled.
