@@ -1,6 +1,5 @@
 shape-form-original/data/pion_standalone_N100000_M0_20GeV_reg_balanced_s1_v3.parquet
 shape-form-martin/cache/pion_s1_trainval.pt
-shape-form-martin/cache/pion_s1_test.pt
 shape-form-martin/cache/pion_s1_meta.json
 shape-form-proton/results/particles/pion/mlp_std.pt
 shape-form-proton/results/particles/pion/new3_std_n3.pt
@@ -8,9 +7,7 @@ shape-form-proton/results/particles/pion/abar.pt
 shape-form-proton/results/particles/pion/test_v3.json
 shape-form-proton/results/particles/pion/mlp_std.json
 shape-form-proton/results/particles/pion/new3_std.json
-shape-form-proton/results/particles/pion/test_v3_nll.npz
 shape-form-martin/results/m0_parity/val_event_number.npy
-shape-form-martin/results/m0_parity/test_event_number.npy
 shape-form-martin/results/m0_parity/abar_front.pt
 shape-form-martin/results/m0_parity/abar_front_back.pt
 shape-form-martin/results/m2b_mlp/s1_seed11/model.pt

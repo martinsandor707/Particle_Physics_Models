@@ -1,0 +1,4 @@
+shape-form-martin/results/m0_parity/mlp_test_nll.npy
+shape-form-martin/results/m0_parity/formula_test_nll.npy
+shape-form-martin/results/m0_parity/mlp_test_nll_ref1056.npy
+shape-form-martin/results/m0_parity/formula_test_nll_ref1056.npy

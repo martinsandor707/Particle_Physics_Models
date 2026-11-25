@@ -1,11 +1,7 @@
 shape-form-martin/results/m0_parity/mlp_val_nll.npy
 shape-form-martin/results/m0_parity/formula_val_nll.npy
-shape-form-martin/results/m0_parity/mlp_test_nll.npy
-shape-form-martin/results/m0_parity/formula_test_nll.npy
 shape-form-martin/results/m0_parity/mlp_val_nll_ref1056.npy
 shape-form-martin/results/m0_parity/formula_val_nll_ref1056.npy
-shape-form-martin/results/m0_parity/mlp_test_nll_ref1056.npy
-shape-form-martin/results/m0_parity/formula_test_nll_ref1056.npy
 shape-form-martin/results/registry_refs/mlp_val_k1024.npy
 shape-form-martin/results/registry_refs/mlp_val_bulk_stratum.npy
 shape-form-martin/results/registry_refs/formula_val_k1024.npy

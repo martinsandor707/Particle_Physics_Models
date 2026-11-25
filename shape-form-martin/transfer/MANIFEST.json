@@ -1,21 +1,86 @@
 {
- "schema": 1,
+ "schema": 2,
  "title": "H200 transfer package (PLAN.md section 16)",
- "generated_utc": "2026-11-25T09:37:22+00:00",
+ "generated_utc": "2026-11-25T11:08:49+00:00",
  "generated_by": "shape-form-martin/scripts/make_transfer_package.py list",
  "git": {
-  "commit": "c9b7f72a9a6a2f5434f1b244e7042cb419477c96",
+  "commit": "fcd223af5051d40244f8743ce9843149d2f8f4f4",
   "branch": "shape-form-martin",
   "tracked_tree_dirty": true,
   "note": "verify requires this commit to be an ancestor of (or equal to) the H200 checkout's HEAD"
  },
  "policies": {
-  "test_cache": "shape-form-martin/cache/pion_s1_test.pt is copied byte for byte (not rebuilt) and verified by its SHA-256 and size only: the transfer script reads it as an opaque byte stream (chunked binary read in sha256_file) and never unpickles, torch-loads or load_sets() it. A byte hash is not a test access and is not logged. The file must stay unopened as data until the single final evaluation after Gate 2c.",
-  "csv": "No *.csv is listed, stat'ed for the package or hashed (the 15 GB raw CSV is not part of the package; only the Parquet copy is). sha256_file() and the table expansion refuse any .csv path.",
+  "test_derived": "Seven files carry per-event or per-hit information about the test events: the test cache shape-form-martin/cache/pion_s1_test.pt, the earlier study's stored per-event test arrays shape-form-proton/results/particles/pion/test_v3_nll.npz, the test event order shape-form-martin/results/m0_parity/test_event_number.npy, and the four laptop test arrays shape-form-martin/results/m0_parity/{mlp,formula}_test_nll{,_ref1056}.npy. Rule (user decision P4, 25 Nov 2026): they are not copied with the rest of the package. They sit in their own lists (files_b_test_derived_inputs.txt to the same path, files_b_test_derived_records.txt into the quarantine root) and are copied to the H200 only after Gate 2c has passed. Until then `verify` FAILS if any of them exists on the H200 - at its live path, under the quarantine root, or under the same file name with the same size anywhere in the working tree, confirmed by SHA-256 (the test cache only by size and a byte hash) - and `verify --after-gate2c` requires all seven, verified by size and SHA-256. Reason: physical absence on the machine of record shows that nothing there read them before the final evaluation, without having to trust the test-access log (it has no host field, and load_sets writes its line before it opens the file, data.py:286-287) or a reading of the code. No moved step, import or campaign test reads the three test-derived inputs (static reading plus a run with the seven made invisible by an audit hook; see absence_before_gate2c).",
+  "test_derived_files": [
+   {
+    "path": "shape-form-martin/cache/pion_s1_test.pt",
+    "group": "b1",
+    "list": "files_b_test_derived_inputs.txt",
+    "destination": "shape-form-martin/cache/pion_s1_test.pt",
+    "bytes": 68476893
+   },
+   {
+    "path": "shape-form-proton/results/particles/pion/test_v3_nll.npz",
+    "group": "b1",
+    "list": "files_b_test_derived_inputs.txt",
+    "destination": "shape-form-proton/results/particles/pion/test_v3_nll.npz",
+    "bytes": 600804
+   },
+   {
+    "path": "shape-form-martin/results/m0_parity/test_event_number.npy",
+    "group": "b1",
+    "list": "files_b_test_derived_inputs.txt",
+    "destination": "shape-form-martin/results/m0_parity/test_event_number.npy",
+    "bytes": 119776
+   },
+   {
+    "path": "shape-form-martin/results/m0_parity/mlp_test_nll.npy",
+    "group": "b2",
+    "list": "files_b_test_derived_records.txt",
+    "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m0_parity/mlp_test_nll.npy",
+    "bytes": 59952
+   },
+   {
+    "path": "shape-form-martin/results/m0_parity/formula_test_nll.npy",
+    "group": "b2",
+    "list": "files_b_test_derived_records.txt",
+    "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m0_parity/formula_test_nll.npy",
+    "bytes": 59952
+   },
+   {
+    "path": "shape-form-martin/results/m0_parity/mlp_test_nll_ref1056.npy",
+    "group": "b2",
+    "list": "files_b_test_derived_records.txt",
+    "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m0_parity/mlp_test_nll_ref1056.npy",
+    "bytes": 59952
+   },
+   {
+    "path": "shape-form-martin/results/m0_parity/formula_test_nll_ref1056.npy",
+    "group": "b2",
+    "list": "files_b_test_derived_records.txt",
+    "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m0_parity/formula_test_nll_ref1056.npy",
+    "bytes": 59952
+   }
+  ],
+  "test_summary_metadata_now": [
+   {
+    "path": "shape-form-proton/results/particles/pion/test_v3.json",
+    "why_now": "read by every legacy formula load (shapelab.final_round / final_kwargs, shape-form-proton/shapelab.py:358-386, via sfm.legacy.load_component_formula, families.load_legacy_core, registry._default_bench_models): it defines the final formula's structure (variant, variant_kwargs, degrees)",
+    "test_content": "summary numbers of the earlier study only: n_events, the test means of 10 models, paired differences with SE, gap-closed fractions and two 20-entry per-momentum-bin mean differences; no per-event or per-hit values. The headline test means are already printed in PLAN.md."
+   },
+   {
+    "path": "shape-form-martin/cache/pion_s1_meta.json",
+    "why_now": "read by sfm.data.load_meta (data.py:300) and registry.validation_reference (registry.py:144-145, the train/val SHA-256 keys the validation fingerprint); it holds the reference hashes of both caches",
+    "test_content": "summary metadata only: counts.test, files.test (SHA-256 and size of the test cache) and splits.test (aggregate statistics of the test split: events, hits, extremes of p, theta, zb, z_local, r and evis, hits per event min/median/max, events per momentum bin); no event identities, no per-event or per-hit arrays, no scores."
+   }
+  ],
+  "test_events_in_raw_parquet": "The Parquet raw table (group b1, copied now) holds the hits of ALL 99,689 events, including the 14,956 test events: the split is made only when the cache is built (sfm/data.py:150-160 split_indices, seeded per momentum bin), and sfm.data.build_cache writes a test cache as well (data.py:227). It is not test-derived and travels now (zero-training geometry arm; cross-check rebuild only after Gate 2c). Consequently the absence of the seven files shows that none of the stored test-derived files was used; it does not make the test events unreachable on the H200. Before Gate 2c: never run build_cache.py there (not even into scratch directories), and any code that reads the Parquet file must restrict itself to the train/val event numbers of the copied cache. A rebuilt test cache at its live path fails verify; under another directory it is reported when name and size match.",
+  "test_cache": "shape-form-martin/cache/pion_s1_test.pt is test-derived: it is NOT copied now but only after Gate 2c (list files_b_test_derived_inputs.txt), byte for byte (not rebuilt), and verified by its SHA-256 and size only: the transfer script reads it as an opaque byte stream (chunked binary read in sha256_file) and never unpickles, torch-loads or load_sets() it. A byte hash is not a test access and is not logged. The file must stay unopened as data until the single final evaluation after Gate 2c.",
+  "csv": "No *.csv is listed, stat'ed for the package or hashed (the 15 GB raw CSV is not part of the package; only the Parquet copy is). sha256_file() and the table expansion refuse any .csv path; the absence search of verify skips *.csv names before any stat.",
   "quarantine_root": "shape-form-martin/cache/laptop_records",
   "quarantine_rule": "group b2 files are copied ONLY under the quarantine root (repo-relative path preserved); a stream-dependent b2 file found at its live path is a verify FAILURE",
   "cache_decision": {
-   "decision": "COPY both cache files and pion_s1_meta.json; verify by SHA-256 against the meta file (and this manifest); do NOT rebuild in place",
+   "decision": "COPY, do NOT rebuild: the train/val cache and pion_s1_meta.json now, the test cache only after Gate 2c (test-derived); verify each by SHA-256 against the meta file (and this manifest)",
    "facts": [
     "scripts/build_cache.py has no argument parser: any invocation (even --help) rebuilds",
     "sfm.data.build_cache always writes BOTH pion_s1_trainval.pt and pion_s1_test.pt (data.py:226-227) and the meta file (:246); build_cache.py then rewrites the tracked results/m0_parity/cache_build.json (:64-66)",
@@ -23,16 +88,93 @@
     "the tensors are not guaranteed bit-identical on another CPU: float64 np.cos/np.sin (data.py:135-136, common.py:144) may use AVX-512 SVML kernels on the H200 host (the laptop CPU has no AVX-512); torch CPU log for lnp likewise",
     "the code would not notice a different rebuild: validation_reference re-keys the fingerprint by the new trainval SHA-256 and _bench_guard_arrays recomputes silently",
     "Gate 0 (train/val bit-identical to the reference loader) and C1 (exact per-event test parity) validated exactly the laptop bytes; only a byte copy carries both over; the test file stays unopened, so a byte hash is the right check",
-    "optional cross-check without touching the live files: SFM_CACHE_DIR=<scratch>/c SFM_RESULTS_DIR=<scratch>/r uv run python -B shape-form-martin/scripts/build_cache.py, then compare the scratch SHA-256 values (equal = bit-identical rebuild); delete the scratch test file"
+    "optional cross-check without touching the live files - on the H200 ONLY AFTER Gate 2c, because build_cache also writes a test cache (data.py:227), whose absence verify checks before Gate 2c: SFM_CACHE_DIR=<scratch>/c SFM_RESULTS_DIR=<scratch>/r uv run python -B shape-form-martin/scripts/build_cache.py, then compare the scratch SHA-256 values (equal = bit-identical rebuild); delete the scratch test file"
    ]
   }
  },
  "transfer_commands": {
   "inputs": "rsync -a --files-from=shape-form-martin/transfer/files_b_inputs.txt <repo>/ <user>@<h200>:<repo>/",
   "laptop_records": "rsync -a --files-from=shape-form-martin/transfer/files_b_laptop_records.txt <repo>/ <user>@<h200>:<repo>/shape-form-martin/cache/laptop_records/",
+  "test_derived_inputs": "rsync -a --files-from=shape-form-martin/transfer/files_b_test_derived_inputs.txt <repo>/ <user>@<h200>:<repo>/",
+  "test_derived_records": "rsync -a --files-from=shape-form-martin/transfer/files_b_test_derived_records.txt <repo>/ <user>@<h200>:<repo>/shape-form-martin/cache/laptop_records/",
+  "phases": {
+   "now": [
+    "inputs",
+    "laptop_records"
+   ],
+   "after_gate2c": [
+    "test_derived_inputs",
+    "test_derived_records"
+   ]
+  },
   "tar_alternative": "tar -C <repo> -cf inputs.tar -T shape-form-martin/transfer/files_b_inputs.txt",
-  "verify_on_h200": "python3 -B shape-form-martin/scripts/make_transfer_package.py verify   (from <repo>)",
+  "verify_on_h200_before_gate2c": "python3 -B shape-form-martin/scripts/make_transfer_package.py verify   (from <repo>; fails if any test-derived file is on the machine)",
+  "verify_on_h200_after_gate2c": "python3 -B shape-form-martin/scripts/make_transfer_package.py verify --after-gate2c   (from <repo>, after the two test-derived lists were copied)",
   "verify_on_laptop": "python3 -B shape-form-martin/scripts/make_transfer_package.py verify --source-machine"
+ },
+ "lists": {
+  "inputs": {
+   "file": "shape-form-martin/transfer/files_b_inputs.txt",
+   "group": "b1",
+   "test_derived": false,
+   "transfer_phase": "now",
+   "destination_root": "<repo>/",
+   "totals": {
+    "files": 20,
+    "bytes": 2993885926
+   },
+   "rsync": "rsync -a --files-from=shape-form-martin/transfer/files_b_inputs.txt <repo>/ <user>@<h200>:<repo>/",
+   "check_on_h200": "sed -n '/^# BEGIN inputs$/,/^# END inputs$/p' shape-form-martin/transfer/SHA256SUMS | sha256sum -c"
+  },
+  "laptop_records": {
+   "file": "shape-form-martin/transfer/files_b_laptop_records.txt",
+   "group": "b2",
+   "test_derived": false,
+   "transfer_phase": "now",
+   "destination_root": "<repo>/shape-form-martin/cache/laptop_records/",
+   "totals": {
+    "files": 51,
+    "bytes": 5749702
+   },
+   "rsync": "rsync -a --files-from=shape-form-martin/transfer/files_b_laptop_records.txt <repo>/ <user>@<h200>:<repo>/shape-form-martin/cache/laptop_records/",
+   "check_on_h200": "(cd shape-form-martin/cache/laptop_records && sed -n '/^# BEGIN laptop_records$/,/^# END laptop_records$/p' ../../transfer/SHA256SUMS | sha256sum -c)"
+  },
+  "test_derived_inputs": {
+   "file": "shape-form-martin/transfer/files_b_test_derived_inputs.txt",
+   "group": "b1",
+   "test_derived": true,
+   "transfer_phase": "after_gate2c",
+   "destination_root": "<repo>/",
+   "totals": {
+    "files": 3,
+    "bytes": 69197473
+   },
+   "rsync": "rsync -a --files-from=shape-form-martin/transfer/files_b_test_derived_inputs.txt <repo>/ <user>@<h200>:<repo>/",
+   "check_on_h200": "sed -n '/^# BEGIN test_derived_inputs$/,/^# END test_derived_inputs$/p' shape-form-martin/transfer/SHA256SUMS | sha256sum -c"
+  },
+  "test_derived_records": {
+   "file": "shape-form-martin/transfer/files_b_test_derived_records.txt",
+   "group": "b2",
+   "test_derived": true,
+   "transfer_phase": "after_gate2c",
+   "destination_root": "<repo>/shape-form-martin/cache/laptop_records/",
+   "totals": {
+    "files": 4,
+    "bytes": 239808
+   },
+   "rsync": "rsync -a --files-from=shape-form-martin/transfer/files_b_test_derived_records.txt <repo>/ <user>@<h200>:<repo>/shape-form-martin/cache/laptop_records/",
+   "check_on_h200": "(cd shape-form-martin/cache/laptop_records && sed -n '/^# BEGIN test_derived_records$/,/^# END test_derived_records$/p' ../../transfer/SHA256SUMS | sha256sum -c)"
+  }
+ },
+ "totals_by_phase": {
+  "now": {
+   "files": 71,
+   "bytes": 2999635628
+  },
+  "after_gate2c": {
+   "files": 7,
+   "bytes": 69437281
+  }
  },
  "groups": {
   "a": {
@@ -525,10 +667,9 @@
      "laptop_record": false,
      "hazard": null,
      "package": true,
-     "bytes": 80814,
+     "bytes": 108290,
      "git": {
-      "tracked": false,
-      "status": "untracked: part of this package, to be committed with the outputs"
+      "tracked": true
      }
     },
     {
@@ -862,10 +1003,9 @@
      "laptop_record": false,
      "hazard": null,
      "package": true,
-     "bytes": 16303,
+     "bytes": 29817,
      "git": {
-      "tracked": false,
-      "status": "untracked: part of this package, to be committed with the outputs"
+      "tracked": true
      }
     },
     {
@@ -1007,7 +1147,7 @@
      "laptop_record": false,
      "hazard": null,
      "package": false,
-     "bytes": 59557,
+     "bytes": 147048,
      "git": {
       "tracked": true
      }
@@ -1091,7 +1231,7 @@
      "laptop_record": false,
      "hazard": null,
      "package": false,
-     "bytes": 16003,
+     "bytes": 17955,
      "git": {
       "tracked": true
      }
@@ -1103,7 +1243,7 @@
      "laptop_record": false,
      "hazard": null,
      "package": false,
-     "bytes": 23969,
+     "bytes": 79718,
      "git": {
       "tracked": true
      }
@@ -1525,12 +1665,36 @@
      "package": true,
      "bytes": null,
      "git": {
+      "tracked": true
+     }
+    },
+    {
+     "path": "shape-form-martin/transfer/files_b_laptop_records.txt",
+     "kind": "package",
+     "role": "output of make_transfer_package.py list",
+     "laptop_record": false,
+     "hazard": null,
+     "package": true,
+     "bytes": null,
+     "git": {
+      "tracked": true
+     }
+    },
+    {
+     "path": "shape-form-martin/transfer/files_b_test_derived_inputs.txt",
+     "kind": "package",
+     "role": "output of make_transfer_package.py list",
+     "laptop_record": false,
+     "hazard": null,
+     "package": true,
+     "bytes": null,
+     "git": {
       "tracked": false,
       "status": "untracked: part of this package, to be committed with the outputs"
      }
     },
     {
-     "path": "shape-form-martin/transfer/files_b_laptop_records.txt",
+     "path": "shape-form-martin/transfer/files_b_test_derived_records.txt",
      "kind": "package",
      "role": "output of make_transfer_package.py list",
      "laptop_record": false,
@@ -1551,8 +1715,7 @@
      "package": true,
      "bytes": null,
      "git": {
-      "tracked": false,
-      "status": "untracked: part of this package, to be committed with the outputs"
+      "tracked": true
      }
     },
     {
@@ -1564,14 +1727,13 @@
      "package": true,
      "bytes": null,
      "git": {
-      "tracked": false,
-      "status": "untracked: part of this package, to be committed with the outputs"
+      "tracked": true
      }
     }
    ],
    "totals": {
-    "files": 127,
-    "bytes": 2424088
+    "files": 129,
+    "bytes": 2610270
    },
    "laptop_record_hazards": [
     {
@@ -1647,7 +1809,7 @@
    ]
   },
   "b1": {
-   "description": "git-ignored inputs; copy to the same repo-relative path",
+   "description": "git-ignored inputs; copy to the same repo-relative path (test-derived ones only after Gate 2c)",
    "files": [
     {
      "path": "shape-form-original/data/pion_standalone_N100000_M0_20GeV_reg_balanced_s1_v3.parquet",
@@ -1669,7 +1831,10 @@
      },
      "stream_dependent": false,
      "stream": "none (data)",
-     "decision": "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256; needed only for a cross-check rebuild into scratch directories and for the zero-training geometry arm (absolute shower origin, AUDIT section 4.3; user decision: no trained arm)",
+     "decision": "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256; needed only for the zero-training geometry arm (absolute shower origin, AUDIT section 4.3; user decision: no trained arm) and for a cross-check rebuild into scratch directories, which must wait until after Gate 2c on the H200 (build_cache writes a test cache too, data.py:227)",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_inputs.txt",
      "destination": "shape-form-original/data/pion_standalone_N100000_M0_20GeV_reg_balanced_s1_v3.parquet",
      "regeneration": {
       "command": "not regenerated (source data)",
@@ -1678,6 +1843,7 @@
      },
      "hazard": null,
      "opaque_byte_stream": false,
+     "test_note": "NOT test-derived, but it CONTAINS the raw hits of all events including the 14,956 test events (the split is made at cache build, data.py:150-160); see policies.test_events_in_raw_parquet",
      "cross_check": {
       "source": "shape-form-martin/results/m0_parity/checksums.json stat_only[shape-form-original/data/pion_standalone_N100000_M0_20GeV_reg_balanced_s1_v3.parquet] (size + mtime; no hash recorded)",
       "expected": {
@@ -1708,6 +1874,9 @@
      "stream_dependent": false,
      "stream": "none (deterministic CPU build from the Parquet file)",
      "decision": "COPY (do not rebuild); verify SHA-256 = cache/pion_s1_meta.json files.trainval.sha256",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_inputs.txt",
      "destination": "shape-form-martin/cache/pion_s1_trainval.pt",
      "regeneration": {
       "command": "uv run python -B shape-form-martin/scripts/build_cache.py (no argparse; rewrites BOTH caches, the meta file and the tracked results/m0_parity/cache_build.json)",
@@ -1716,6 +1885,7 @@
      },
      "hazard": null,
      "opaque_byte_stream": false,
+     "test_note": "train and val events only; its geometry constants come from all rows (data.py:82-86) and its per-event 'index' is the position in the full event list (the complement locates the test events, without hits or scores)",
      "cross_check": {
       "source": "shape-form-martin/cache/pion_s1_meta.json files.trainval",
       "expected": {
@@ -1741,7 +1911,10 @@
      },
      "stream_dependent": false,
      "stream": "none (deterministic CPU build from the Parquet file)",
-     "decision": "COPY (do not rebuild); verify SHA-256 = cache/pion_s1_meta.json files.test.sha256 by a plain byte hash; stays unopened as data until the final evaluation after Gate 2c",
+     "decision": "TEST-DERIVED: not copied now; copied ONLY AFTER Gate 2c has passed (files_b_test_derived_*.txt); before that, verify fails if it exists on the H200. COPY (do not rebuild); verify SHA-256 = cache/pion_s1_meta.json files.test.sha256 by a plain byte hash; stays unopened as data until the final evaluation after Gate 2c",
+     "test_derived": true,
+     "transfer_phase": "after_gate2c",
+     "list": "files_b_test_derived_inputs.txt",
      "destination": "shape-form-martin/cache/pion_s1_test.pt",
      "regeneration": {
       "command": "only as a side effect of build_cache.py (data.py:227), which also rewrites the copied files",
@@ -1750,6 +1923,7 @@
      },
      "hazard": null,
      "opaque_byte_stream": true,
+     "test_note": null,
      "cross_check": {
       "source": "shape-form-martin/cache/pion_s1_meta.json files.test",
       "expected": {
@@ -1777,6 +1951,9 @@
      "stream_dependent": false,
      "stream": "none",
      "decision": "COPY; never byte-reproducible (created_utc, Parquet mtime_ns), and it carries the reference hashes of both caches",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_inputs.txt",
      "destination": "shape-form-martin/cache/pion_s1_meta.json",
      "regeneration": {
       "command": "build_cache.py (see above)",
@@ -1784,7 +1961,8 @@
       "reproducibility": "never byte-identical"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": "travels NOW although it mentions the test split: summary metadata only (counts.test, files.test hash and size, splits.test aggregate statistics); needed by load_meta and validation_reference; see policies.test_summary_metadata_now"
     },
     {
      "path": "shape-form-proton/results/particles/pion/mlp_std.pt",
@@ -1806,6 +1984,9 @@
      "stream_dependent": false,
      "stream": "none (weights)",
      "decision": "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_inputs.txt",
      "destination": "shape-form-proton/results/particles/pion/mlp_std.pt",
      "regeneration": {
       "command": "not regenerable (earlier study)",
@@ -1814,6 +1995,7 @@
      },
      "hazard": null,
      "opaque_byte_stream": false,
+     "test_note": null,
      "cross_check": {
       "source": "shape-form-martin/results/m0_parity/checksums.json files[shape-form-proton/results/particles/pion/mlp_std.pt]",
       "expected": {
@@ -1840,6 +2022,9 @@
      "stream_dependent": false,
      "stream": "none (weights)",
      "decision": "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_inputs.txt",
      "destination": "shape-form-proton/results/particles/pion/new3_std_n3.pt",
      "regeneration": {
       "command": "not regenerable (earlier study)",
@@ -1848,6 +2033,7 @@
      },
      "hazard": null,
      "opaque_byte_stream": false,
+     "test_note": null,
      "cross_check": {
       "source": "shape-form-martin/results/m0_parity/checksums.json files[shape-form-proton/results/particles/pion/new3_std_n3.pt]",
       "expected": {
@@ -1877,6 +2063,9 @@
      "stream_dependent": false,
      "stream": "none",
      "decision": "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_inputs.txt",
      "destination": "shape-form-proton/results/particles/pion/abar.pt",
      "regeneration": {
       "command": "not regenerable (earlier study)",
@@ -1885,6 +2074,7 @@
      },
      "hazard": null,
      "opaque_byte_stream": false,
+     "test_note": null,
      "cross_check": {
       "source": "shape-form-martin/results/m0_parity/checksums.json files[shape-form-proton/results/particles/pion/abar.pt]",
       "expected": {
@@ -1911,6 +2101,9 @@
      "stream_dependent": false,
      "stream": "none",
      "decision": "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_inputs.txt",
      "destination": "shape-form-proton/results/particles/pion/test_v3.json",
      "regeneration": {
       "command": "not regenerable",
@@ -1919,6 +2112,7 @@
      },
      "hazard": null,
      "opaque_byte_stream": false,
+     "test_note": "travels NOW although it holds test numbers: summary results only (test means, paired differences with SE, gap-closed fractions, per-momentum-bin mean differences; no per-event values); the legacy adapter reads the formula's structure from it; see policies.test_summary_metadata_now",
      "cross_check": {
       "source": "shape-form-martin/results/m0_parity/checksums.json files[shape-form-proton/results/particles/pion/test_v3.json]",
       "expected": {
@@ -1945,6 +2139,9 @@
      "stream_dependent": true,
      "stream": "reference machine of the earlier study (grid 1056), scalar",
      "decision": "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256; validation-only parity target on the H200",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_inputs.txt",
      "destination": "shape-form-proton/results/particles/pion/mlp_std.json",
      "regeneration": {
       "command": "not regenerable",
@@ -1953,6 +2150,7 @@
      },
      "hazard": null,
      "opaque_byte_stream": false,
+     "test_note": "validation only: keys val (18.118084) and val_report_weights; no test content",
      "cross_check": {
       "source": "shape-form-martin/results/m0_parity/checksums.json files[shape-form-proton/results/particles/pion/mlp_std.json]",
       "expected": {
@@ -1979,6 +2177,9 @@
      "stream_dependent": true,
      "stream": "reference machine of the earlier study (grid 1056), scalars",
      "decision": "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256; validation-only parity target on the H200",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_inputs.txt",
      "destination": "shape-form-proton/results/particles/pion/new3_std.json",
      "regeneration": {
       "command": "not regenerable",
@@ -1987,6 +2188,7 @@
      },
      "hazard": null,
      "opaque_byte_stream": false,
+     "test_note": "validation only: per-rung params and validation means (rungs 1-6), n_star, chosen, diff_vs_best (paired difference and SE on validation, shape-form-proton/scripts/particle_pipeline.py:121-126); no test content",
      "cross_check": {
       "source": "shape-form-martin/results/m0_parity/checksums.json files[shape-form-proton/results/particles/pion/new3_std.json]",
       "expected": {
@@ -2003,7 +2205,8 @@
      "sha256": "174524ef734a50ed96a2e7a2a1b8be71349d2efed2da68a6f1702519d32fd81b",
      "role": "stored per-event TEST arrays of the earlier study (not a laptop record)",
      "readers": [
-      "scripts/parity.py:317 (C1), :407 (default mode)"
+      "scripts/parity.py:317 (C1), :407 (default mode)",
+      "results/gates/gate0_checks/c08, c08b, c14, c16 (Gate 0 records, not moved)"
      ],
      "git": {
       "tracked": false,
@@ -2012,7 +2215,10 @@
      },
      "stream_dependent": true,
      "stream": "reference machine of the earlier study (grid 1056), test split",
-     "decision": "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256; pairing partner for a labelled secondary test column and the abort-on-fail check of the final test if the H200 grid is 1056",
+     "decision": "TEST-DERIVED: not copied now; copied ONLY AFTER Gate 2c has passed (files_b_test_derived_*.txt); before that, verify fails if it exists on the H200. Then: copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256; pairing partner for a labelled secondary test column and the abort-on-fail check of the final test if the H200 grid is 1056",
+     "test_derived": true,
+     "transfer_phase": "after_gate2c",
+     "list": "files_b_test_derived_inputs.txt",
      "destination": "shape-form-proton/results/particles/pion/test_v3_nll.npz",
      "regeneration": {
       "command": "not regenerable",
@@ -2021,6 +2227,7 @@
      },
      "hazard": null,
      "opaque_byte_stream": false,
+     "test_note": null,
      "cross_check": {
       "source": "shape-form-martin/results/m0_parity/checksums.json files[shape-form-proton/results/particles/pion/test_v3_nll.npz]",
       "expected": {
@@ -2048,6 +2255,9 @@
      "stream_dependent": false,
      "stream": "none (event numbers)",
      "decision": "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256; written only by parity.py default mode (parity.py:414), which opens the test split",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_inputs.txt",
      "destination": "shape-form-martin/results/m0_parity/val_event_number.npy",
      "regeneration": {
       "command": "no command exists (parity.py default mode opens test)",
@@ -2055,17 +2265,19 @@
       "reproducibility": "bit-identical (= cache extras['val']['event_number'])"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/m0_parity/test_event_number.npy",
      "group": "b1",
      "bytes": 119776,
      "sha256": "ab5dcf3828d0fd1968d64eae28250a99c835851c9bd7ef60e0c0dc6f595263a4",
-     "role": "test event numbers (order check of the final test; event numbers only, reading it is not a test access)",
+     "role": "test event numbers in test pairing order (order check of the final test)",
      "readers": [
       "scripts/parity.py:316 (C1 order check)",
-      "future final_test.py"
+      "future final_test.py",
+      "results/gates/gate0_checks/c05, c08, c14, c16 (Gate 0 records, not moved)"
      ],
      "git": {
       "tracked": false,
@@ -2074,7 +2286,10 @@
      },
      "stream_dependent": false,
      "stream": "none (event numbers)",
-     "decision": "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256",
+     "decision": "TEST-DERIVED: not copied now; copied ONLY AFTER Gate 2c has passed (files_b_test_derived_*.txt); before that, verify fails if it exists on the H200. Then: copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256",
+     "test_derived": true,
+     "transfer_phase": "after_gate2c",
+     "list": "files_b_test_derived_inputs.txt",
      "destination": "shape-form-martin/results/m0_parity/test_event_number.npy",
      "regeneration": {
       "command": "no command exists (parity.py default mode opens test)",
@@ -2082,7 +2297,8 @@
       "reproducibility": "bit-identical"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/m0_parity/abar_front.pt",
@@ -2102,6 +2318,9 @@
      "stream_dependent": false,
      "stream": "none (deterministic mean_acceptance, no RNG; GPU float arithmetic)",
      "decision": "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256; written only by parity.py default mode (parity.py:504), which opens the test split",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_inputs.txt",
      "destination": "shape-form-martin/results/m0_parity/abar_front.pt",
      "regeneration": {
       "command": "no command exists (parity.py default mode opens test)",
@@ -2109,7 +2328,8 @@
       "reproducibility": "deterministic up to GPU float rounding"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/m0_parity/abar_front_back.pt",
@@ -2128,6 +2348,9 @@
      "stream_dependent": false,
      "stream": "none (deterministic mean_acceptance, no RNG; GPU float arithmetic)",
      "decision": "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256; written only by parity.py default mode (parity.py:505)",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_inputs.txt",
      "destination": "shape-form-martin/results/m0_parity/abar_front_back.pt",
      "regeneration": {
       "command": "no command exists (parity.py default mode opens test)",
@@ -2135,7 +2358,8 @@
       "reproducibility": "deterministic up to GPU float rounding"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/m2b_mlp/s1_seed11/model.pt",
@@ -2157,6 +2381,9 @@
      "stream_dependent": false,
      "stream": "none (weights; trained on the laptop, identified by SHA-256)",
      "decision": "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256; SHA-256 must equal checkpoint_sha256 of its registry row",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_inputs.txt",
      "destination": "shape-form-martin/results/m2b_mlp/s1_seed11/model.pt",
      "regeneration": {
       "command": "not regenerable (training is not bit-reproducible)",
@@ -2165,6 +2392,7 @@
      },
      "hazard": null,
      "opaque_byte_stream": false,
+     "test_note": null,
      "cross_check": {
       "source": "shape-form-martin/results/registry.jsonl m2b_mlp/s1_seed11 checkpoint_sha256",
       "expected": {
@@ -2193,6 +2421,9 @@
      "stream_dependent": false,
      "stream": "none (weights; trained on the laptop, identified by SHA-256)",
      "decision": "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256; SHA-256 must equal checkpoint_sha256 of its registry row",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_inputs.txt",
      "destination": "shape-form-martin/results/m2b_mlp/s1_seed12/model.pt",
      "regeneration": {
       "command": "not regenerable (training is not bit-reproducible)",
@@ -2201,6 +2432,7 @@
      },
      "hazard": null,
      "opaque_byte_stream": false,
+     "test_note": null,
      "cross_check": {
       "source": "shape-form-martin/results/registry.jsonl m2b_mlp/s1_seed12 checkpoint_sha256",
       "expected": {
@@ -2230,6 +2462,9 @@
      "stream_dependent": false,
      "stream": "none (weights; trained on the laptop, identified by SHA-256)",
      "decision": "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256; SHA-256 must equal checkpoint_sha256 of its registry row",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_inputs.txt",
      "destination": "shape-form-martin/results/m2b_mlp/s1_seed13/model.pt",
      "regeneration": {
       "command": "not regenerable (training is not bit-reproducible)",
@@ -2238,6 +2473,7 @@
      },
      "hazard": null,
      "opaque_byte_stream": false,
+     "test_note": null,
      "cross_check": {
       "source": "shape-form-martin/results/registry.jsonl m2b_mlp/s1_seed13 checkpoint_sha256",
       "expected": {
@@ -2267,6 +2503,9 @@
      "stream_dependent": false,
      "stream": "none (weights; trained on the laptop, identified by SHA-256)",
      "decision": "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256; SHA-256 must equal checkpoint_sha256 of its registry row",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_inputs.txt",
      "destination": "shape-form-martin/results/m2b_mlp/s1_seed14/model.pt",
      "regeneration": {
       "command": "not regenerable (training is not bit-reproducible)",
@@ -2275,6 +2514,7 @@
      },
      "hazard": null,
      "opaque_byte_stream": false,
+     "test_note": null,
      "cross_check": {
       "source": "shape-form-martin/results/registry.jsonl m2b_mlp/s1_seed14 checkpoint_sha256",
       "expected": {
@@ -2304,6 +2544,9 @@
      "stream_dependent": false,
      "stream": "none (weights; trained on the laptop, identified by SHA-256)",
      "decision": "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256; SHA-256 must equal checkpoint_sha256 of its registry row",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_inputs.txt",
      "destination": "shape-form-martin/results/m2b_mlp/s1_seed15/model.pt",
      "regeneration": {
       "command": "not regenerable (training is not bit-reproducible)",
@@ -2312,6 +2555,7 @@
      },
      "hazard": null,
      "opaque_byte_stream": false,
+     "test_note": null,
      "cross_check": {
       "source": "shape-form-martin/results/registry.jsonl m2b_mlp/s1_seed15 checkpoint_sha256",
       "expected": {
@@ -2340,6 +2584,9 @@
      "stream_dependent": false,
      "stream": "none (weights; trained on the laptop, identified by SHA-256)",
      "decision": "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256; SHA-256 must equal checkpoint_sha256 of its registry row",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_inputs.txt",
      "destination": "shape-form-martin/results/m2b_mlp/s2_seed11/model.pt",
      "regeneration": {
       "command": "not regenerable (training is not bit-reproducible)",
@@ -2348,6 +2595,7 @@
      },
      "hazard": null,
      "opaque_byte_stream": false,
+     "test_note": null,
      "cross_check": {
       "source": "shape-form-martin/results/registry.jsonl m2b_mlp/s2_seed11 checkpoint_sha256",
       "expected": {
@@ -2376,6 +2624,9 @@
      "stream_dependent": false,
      "stream": "none (weights; trained on the laptop, identified by SHA-256)",
      "decision": "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256; SHA-256 must equal checkpoint_sha256 of its registry row",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_inputs.txt",
      "destination": "shape-form-martin/results/m2b_mlp/s2_seed12/model.pt",
      "regeneration": {
       "command": "not regenerable (training is not bit-reproducible)",
@@ -2384,6 +2635,7 @@
      },
      "hazard": null,
      "opaque_byte_stream": false,
+     "test_note": null,
      "cross_check": {
       "source": "shape-form-martin/results/registry.jsonl m2b_mlp/s2_seed12 checkpoint_sha256",
       "expected": {
@@ -2412,6 +2664,9 @@
      "stream_dependent": false,
      "stream": "none (weights; trained on the laptop, identified by SHA-256)",
      "decision": "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256; SHA-256 must equal checkpoint_sha256 of its registry row",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_inputs.txt",
      "destination": "shape-form-martin/results/m2b_mlp/b0_seed0/model.pt",
      "regeneration": {
       "command": "not regenerable (training is not bit-reproducible)",
@@ -2420,6 +2675,7 @@
      },
      "hazard": null,
      "opaque_byte_stream": false,
+     "test_note": null,
      "cross_check": {
       "source": "shape-form-martin/results/registry.jsonl m2b_mlp/b0_seed0 checkpoint_sha256",
       "expected": {
@@ -2432,10 +2688,20 @@
    "totals": {
     "files": 23,
     "bytes": 3063083399
+   },
+   "totals_by_phase": {
+    "now": {
+     "files": 20,
+     "bytes": 2993885926
+    },
+    "after_gate2c": {
+     "files": 3,
+     "bytes": 69197473
+    }
    }
   },
   "b2": {
-   "description": "git-ignored laptop records; copy ONLY under shape-form-martin/cache/laptop_records/ for comparison",
+   "description": "git-ignored laptop records; copy ONLY under shape-form-martin/cache/laptop_records/ for comparison (test-derived ones only after Gate 2c)",
    "files": [
     {
      "path": "shape-form-martin/results/m0_parity/mlp_val_nll.npy",
@@ -2455,6 +2721,9 @@
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, K=64; written OUTSIDE deterministic() (parity.py:412)",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m0_parity/mlp_val_nll.npy",
      "regeneration": {
       "command": "H200 version: no command exists yet (validation-only common.test_nll inside deterministic())",
@@ -2462,7 +2731,8 @@
       "reproducibility": "machine-dependent (fold stream of the launch grid)"
      },
      "hazard": "DANGEROUS at the live path: every H200 registry row would pair against laptop points silently; absent, evaluate() fails loudly (FileNotFoundError)",
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/m0_parity/formula_val_nll.npy",
@@ -2482,6 +2752,9 @@
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, K=64; written OUTSIDE deterministic() (parity.py:412)",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m0_parity/formula_val_nll.npy",
      "regeneration": {
       "command": "H200 version: no command exists yet (validation-only common.test_nll inside deterministic())",
@@ -2489,7 +2762,8 @@
       "reproducibility": "machine-dependent (fold stream of the launch grid)"
      },
      "hazard": "DANGEROUS at the live path: every H200 registry row would pair against laptop points silently; absent, evaluate() fails loudly (FileNotFoundError)",
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/m0_parity/mlp_test_nll.npy",
@@ -2498,7 +2772,7 @@
      "sha256": "082a20e522830a371d1537f88b641808e67dc3321c5626fc792f1b5e79bb808d",
      "role": "Gate 0 benchmark TEST array (mlp), laptop",
      "readers": [
-      "no reader in code (written by parity.py:412)"
+      "no reader in moved code (written by parity.py:412; read by the Gate 0 record scripts results/gates/gate0_checks/c08, c08b, c14)"
      ],
      "git": {
       "tracked": false,
@@ -2507,7 +2781,10 @@
      },
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, K=64, test split",
-     "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "decision": "TEST-DERIVED: not copied now; copied ONLY AFTER Gate 2c has passed (files_b_test_derived_*.txt); before that, verify fails if it exists on the H200. Then: copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": true,
+     "transfer_phase": "after_gate2c",
+     "list": "files_b_test_derived_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m0_parity/mlp_test_nll.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record)",
@@ -2515,7 +2792,8 @@
       "reproducibility": "machine-dependent"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/m0_parity/formula_test_nll.npy",
@@ -2524,7 +2802,7 @@
      "sha256": "ffb37454a3de4523c2b71324e1e2585b278c9662cb1d7d9e6e78f6cd36f811f7",
      "role": "Gate 0 benchmark TEST array (formula), laptop",
      "readers": [
-      "no reader in code (written by parity.py:412)"
+      "no reader in moved code (written by parity.py:412; read by the Gate 0 record scripts results/gates/gate0_checks/c08, c08b, c14)"
      ],
      "git": {
       "tracked": false,
@@ -2533,7 +2811,10 @@
      },
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, K=64, test split",
-     "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "decision": "TEST-DERIVED: not copied now; copied ONLY AFTER Gate 2c has passed (files_b_test_derived_*.txt); before that, verify fails if it exists on the H200. Then: copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": true,
+     "transfer_phase": "after_gate2c",
+     "list": "files_b_test_derived_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m0_parity/formula_test_nll.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record)",
@@ -2541,7 +2822,8 @@
       "reproducibility": "machine-dependent"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/m0_parity/mlp_val_nll_ref1056.npy",
@@ -2560,6 +2842,9 @@
      "stream_dependent": true,
      "stream": "emulated reference stream, launch grid 1056 (laptop CPU emulator + laptop GPU arithmetic)",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there; expected values of the H200's own common.test_nll if its grid is 1056 (tolerance 1e-4 per event)",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m0_parity/mlp_val_nll_ref1056.npy",
      "regeneration": {
       "command": "not regenerated (C1 / Gate 0 record)",
@@ -2567,7 +2852,8 @@
       "reproducibility": "emulated stream is machine-independent; arithmetic agrees to ~3e-5 per event"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/m0_parity/formula_val_nll_ref1056.npy",
@@ -2586,6 +2872,9 @@
      "stream_dependent": true,
      "stream": "emulated reference stream, launch grid 1056 (laptop CPU emulator + laptop GPU arithmetic)",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there; expected values of the H200's own common.test_nll if its grid is 1056 (tolerance 1e-4 per event)",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m0_parity/formula_val_nll_ref1056.npy",
      "regeneration": {
       "command": "not regenerated (C1 / Gate 0 record)",
@@ -2593,7 +2882,8 @@
       "reproducibility": "emulated stream is machine-independent; arithmetic agrees to ~3e-5 per event"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/m0_parity/mlp_test_nll_ref1056.npy",
@@ -2611,7 +2901,10 @@
      },
      "stream_dependent": true,
      "stream": "emulated reference stream, launch grid 1056 (laptop CPU emulator + laptop GPU arithmetic)",
-     "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there; expected values of the H200's own common.test_nll if its grid is 1056 (tolerance 1e-4 per event)",
+     "decision": "TEST-DERIVED: not copied now; copied ONLY AFTER Gate 2c has passed (files_b_test_derived_*.txt); before that, verify fails if it exists on the H200. Then: copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there; expected values of the H200's own common.test_nll if its grid is 1056 (tolerance 1e-4 per event)",
+     "test_derived": true,
+     "transfer_phase": "after_gate2c",
+     "list": "files_b_test_derived_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m0_parity/mlp_test_nll_ref1056.npy",
      "regeneration": {
       "command": "not regenerated (C1 / Gate 0 record)",
@@ -2619,7 +2912,8 @@
       "reproducibility": "emulated stream is machine-independent; arithmetic agrees to ~3e-5 per event"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/m0_parity/formula_test_nll_ref1056.npy",
@@ -2637,7 +2931,10 @@
      },
      "stream_dependent": true,
      "stream": "emulated reference stream, launch grid 1056 (laptop CPU emulator + laptop GPU arithmetic)",
-     "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there; expected values of the H200's own common.test_nll if its grid is 1056 (tolerance 1e-4 per event)",
+     "decision": "TEST-DERIVED: not copied now; copied ONLY AFTER Gate 2c has passed (files_b_test_derived_*.txt); before that, verify fails if it exists on the H200. Then: copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there; expected values of the H200's own common.test_nll if its grid is 1056 (tolerance 1e-4 per event)",
+     "test_derived": true,
+     "transfer_phase": "after_gate2c",
+     "list": "files_b_test_derived_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m0_parity/formula_test_nll_ref1056.npy",
      "regeneration": {
       "command": "not regenerated (C1 / Gate 0 record)",
@@ -2645,7 +2942,8 @@
       "reproducibility": "emulated stream is machine-independent; arithmetic agrees to ~3e-5 per event"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/registry_refs/mlp_val_k1024.npy",
@@ -2664,6 +2962,9 @@
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, K=1024 chunk 64, inside deterministic()",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/registry_refs/mlp_val_k1024.npy",
      "regeneration": {
       "command": "automatic at the first registry.evaluate(..., guards=True) when absent",
@@ -2671,7 +2972,8 @@
       "reproducibility": "machine-dependent"
      },
      "hazard": "DANGEROUS at the live path: guard_spec.json is tracked and has no GPU identity, so laptop arrays would be reused silently (shown by the trace)",
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/registry_refs/mlp_val_bulk_stratum.npy",
@@ -2690,6 +2992,9 @@
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, bulk metric on the stratum zb >= 1221 mm, inside deterministic()",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/registry_refs/mlp_val_bulk_stratum.npy",
      "regeneration": {
       "command": "automatic at the first registry.evaluate(..., guards=True) when absent",
@@ -2697,7 +3002,8 @@
       "reproducibility": "machine-dependent"
      },
      "hazard": "DANGEROUS at the live path: guard_spec.json is tracked and has no GPU identity, so laptop arrays would be reused silently (shown by the trace)",
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/registry_refs/formula_val_k1024.npy",
@@ -2716,6 +3022,9 @@
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, K=1024 chunk 64, inside deterministic()",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/registry_refs/formula_val_k1024.npy",
      "regeneration": {
       "command": "automatic at the first registry.evaluate(..., guards=True) when absent",
@@ -2723,7 +3032,8 @@
       "reproducibility": "machine-dependent"
      },
      "hazard": "DANGEROUS at the live path: guard_spec.json is tracked and has no GPU identity, so laptop arrays would be reused silently (shown by the trace)",
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/registry_refs/formula_val_bulk_stratum.npy",
@@ -2742,6 +3052,9 @@
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, bulk metric on the stratum zb >= 1221 mm, inside deterministic()",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/registry_refs/formula_val_bulk_stratum.npy",
      "regeneration": {
       "command": "automatic at the first registry.evaluate(..., guards=True) when absent",
@@ -2749,7 +3062,8 @@
       "reproducibility": "machine-dependent"
      },
      "hazard": "DANGEROUS at the live path: guard_spec.json is tracked and has no GPU identity, so laptop arrays would be reused silently (shown by the trace)",
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/m2b_mlp/s1_seed11/val_nll.npy",
@@ -2771,6 +3085,9 @@
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, K=64, inside deterministic()",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m2b_mlp/s1_seed11/val_nll.npy",
      "regeneration": {
       "command": "re-scoring: no command exists yet",
@@ -2779,6 +3096,7 @@
      },
      "hazard": "At the live path the laptop rows would stay valid (their SHA-256 matches) and be mixed with H200 arrays; re-scoring would raise FileExistsError unless replace=True",
      "opaque_byte_stream": false,
+     "test_note": null,
      "cross_check": {
       "source": "shape-form-martin/results/registry.jsonl m2b_mlp/s1_seed11 val_nll_sha256 (array hash, sfm.registry._sha256_array)",
       "expected": {
@@ -2807,6 +3125,9 @@
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, K=64, inside deterministic()",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m2b_mlp/s1_seed12/val_nll.npy",
      "regeneration": {
       "command": "re-scoring: no command exists yet",
@@ -2815,6 +3136,7 @@
      },
      "hazard": "At the live path the laptop rows would stay valid (their SHA-256 matches) and be mixed with H200 arrays; re-scoring would raise FileExistsError unless replace=True",
      "opaque_byte_stream": false,
+     "test_note": null,
      "cross_check": {
       "source": "shape-form-martin/results/registry.jsonl m2b_mlp/s1_seed12 val_nll_sha256 (array hash, sfm.registry._sha256_array)",
       "expected": {
@@ -2843,6 +3165,9 @@
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, K=64, inside deterministic()",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m2b_mlp/s1_seed13/val_nll.npy",
      "regeneration": {
       "command": "re-scoring: no command exists yet",
@@ -2851,6 +3176,7 @@
      },
      "hazard": "At the live path the laptop rows would stay valid (their SHA-256 matches) and be mixed with H200 arrays; re-scoring would raise FileExistsError unless replace=True",
      "opaque_byte_stream": false,
+     "test_note": null,
      "cross_check": {
       "source": "shape-form-martin/results/registry.jsonl m2b_mlp/s1_seed13 val_nll_sha256 (array hash, sfm.registry._sha256_array)",
       "expected": {
@@ -2879,6 +3205,9 @@
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, K=64, inside deterministic()",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m2b_mlp/s1_seed14/val_nll.npy",
      "regeneration": {
       "command": "re-scoring: no command exists yet",
@@ -2887,6 +3216,7 @@
      },
      "hazard": "At the live path the laptop rows would stay valid (their SHA-256 matches) and be mixed with H200 arrays; re-scoring would raise FileExistsError unless replace=True",
      "opaque_byte_stream": false,
+     "test_note": null,
      "cross_check": {
       "source": "shape-form-martin/results/registry.jsonl m2b_mlp/s1_seed14 val_nll_sha256 (array hash, sfm.registry._sha256_array)",
       "expected": {
@@ -2915,6 +3245,9 @@
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, K=64, inside deterministic()",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m2b_mlp/s1_seed15/val_nll.npy",
      "regeneration": {
       "command": "re-scoring: no command exists yet",
@@ -2923,6 +3256,7 @@
      },
      "hazard": "At the live path the laptop rows would stay valid (their SHA-256 matches) and be mixed with H200 arrays; re-scoring would raise FileExistsError unless replace=True",
      "opaque_byte_stream": false,
+     "test_note": null,
      "cross_check": {
       "source": "shape-form-martin/results/registry.jsonl m2b_mlp/s1_seed15 val_nll_sha256 (array hash, sfm.registry._sha256_array)",
       "expected": {
@@ -2951,6 +3285,9 @@
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, K=64, inside deterministic()",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m2b_mlp/s2_seed11/val_nll.npy",
      "regeneration": {
       "command": "re-scoring: no command exists yet",
@@ -2959,6 +3296,7 @@
      },
      "hazard": "At the live path the laptop rows would stay valid (their SHA-256 matches) and be mixed with H200 arrays; re-scoring would raise FileExistsError unless replace=True",
      "opaque_byte_stream": false,
+     "test_note": null,
      "cross_check": {
       "source": "shape-form-martin/results/registry.jsonl m2b_mlp/s2_seed11 val_nll_sha256 (array hash, sfm.registry._sha256_array)",
       "expected": {
@@ -2987,6 +3325,9 @@
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, K=64, inside deterministic()",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m2b_mlp/s2_seed12/val_nll.npy",
      "regeneration": {
       "command": "re-scoring: no command exists yet",
@@ -2995,6 +3336,7 @@
      },
      "hazard": "At the live path the laptop rows would stay valid (their SHA-256 matches) and be mixed with H200 arrays; re-scoring would raise FileExistsError unless replace=True",
      "opaque_byte_stream": false,
+     "test_note": null,
      "cross_check": {
       "source": "shape-form-martin/results/registry.jsonl m2b_mlp/s2_seed12 val_nll_sha256 (array hash, sfm.registry._sha256_array)",
       "expected": {
@@ -3023,6 +3365,9 @@
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, K=64, inside deterministic()",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m2b_mlp/b0_seed0/val_nll.npy",
      "regeneration": {
       "command": "re-scoring: no command exists yet",
@@ -3031,6 +3376,7 @@
      },
      "hazard": "At the live path the laptop rows would stay valid (their SHA-256 matches) and be mixed with H200 arrays; re-scoring would raise FileExistsError unless replace=True",
      "opaque_byte_stream": false,
+     "test_note": null,
      "cross_check": {
       "source": "shape-form-martin/results/registry.jsonl m2b_mlp/b0_seed0 val_nll_sha256 (array hash, sfm.registry._sha256_array)",
       "expected": {
@@ -3056,6 +3402,9 @@
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, K=1024, inside deterministic()",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m2b_mlp/b0_seed0/val_nll_k1024.npy",
      "regeneration": {
       "command": "re-scoring with guards: no command exists yet",
@@ -3063,7 +3412,8 @@
       "reproducibility": "machine-dependent"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/m2b_mlp/s2_seed11/val_nll_k1024.npy",
@@ -3082,6 +3432,9 @@
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, K=1024, inside deterministic()",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m2b_mlp/s2_seed11/val_nll_k1024.npy",
      "regeneration": {
       "command": "re-scoring with guards: no command exists yet",
@@ -3089,7 +3442,8 @@
       "reproducibility": "machine-dependent"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/m2b_mlp/s2_seed12/val_nll_k1024.npy",
@@ -3108,6 +3462,9 @@
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, K=1024, inside deterministic()",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m2b_mlp/s2_seed12/val_nll_k1024.npy",
      "regeneration": {
       "command": "re-scoring with guards: no command exists yet",
@@ -3115,7 +3472,8 @@
       "reproducibility": "machine-dependent"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/m2b_mlp/b0_seed0/val_bulk_zb1221.npy",
@@ -3135,6 +3493,9 @@
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, bulk metric on zb >= 1221 mm",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m2b_mlp/b0_seed0/val_bulk_zb1221.npy",
      "regeneration": {
       "command": "re-scoring with guards: no command exists yet",
@@ -3142,7 +3503,8 @@
       "reproducibility": "machine-dependent"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/m2b_mlp/s2_seed11/val_bulk_zb1221.npy",
@@ -3162,6 +3524,9 @@
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, bulk metric on zb >= 1221 mm",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m2b_mlp/s2_seed11/val_bulk_zb1221.npy",
      "regeneration": {
       "command": "re-scoring with guards: no command exists yet",
@@ -3169,7 +3534,8 @@
       "reproducibility": "machine-dependent"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/m2b_mlp/s2_seed12/val_bulk_zb1221.npy",
@@ -3189,6 +3555,9 @@
      "stream_dependent": true,
      "stream": "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345, bulk metric on zb >= 1221 mm",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m2b_mlp/s2_seed12/val_bulk_zb1221.npy",
      "regeneration": {
       "command": "re-scoring with guards: no command exists yet",
@@ -3196,7 +3565,8 @@
       "reproducibility": "machine-dependent"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/m2b_mlp/b0_seed0/val_mass_monitors.npz",
@@ -3215,6 +3585,9 @@
      "stream_dependent": false,
      "stream": "none (no fold points; laptop GPU float arithmetic)",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there; free functional check of the copied checkpoint after re-scoring (should agree to rounding)",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m2b_mlp/b0_seed0/val_mass_monitors.npz",
      "regeneration": {
       "command": "re-scoring with guards: no command exists yet",
@@ -3222,7 +3595,8 @@
       "reproducibility": "deterministic up to GPU float rounding"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/m2b_mlp/s2_seed11/val_mass_monitors.npz",
@@ -3241,6 +3615,9 @@
      "stream_dependent": false,
      "stream": "none (no fold points; laptop GPU float arithmetic)",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there; free functional check of the copied checkpoint after re-scoring (should agree to rounding)",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m2b_mlp/s2_seed11/val_mass_monitors.npz",
      "regeneration": {
       "command": "re-scoring with guards: no command exists yet",
@@ -3248,7 +3625,8 @@
       "reproducibility": "deterministic up to GPU float rounding"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/m2b_mlp/s2_seed12/val_mass_monitors.npz",
@@ -3267,6 +3645,9 @@
      "stream_dependent": false,
      "stream": "none (no fold points; laptop GPU float arithmetic)",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there; free functional check of the copied checkpoint after re-scoring (should agree to rounding)",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/m2b_mlp/s2_seed12/val_mass_monitors.npz",
      "regeneration": {
       "command": "re-scoring with guards: no command exists yet",
@@ -3274,7 +3655,8 @@
       "reproducibility": "deterministic up to GPU float rounding"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid1056_base_std_n1.npy",
@@ -3294,6 +3676,9 @@
      "stream_dependent": true,
      "stream": "emulated reference stream, launch grid 1056 (computed outside deterministic())",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid1056_base_std_n1.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record, c04_confirm_reference_stream.py)",
@@ -3301,7 +3686,8 @@
       "reproducibility": "emulated stream machine-independent; arithmetic to ~3e-5"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid1056_base_std_n2.npy",
@@ -3321,6 +3707,9 @@
      "stream_dependent": true,
      "stream": "emulated reference stream, launch grid 1056 (computed outside deterministic())",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid1056_base_std_n2.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record, c04_confirm_reference_stream.py)",
@@ -3328,7 +3717,8 @@
       "reproducibility": "emulated stream machine-independent; arithmetic to ~3e-5"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid1056_base_std_n3.npy",
@@ -3348,6 +3738,9 @@
      "stream_dependent": true,
      "stream": "emulated reference stream, launch grid 1056 (computed outside deterministic())",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid1056_base_std_n3.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record, c04_confirm_reference_stream.py)",
@@ -3355,7 +3748,8 @@
       "reproducibility": "emulated stream machine-independent; arithmetic to ~3e-5"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid1056_base_std_n4.npy",
@@ -3375,6 +3769,9 @@
      "stream_dependent": true,
      "stream": "emulated reference stream, launch grid 1056 (computed outside deterministic())",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid1056_base_std_n4.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record, c04_confirm_reference_stream.py)",
@@ -3382,7 +3779,8 @@
       "reproducibility": "emulated stream machine-independent; arithmetic to ~3e-5"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid1056_base_std_n5.npy",
@@ -3402,6 +3800,9 @@
      "stream_dependent": true,
      "stream": "emulated reference stream, launch grid 1056 (computed outside deterministic())",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid1056_base_std_n5.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record, c04_confirm_reference_stream.py)",
@@ -3409,7 +3810,8 @@
       "reproducibility": "emulated stream machine-independent; arithmetic to ~3e-5"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid1056_base_std_n6.npy",
@@ -3429,6 +3831,9 @@
      "stream_dependent": true,
      "stream": "emulated reference stream, launch grid 1056 (computed outside deterministic())",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid1056_base_std_n6.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record, c04_confirm_reference_stream.py)",
@@ -3436,7 +3841,8 @@
       "reproducibility": "emulated stream machine-independent; arithmetic to ~3e-5"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid1056_mlp_std.npy",
@@ -3456,6 +3862,9 @@
      "stream_dependent": true,
      "stream": "emulated reference stream, launch grid 1056 (computed outside deterministic())",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid1056_mlp_std.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record, c04_confirm_reference_stream.py)",
@@ -3463,7 +3872,8 @@
       "reproducibility": "emulated stream machine-independent; arithmetic to ~3e-5"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid1056_new3_std_n1.npy",
@@ -3483,6 +3893,9 @@
      "stream_dependent": true,
      "stream": "emulated reference stream, launch grid 1056 (computed outside deterministic())",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid1056_new3_std_n1.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record, c04_confirm_reference_stream.py)",
@@ -3490,7 +3903,8 @@
       "reproducibility": "emulated stream machine-independent; arithmetic to ~3e-5"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid1056_new3_std_n2.npy",
@@ -3510,6 +3924,9 @@
      "stream_dependent": true,
      "stream": "emulated reference stream, launch grid 1056 (computed outside deterministic())",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid1056_new3_std_n2.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record, c04_confirm_reference_stream.py)",
@@ -3517,7 +3934,8 @@
       "reproducibility": "emulated stream machine-independent; arithmetic to ~3e-5"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid1056_new3_std_n3.npy",
@@ -3537,6 +3955,9 @@
      "stream_dependent": true,
      "stream": "emulated reference stream, launch grid 1056 (computed outside deterministic())",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid1056_new3_std_n3.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record, c04_confirm_reference_stream.py)",
@@ -3544,7 +3965,8 @@
       "reproducibility": "emulated stream machine-independent; arithmetic to ~3e-5"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid1056_new3_std_n4.npy",
@@ -3564,6 +3986,9 @@
      "stream_dependent": true,
      "stream": "emulated reference stream, launch grid 1056 (computed outside deterministic())",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid1056_new3_std_n4.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record, c04_confirm_reference_stream.py)",
@@ -3571,7 +3996,8 @@
       "reproducibility": "emulated stream machine-independent; arithmetic to ~3e-5"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid1056_new3_std_n5.npy",
@@ -3591,6 +4017,9 @@
      "stream_dependent": true,
      "stream": "emulated reference stream, launch grid 1056 (computed outside deterministic())",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid1056_new3_std_n5.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record, c04_confirm_reference_stream.py)",
@@ -3598,7 +4027,8 @@
       "reproducibility": "emulated stream machine-independent; arithmetic to ~3e-5"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid1056_new3_std_n6.npy",
@@ -3618,6 +4048,9 @@
      "stream_dependent": true,
      "stream": "emulated reference stream, launch grid 1056 (computed outside deterministic())",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid1056_new3_std_n6.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record, c04_confirm_reference_stream.py)",
@@ -3625,7 +4058,8 @@
       "reproducibility": "emulated stream machine-independent; arithmetic to ~3e-5"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid144_base_std_n1.npy",
@@ -3644,6 +4078,9 @@
      "stream_dependent": true,
      "stream": "emulated launch grid 144 (= laptop native stream)",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid144_base_std_n1.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record)",
@@ -3651,7 +4088,8 @@
       "reproducibility": "as above"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid144_base_std_n2.npy",
@@ -3670,6 +4108,9 @@
      "stream_dependent": true,
      "stream": "emulated launch grid 144 (= laptop native stream)",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid144_base_std_n2.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record)",
@@ -3677,7 +4118,8 @@
       "reproducibility": "as above"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid144_base_std_n3.npy",
@@ -3696,6 +4138,9 @@
      "stream_dependent": true,
      "stream": "emulated launch grid 144 (= laptop native stream)",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid144_base_std_n3.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record)",
@@ -3703,7 +4148,8 @@
       "reproducibility": "as above"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid144_base_std_n4.npy",
@@ -3722,6 +4168,9 @@
      "stream_dependent": true,
      "stream": "emulated launch grid 144 (= laptop native stream)",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid144_base_std_n4.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record)",
@@ -3729,7 +4178,8 @@
       "reproducibility": "as above"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid144_base_std_n5.npy",
@@ -3748,6 +4198,9 @@
      "stream_dependent": true,
      "stream": "emulated launch grid 144 (= laptop native stream)",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid144_base_std_n5.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record)",
@@ -3755,7 +4208,8 @@
       "reproducibility": "as above"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid144_base_std_n6.npy",
@@ -3774,6 +4228,9 @@
      "stream_dependent": true,
      "stream": "emulated launch grid 144 (= laptop native stream)",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid144_base_std_n6.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record)",
@@ -3781,7 +4238,8 @@
       "reproducibility": "as above"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid144_mlp_std.npy",
@@ -3800,6 +4258,9 @@
      "stream_dependent": true,
      "stream": "emulated launch grid 144 (= laptop native stream)",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid144_mlp_std.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record)",
@@ -3807,7 +4268,8 @@
       "reproducibility": "as above"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid144_new3_std_n1.npy",
@@ -3826,6 +4288,9 @@
      "stream_dependent": true,
      "stream": "emulated launch grid 144 (= laptop native stream)",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid144_new3_std_n1.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record)",
@@ -3833,7 +4298,8 @@
       "reproducibility": "as above"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid144_new3_std_n2.npy",
@@ -3852,6 +4318,9 @@
      "stream_dependent": true,
      "stream": "emulated launch grid 144 (= laptop native stream)",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid144_new3_std_n2.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record)",
@@ -3859,7 +4328,8 @@
       "reproducibility": "as above"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid144_new3_std_n3.npy",
@@ -3878,6 +4348,9 @@
      "stream_dependent": true,
      "stream": "emulated launch grid 144 (= laptop native stream)",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid144_new3_std_n3.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record)",
@@ -3885,7 +4358,8 @@
       "reproducibility": "as above"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid144_new3_std_n4.npy",
@@ -3904,6 +4378,9 @@
      "stream_dependent": true,
      "stream": "emulated launch grid 144 (= laptop native stream)",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid144_new3_std_n4.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record)",
@@ -3911,7 +4388,8 @@
       "reproducibility": "as above"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid144_new3_std_n5.npy",
@@ -3930,6 +4408,9 @@
      "stream_dependent": true,
      "stream": "emulated launch grid 144 (= laptop native stream)",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid144_new3_std_n5.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record)",
@@ -3937,7 +4418,8 @@
       "reproducibility": "as above"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     },
     {
      "path": "shape-form-martin/results/gates/gate0_checks/val_grid144_new3_std_n6.npy",
@@ -3956,6 +4438,9 @@
      "stream_dependent": true,
      "stream": "emulated launch grid 144 (= laptop native stream)",
      "decision": "copy ONLY into shape-form-martin/cache/laptop_records/<same path> (comparison partner); never to the live path; verify there",
+     "test_derived": false,
+     "transfer_phase": "now",
+     "list": "files_b_laptop_records.txt",
      "destination": "shape-form-martin/cache/laptop_records/shape-form-martin/results/gates/gate0_checks/val_grid144_new3_std_n6.npy",
      "regeneration": {
       "command": "not regenerated (Gate 0 record)",
@@ -3963,12 +4448,23 @@
       "reproducibility": "as above"
      },
      "hazard": null,
-     "opaque_byte_stream": false
+     "opaque_byte_stream": false,
+     "test_note": null
     }
    ],
    "totals": {
     "files": 55,
     "bytes": 5989510
+   },
+   "totals_by_phase": {
+    "now": {
+     "files": 51,
+     "bytes": 5749702
+    },
+    "after_gate2c": {
+     "files": 4,
+     "bytes": 239808
+    }
    }
   },
   "c": {
@@ -4421,6 +4917,74 @@
    "line_checked": true
   }
  ],
+ "absence_before_gate2c": {
+  "consequences": [
+   {
+    "file": "shape-form-martin/src/sfm/data.py",
+    "line": 286,
+    "must_contain": "_log_test_access(str(reason).strip())",
+    "what": "load_sets(('test',), allow_test=True, reason=...) appends the test-access log line BEFORE it opens the test cache (:287, the only reader of pion_s1_test.pt)",
+    "consequence_before_gate2c": "an allowed test load fails with FileNotFoundError at :287 after the log line has been written: on the H200 such a line before Gate 2c marks an attempted access (no data read); investigate it. The locked calls (no allow_test, :283; empty reason, :285) raise before logging or opening",
+    "line_text": "_log_test_access(str(reason).strip())",
+    "line_checked": true
+   },
+   {
+    "file": "shape-form-martin/scripts/parity.py",
+    "line": 316,
+    "must_contain": "np.load(OUT / \"test_event_number.npy\")",
+    "what": "C1 (--reference-stream; refused without --overwrite at :300 because c1_reference_stream.json is tracked)",
+    "consequence_before_gate2c": "with --overwrite: FileNotFoundError here, before load_sets(test) at :318 (no log line), but only after :314 has written {mlp,formula}_val_nll_ref1056.npy at their live paths",
+    "line_text": "saved_en = np.load(OUT / \"test_event_number.npy\")",
+    "line_checked": true
+   },
+   {
+    "file": "shape-form-martin/scripts/parity.py",
+    "line": 368,
+    "must_contain": "allow_test=True, reason=TEST_REASON",
+    "what": "Gate 0 default mode (refused without --overwrite at :342 because parity.json is tracked)",
+    "consequence_before_gate2c": "with --overwrite: a test-access log line, then FileNotFoundError (data.py:286-287), before test_v3_nll.npz (:407) is reached. parity.py must not run on the H200 before Gate 2c in any case",
+    "line_text": "tsets, textras = data.load_sets((\"test\",), device=DEV, allow_test=True, reason=TEST_REASON)",
+    "line_checked": true
+   },
+   {
+    "file": "shape-form-martin/scripts/check_protected.py",
+    "line": 152,
+    "must_contain": "fail = bool(a or r or c",
+    "what": "verify compares shape-form-proton/ and shape-form-original/ with checksums.json (1997 hashed files; 185 tracked, 1812 git-ignored, 7 of them in the package)",
+    "consequence_before_gate2c": "already FAILS on the H200 (1805 ignored protected files are never copied, and the CSV in stat_only is missing); before Gate 2c test_v3_nll.npz is one more 'removed' entry (1806). Exit code 1 either way; it also rewrites the tracked results/m0_parity/checksums_verify.json (:155)",
+    "line_text": "fail = bool(a or r or c or sa or sr or sc or la or lr or lc or moved_fail)",
+    "line_checked": true
+   },
+   {
+    "file": "shape-form-martin/results/gates/gate0_checks/c08_parity_stats.py",
+    "line": 117,
+    "must_contain": "test_v3_nll.npz",
+    "what": "Gate 0 record scripts that read the test-derived files (also c05_split_integrity.py:102, c08_parity_stats.py:110/118, c08b_pair_tail.py:15-16, c14_stats_review.py:119-121, c16_test_order_fingerprint.py:15/19)",
+    "consequence_before_gate2c": "FileNotFoundError on the H200 (not moved steps; the four laptop test arrays they read would be quarantined in any case)",
+    "line_text": "npz = np.load(PION / \"test_v3_nll.npz\")",
+    "line_checked": true
+   },
+   {
+    "file": "shape-form-martin/src/sfm/data.py",
+    "line": 168,
+    "must_contain": "\"test\": d / f\"{CACHE_STEM}_test.pt\"",
+    "what": "cache_files() returns the test path without opening it",
+    "consequence_before_gate2c": "no effect: no code branches on cache_files()['test'].exists() (grep); load_meta still reports files.test from the copied meta file",
+    "line_text": "return {\"trainval\": d / f\"{CACHE_STEM}_trainval.pt\", \"test\": d / f\"{CACHE_STEM}_test.pt\",",
+    "line_checked": true
+   },
+   {
+    "file": "shape-form-martin/tests/test_data.py",
+    "line": 34,
+    "must_contain": "data.load_sets((\"test\",), device=\"cpu\")",
+    "what": "test_test_split_is_locked",
+    "consequence_before_gate2c": "passes: PermissionError at data.py:283 (and ValueError at :285) before any log write or open; run on the laptop with the seven hidden: 5 passed",
+    "line_text": "data.load_sets((\"test\",), device=\"cpu\")",
+    "line_checked": true
+   }
+  ],
+  "unaffected": "Unaffected (read-only run on the laptop CPU, 25 Nov 2026, with the seven test-derived files made invisible: an audit hook raised FileNotFoundError on any open and a stat wrapper on any stat of them; writes under the repo and *.csv opens were refused): imports of all sfm modules; data.load_sets(('train','val')) and load_meta; legacy.load_mlp_std, load_component_formula (shapelab.build_final, reads test_v3.json, which travels now), load_abar, families.load_legacy_core; registry.validation_reference, check_validation, read_registry, select_1se, the benchmark arrays and _bench_guard_arrays (reuse path); acceptance templates stored/front/front_back; the emulator library; Track A spec lists and builds with skip_init=True; Track B factories field_mlp_std, from_run, ensemble, field_acc, residual_table, field; load_run of the 8 networks; fit.py --dry-run (s2_seed13, b0_seed1); fit_queue.py --dry-run; run_m2b_fit.py config start-up; import and --help of run_m2a.py, run_m2b_fit.py, run_m2b_ensembles.py, run_m2b_stage1.py, import of run_m2b_report.py; collection of all 445 campaign tests and a run of tests/test_data.py. Result: zero opens or stats of any of the seven."
+ },
  "tests_expected_to_fail_on_h200": [
   {
    "test": "tests/test_refstream.py::test_local_grid_constant_matches_this_gpu",
@@ -4451,6 +5015,11 @@
    "test": "tests/test_dist_factory.py template test",
    "expected": "SKIP until run_m2a.py templates",
    "why": "HAVE_TEMPLATES"
+  },
+  {
+   "test": "all campaign tests, before Gate 2c (test-derived files absent)",
+   "expected": "unaffected",
+   "why": "no test reads test_v3_nll.npz, test_event_number.npy or the test cache; tests/test_data.py::test_test_split_is_locked raises PermissionError / ValueError before any log write or open (data.py:283, :285). Laptop check with the seven made invisible by an audit hook: collection of all 445 tests and tests/test_data.py (5 passed) opened or stat'ed none of them"
   }
  ]
 }
