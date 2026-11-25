@@ -61,7 +61,7 @@ def test_inclusion_probabilities_and_fixed_size():
         assert len(idx) == 80 == len(set(idx.tolist())) and set(np.flatnonzero(pi == 1.0)) <= set(idx.tolist())
 
 
-def test_horvitz_thompson_is_unbiased():
+def test_horvitz_thompson_total_is_unbiased():
     rng = np.random.default_rng(1)
     omega = rng.lognormal(0, 2.0, 400)
     omega /= omega.sum()
@@ -201,6 +201,65 @@ def test_file_round_trip_through_the_runner(tmp_path):
     bad.update(X=t["X"][perm], y=t["y"][perm], weights=t["weights"][perm])
     with pytest.raises(ValueError, match="contiguous"):
         TG.save_target(tmp_path / "bad.npz", bad)
+
+
+def test_effective_sample_size_is_stored_per_slice_for_the_pilot_log():
+    """User confirmation 4: n_eff of the Horvitz-Thompson weights per momentum slice under the size measure
+    omega^0.5, with the gamma = 1 value of an equal-size sample for comparison."""
+    assert TG.effective_sample_size(np.ones(50)) == 50.0 and TG.effective_sample_size([1.0, 0.0, 0.0]) == 1.0
+    t = TG.build_residual_target(**synthetic(), n_per_slice=120, seed=3)
+    sid, w = t["slice_id"], t["weights"]
+    meta = json.loads(str(t["meta_json"]))
+    assert float(t["sampling_gamma"]) == 0.5 and meta["gamma"] == 0.5
+    for s in range(NS):
+        ne = w[sid == s].sum() ** 2 / np.sum(w[sid == s] ** 2)
+        assert t["slice_n_eff"][s] == pytest.approx(ne, rel=1e-12) and 1.0 < ne <= 120.0
+        assert meta["counts"]["per_slice"][s]["n_eff"] == pytest.approx(ne, rel=1e-12)
+        assert t["slice_n_sampled"][s] == 120 and t["slice_n_masked"][s] >= 120
+        assert 1.0 < t["slice_n_eff_gamma1"][s] <= 120.0 and t["slice_n_eff_population"][s] > 1.0
+    # under strict proportionality the weights of the non-certain cells are equal: a larger n_eff per sampled row,
+    # bought with fewer distinct tail cells; omega^0.5 spreads the rows and pays in n_eff
+    assert np.all(t["slice_n_eff_gamma1"] > t["slice_n_eff"])
+    rows = TG.n_eff_report(t)
+    assert [r["slice"] for r in rows] == list(range(NS)) and all(r["design_effect"] >= 1.0 for r in rows)
+    assert rows[0]["n_eff"] == pytest.approx(float(t["slice_n_eff"][0])) and rows[0]["gamma"] == 0.5
+    txt = TG.format_n_eff(t)
+    assert "design-consistent" in txt and "not unbiased" in txt and len(txt.splitlines()) == 2 + NS
+    assert "design-consistent" in meta["estimator_note"] and "n_eff" in meta["n_eff_note"]
+    t1 = TG.build_residual_target(**synthetic(), n_per_slice=120, seed=3, gamma=1.0)
+    assert float(t1["sampling_gamma"]) == 1.0 and np.all(t1["slice_n_eff"] > t["slice_n_eff"])
+    again = TG.build_residual_target(**synthetic(), n_per_slice=120, seed=3)       # the comparison draw is separate
+    assert np.array_equal(again["cell_iz"], t["cell_iz"]) and np.array_equal(again["weights"], t["weights"])
+    bad = dict(t, slice_n_eff=t["slice_n_eff"] * 1.5)
+    with pytest.raises(ValueError, match="does not match"):
+        TG.n_eff_report(bad)
+
+
+def test_the_loss_estimate_is_consistent_not_unbiased():
+    """The sampled within-slice weighted variance against the population value: the mean over many designs is
+    close, the relative bias is of order 1 / n_eff (it shrinks when the sample grows), and it is not zero - while
+    the Horvitz-Thompson estimate of a linear total has no bias at all."""
+    rng = np.random.default_rng(12)
+    N = 1500
+    omega = rng.lognormal(0, 1.6, N)
+    omega /= omega.sum()
+    err = 0.2 * rng.normal(size=N) + 0.6 * (omega * N > 3)                 # the error is larger in the core
+    pop = np.sum(omega * (err - np.sum(omega * err)) ** 2)
+
+    def mean_estimate(n, draws):
+        est, neff = [], []
+        for k in range(draws):
+            idx, pi = TG.ht_sample(omega, n, 0.5, rng=50_000 + k)
+            w, e = omega[idx] / pi[idx], err[idx]
+            est.append(np.sum(w * (e - np.sum(w * e) / w.sum()) ** 2) / w.sum())
+            neff.append(TG.effective_sample_size(w))
+        return np.mean(est), np.std(est) / np.sqrt(draws), np.mean(neff)
+    small, se_small, ne_small = mean_estimate(25, 3000)
+    large, se_large, ne_large = mean_estimate(400, 600)
+    assert abs(large / pop - 1.0) < 0.02 and ne_large > 5 * ne_small       # consistent
+    assert (pop - small) > 4 * se_small                                     # biased low at small n: not unbiased
+    assert abs(small / pop - 1.0) > 2 * abs(large / pop - 1.0)             # and the bias shrinks with n_eff
+    assert abs(small / pop - 1.0) < 6.0 / ne_small                         # of relative order 1 / n_eff
 
 
 # ----------------------------------------------------------------------------------------------------------------------

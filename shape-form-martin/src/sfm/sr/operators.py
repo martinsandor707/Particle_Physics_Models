@@ -186,7 +186,8 @@ OPS: Dict[str, OpSpec] = {o.name: o for o in [
     OpSpec("l1p", 1, "l1p(x) = log1p(abs(x))", False, 2, (0.0, _INF), "[0, inf): 0 attained at 0; kink at 0 "
            "(slope jumps from -1 to +1)", smooth=False, group="protected"),
     OpSpec("sqa", 1, "sqa(x) = sqrt(abs(x))", False, 2, (0.0, _INF), "[0, inf): 0 attained at 0; infinite slope "
-           "at 0 (torch's gradient there is NaN: inf * 0)", smooth=False, group="protected"),
+           "at 0 (torch_impl defines the backward pass as 0 at exactly 0; plain autograd would give NaN)",
+           smooth=False, group="protected"),
     # --- Stage 2 -----------------------------------------------------------------------------------------------------
     OpSpec("sin", 1, "sin", True, 2, (-1.0, 1.0), "[-1, 1] attained", group="trig"),
     OpSpec("cos", 1, "cos", True, 2, (-1.0, 1.0), "[-1, 1] attained", group="trig"),
@@ -247,19 +248,45 @@ _TORCH_CACHE: Dict[str, Callable] = {}
 
 def torch_impl(name: Optional[str] = None):
     """torch implementation of operator ``name`` (the whole table if None); torch is imported here, not at module
-    import. The formulas are those of the Julia strings; no clamp, no ``nan_to_num``."""
+    import. The formulas are those of the Julia strings; no clamp, no ``nan_to_num``: every forward value is the
+    formula, non-finite inputs propagate.
+
+    Gradients at exactly 0 (and -0.0) are finite for every total operator: ``abs``, ``l1p`` and ``ppow`` (kinks) give
+    0 there through ``sign(0) = 0``; ``sqa`` (cusp, infinite one-sided slopes) has its backward pass defined as 0 at
+    0 instead of autograd's ``inf * 0 = NaN``; ``softplus`` has the exact derivative ``sigmoid(x)`` everywhere.
+    Next to 0 the slope of ``sqa`` is 1 / (2 sqrt|x|): finite for every non-zero float, but arbitrarily large."""
     if not _TORCH_CACHE:
         import torch
 
-        def softplus(x):
-            return torch.clamp_min(x, 0.0) + torch.log1p(torch.exp(-torch.abs(x)))     # max(x, 0), not a guard
+        class _Softplus(torch.autograd.Function):
+            """Forward: literally the Julia formula. Backward: the exact derivative sigmoid(x). Autograd through
+            the formula itself gives 0 at exactly x = 0 (sign(0) = 0 in both pieces) instead of 1/2."""
+
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return torch.clamp_min(x, 0.0) + torch.log1p(torch.exp(-torch.abs(x)))     # max(x, 0), not a guard
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (x,) = ctx.saved_tensors
+                return grad_output * torch.sigmoid(x)
+
+        def sqa(x):
+            # Forward: sqrt(|x|), bit for bit (NaN and Inf propagate: "a != 0" is True for NaN).
+            # Backward: sign(x) / (2 sqrt|x|) for x != 0 and 0 AT exactly x = +-0, where autograd through
+            # sqrt(abs(x)) would give inf * 0 = NaN. Only the derivative at the cusp is defined here; the value
+            # is the formula. (0 lies in the generalised gradient of sqrt|x| at 0 and is its symmetric derivative.)
+            a = torch.abs(x)
+            nz = a != 0
+            return torch.where(nz, torch.sqrt(torch.where(nz, a, torch.ones_like(a))), torch.zeros_like(a))
 
         _TORCH_CACHE.update({
             "+": torch.add, "-": torch.sub, "*": torch.mul, "/": torch.div,
             "exp": torch.exp, "square": torch.square, "tanh": torch.tanh, "atan": torch.atan,
-            "erf": torch.special.erf, "erfc": torch.special.erfc, "softplus": softplus,
+            "erf": torch.special.erf, "erfc": torch.special.erfc, "softplus": _Softplus.apply,
             "linv": lambda x: 1.0 / (1.0 + x * x), "ppow": lambda x, y: torch.pow(1.0 + torch.abs(x), y),
-            "l1p": lambda x: torch.log1p(torch.abs(x)), "sqa": lambda x: torch.sqrt(torch.abs(x)),
+            "l1p": lambda x: torch.log1p(torch.abs(x)), "sqa": sqa,
             "sin": torch.sin, "cos": torch.cos, "inv": lambda x: 1.0 / x,
             "neg": torch.neg, "abs": torch.abs, "cube": lambda x: x * x * x, "log": torch.log,
             "log1p": torch.log1p, "sqrt": torch.sqrt, "pow": torch.pow,

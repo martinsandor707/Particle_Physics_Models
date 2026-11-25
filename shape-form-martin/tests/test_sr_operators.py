@@ -297,3 +297,88 @@ def test_julia_confirmation_list():
     """The first session's open list is closed: every item was confirmed with tiny fits (STATUS.md section 9)."""
     assert O.UNCONFIRMED == () and len(O.CONFIRMED_WITH_JULIA) == 12
     assert all(isinstance(s, str) and s for s in O.CONFIRMED_WITH_JULIA)
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# gradient hygiene at exactly 0 (user confirmation 1: no Inf / NaN gradient in a PyTorch refit)
+# ----------------------------------------------------------------------------------------------------------------------
+TOTAL_OPS = sorted(n for n, o in O.OPS.items() if o.total)
+
+
+@pytest.mark.parametrize("name", TOTAL_OPS)
+def test_gradients_are_finite_at_exactly_zero(name):
+    """Backpropagate through every total operator at x = +0.0 and -0.0 (r = 0 on the axis and x = 0 are reachable),
+    in float32 and float64, for every argument of a binary operator."""
+    import torch
+    f = O.torch_impl(name)
+    for dt in (torch.float64, torch.float32):
+        for z in (0.0, -0.0):
+            if O.OPS[name].arity == 1:
+                x = torch.tensor([z, z], dtype=dt, requires_grad=True)
+                y = f(x)
+                grads = torch.autograd.grad(y.sum(), x)
+            else:
+                for other in (z, 1.5, -2.0):
+                    for first in (True, False):
+                        a = torch.tensor([z], dtype=dt, requires_grad=True)
+                        b = torch.tensor([other], dtype=dt, requires_grad=True)
+                        y = f(a, b) if first else f(b, a)
+                        grads = torch.autograd.grad(y.sum(), (a, b))
+                        assert all(bool(torch.isfinite(g).all()) for g in grads), (name, z, other, first, grads)
+            assert bool(torch.isfinite(y).all()) and all(bool(torch.isfinite(g).all()) for g in grads), (name, dt, z)
+
+
+def test_sqa_backward_is_guarded_and_forward_is_the_formula():
+    import torch
+    f = O.torch_impl("sqa")
+    x = torch.tensor([0.0, -0.0, 1e-300, -4.0, 9.0, 5e-324], dtype=torch.float64, requires_grad=True)
+    y = f(x)
+    assert torch.equal(y.detach(), torch.sqrt(torch.abs(x.detach())))              # bit for bit
+    (g,) = torch.autograd.grad(y.sum(), x)
+    assert g[0] == 0.0 and g[1] == 0.0                                              # was NaN (inf * 0)
+    assert g[3] == pytest.approx(-0.25) and g[4] == pytest.approx(1 / 6) and torch.isfinite(g).all()
+    assert g[2] == pytest.approx(0.5e150) and g[5] > 1e160                         # huge next to the cusp, finite
+    plain = torch.sqrt(torch.abs(x))                                                # what autograd does unguarded
+    assert torch.isnan(torch.autograd.grad(plain.sum(), x)[0][0])
+    bad = f(torch.tensor([float("nan"), float("inf"), -float("inf")]))             # nothing is hidden
+    assert torch.isnan(bad[0]) and torch.isinf(bad[1]) and torch.isinf(bad[2])
+    for dt in (torch.float32, torch.float64):                                       # gradient w.r.t. constants
+        c = torch.tensor([2.0, 0.0], dtype=dt, requires_grad=True)
+        r = torch.tensor([0.0, 0.0, 3.0], dtype=dt)
+        out = f(r * c[0] + c[1]).sum()
+        (gc,) = torch.autograd.grad(out, c)
+        assert torch.isfinite(gc).all()
+
+
+def test_softplus_gradient_is_the_sigmoid_everywhere():
+    import torch
+    f = O.torch_impl("softplus")
+    x = torch.tensor([-800.0, -30.0, -1.0, -0.0, 0.0, 1.0, 30.0, 800.0], dtype=torch.float64, requires_grad=True)
+    y = f(x)
+    ref = np.maximum(x.detach().numpy(), 0.0) + np.log1p(np.exp(-np.abs(x.detach().numpy())))
+    assert np.array_equal(y.detach().numpy(), ref)                                  # the Julia formula, unchanged
+    (g,) = torch.autograd.grad(y.sum(), x)
+    assert torch.allclose(g, torch.sigmoid(x.detach()), rtol=0, atol=0) and g[3] == 0.5 and g[4] == 0.5
+    xx = torch.linspace(-3, 3, 7, dtype=torch.float64, requires_grad=True)          # second derivative works too
+    (g1,) = torch.autograd.grad(f(xx).sum(), xx, create_graph=True)
+    (g2,) = torch.autograd.grad(g1.sum(), xx)
+    s = torch.sigmoid(xx.detach())
+    assert torch.allclose(g2, s * (1 - s))
+    with torch.inference_mode():
+        assert float(f(torch.tensor(0.0))) == pytest.approx(math.log(2.0))
+
+
+def test_ppow_exponent_limit_is_one_in_every_vocabulary():
+    """User confirmation 3: no compound exponents in the search. (7, 1) = base size <= 7, exponent size 1; the
+    exponent limit is the same as in (-1, 1), the base limit is the plan's argument-size cap. A size-1 exponent can
+    still be a variable (confirmed with Julia), so the post-search scan stays."""
+    for v in O.VOCABULARIES.values():
+        assert v.constraints["ppow"] == (7, 1)
+        cfg = O.search_config(v.name, 3, "gauge")
+        assert cfg["constraints"]["ppow"] == (7, 1)
+        assert "ppow: argument 2 has complexity 3 (limit 1)" in O.violations(("ppow", "zt", ("+", "rh", "x")), v)
+        assert O.violations(("ppow", "zt", "rh"), v) == ["ppow: exponent is not a constant"]
+        assert O.violations(("ppow", "zt", -1.5), v) == []
+    for name, t in O.TEMPLATES.items():                    # templates search their parts with the same constraints
+        assert O.search_config(t.vocabulary, 3, "gauge", template=name)["constraints"]["ppow"] == (7, 1)
+    assert O.search_config("stage1", 1, "wl2")["constraints"]["ppow"] == (7, 1)

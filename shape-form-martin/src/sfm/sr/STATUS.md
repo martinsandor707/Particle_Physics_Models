@@ -1,23 +1,24 @@
-# `sfm.sr` — status of the math-author modules (second session, 25 Nov 2026)
+# `sfm.sr` — status of the math-author modules (second session, 25 Nov 2026; updated after the user's review)
 
 Written for whoever continues. All six modules are implemented; each section says what the code does, what was
-verified and what was not. Section 8 holds the decisions and the list of plan rules that need the user's
-confirmation; section 10 the interfaces for the runner. **Numbers are measured only where they say so.**
+verified and what was not. Section 8 holds the decisions and the plan rules they touch (**all eight accepted by
+the user on 25 Nov 2026**); **section 12 answers the user's four confirmations** and lists what they added;
+section 10 holds the interfaces for the runner. **Numbers are measured only where they say so.**
 
 ## 1. Status per module
 
 | Module | State | Tests | Notes |
 |---|---|---|---|
-| `operators.py` | done (first session); `UNCONFIRMED` emptied, `CONFIRMED_WITH_JULIA` added | 48 pass | every item of `UNCONFIRMED` is now confirmed against Julia, see §9 |
+| `operators.py` | done (first session); `UNCONFIRMED` emptied, `CONFIRMED_WITH_JULIA` added; torch `sqa` / `softplus` gradients fixed (§12.1) | 70 pass | every item of `UNCONFIRMED` is now confirmed against Julia, see §9 |
 | `translate.py` | **done** | 91 pass (`tests/test_sr_translate.py`, 1.3 s) | torch only on demand; checked against real PySR strings, predictions and losses |
-| `audit.py` | **done** | 68 pass (`tests/test_sr_audit.py`, 3.5 s) | NumPy only; gauge decision in §8 needs the user's confirmation |
-| `checks.py` | **done** | 8 pass (`tests/test_sr_checks.py`) | NumPy only; tolerances are arguments with stated defaults |
-| `targets.py` | **done**, not yet run on real data | 16 pass (`tests/test_sr_targets.py`) | constructions tested on synthetic maps; event-level estimators on synthetic showers (CPU child process) |
-| `refit.py` | **done except registration** (stub, by instruction) | 8 pass (`tests/test_sr_refit.py`, CPU child process) | constants recovered on synthetic showers; no real refit run |
+| `audit.py` | **done** | 77 pass (`tests/test_sr_audit.py`, 9 s) | NumPy only; (a) domain, (b) magnitude, (c) numerics; `certify_finalist` |
+| `checks.py` | **done** | 9 pass (`tests/test_sr_checks.py`) | NumPy only; tolerances are arguments with stated defaults |
+| `targets.py` | **done**, not yet run on real data | 18 pass (`tests/test_sr_targets.py`) | constructions tested on synthetic maps; event-level estimators on synthetic showers (CPU child process) |
+| `refit.py` | **done except registration** (stub, by instruction) | 11 pass (`tests/test_sr_refit.py`, CPU child process) | constants recovered on synthetic showers; no real refit run |
 | `__init__.py` | empty, as `test_sr_package_init_is_empty` requires | | |
 
-Run: `uv run pytest shape-form-martin/tests -q -k "sr_ and not search"` → 239 passed (about 12 s; the refit suite
-took up to a minute once, when the CPU was shared).
+Run: `uv run pytest shape-form-martin/tests -q -k "sr_ and not search"` → 280 passed (about 18 s): 276 in the six
+files of this table plus the 4 of another worker's `tests/test_sr_post.py`, which the same filter selects.
 
 Nothing outside the write set was touched; no git state changed; the test split was not opened; no `*.csv` was
 opened; no real data file was read at all (targets and refit were exercised on synthetic inputs only); the GPU was
@@ -49,7 +50,7 @@ Measured: `x(0.0005 GeV) = −4.1030`, `x(50 GeV) = +1.2777` (not +1.33; `x = 1.
 | `linv` | `linv(x) = 1 / (1 + x * x)` | 2 | (0, 1] | |
 | `ppow` | `ppow(x, y) = (1 + abs(x))^y` | 2 | (0, ∞) | kink in x at 0; overflows when `y·log1p(|x|)` > 709.78 / 88.72 |
 | `l1p` | `l1p(x) = log1p(abs(x))` | 2 | [0, ∞) | kink at 0 |
-| `sqa` | `sqa(x) = sqrt(abs(x))` | 2 | [0, ∞) | infinite slope at 0; torch gradient there is NaN (inf·0) |
+| `sqa` | `sqa(x) = sqrt(abs(x))` | 2 | [0, ∞) | infinite slope at 0; `torch_impl` defines the backward pass as 0 at exactly 0 (plain autograd gives NaN), forward unchanged |
 | `sin`, `cos` (Stage 2) | built-in | 2 | [−1, 1] | |
 | `/`, `inv` (extra arm) | built-in | 1 | ℝ | not total |
 | `neg abs cube log log1p sqrt pow` | — | — | — | never searched; for parsing and auditing foreign equations |
@@ -271,7 +272,7 @@ removed member can leave a hole in the front at its complexity.
 **D5.** Fisher weights = expected Hessian of the energy-weighted pseudo-likelihood (§5), tested against the score
 covariance.
 
-### Plan rules touched — for the user's confirmation
+### Plan rules touched — items 1–8 accepted by the user on 25 Nov 2026 (with the four confirmations of §12)
 
 1. **`sup|δ| ≤ 1 nat` (§7) is evaluated as the half-oscillation over (z′, r) at fixed x** (D1). Alternatives ready:
    reference gauge at limit 1; `limit=0.5` for a guaranteed `|δ_eff| ≤ 1 nat`.
@@ -288,6 +289,22 @@ covariance.
 7. **C2** is a polynomial in (ζ, √ϱ, x) with the equation's k, without the monomials the softmax cannot see — the
    plan says only "smooth tensor polynomial with the same number of constants".
 8. **Complexity weights** (first session, still open): `sqa` and `linv` cost 2, not 1.
+
+**New choices made while building in the four confirmations — not yet seen by the user:**
+
+9. **Raw magnitude limit:** the raw, unshifted |f| (top-level gauge terms stripped) must stay below 16 nat on the
+   extended box (`RAW_LIMIT_NAT`). A new rejection criterion; it only rejects more.
+10. **Rounding tolerance:** the first-order float64 rounding-error bound of f must stay below 1e-6 nat
+    (`ROUNDING_TOL_NAT`); rejects only expressions with catastrophic cancellation.
+11. **Gauge constants are not counted in k and not trained:** `refit.expression_correction` strips top-level terms
+    in x alone before translation.
+12. **Finalist rule:** a finalist needs `certified` (magnitude bound proven, not merely unrefuted) plus the tail
+    check with thresholds −2 (radial log-log slope) and 0 (depth slope), on the refitted constants; the baseline is
+    assumed to continue beyond the grid as the power law / exponential of its last four interior rings / rows.
+13. **`sqa` derivative at exactly 0 is defined as 0** in the torch implementation (the value is untouched), and
+    `softplus` uses its exact derivative.
+14. **C2:** the code default stays the unbounded polynomial with its audit verdict reported; `bounded=True`
+    (tanh of the polynomial) is the labelled alternative that this author recommends as the registered control (§12.4).
 
 ### Ill-posed points that remain (not decided here)
 
@@ -348,3 +365,141 @@ Not confirmed here (runner's items): kill-and-resume, `from_file` for templates,
 - The budget behaviour of the magnitude bound for size-30 expressions with high-frequency structure (60k boxes,
   then `not_refuted`); the cases tried here took tens of milliseconds.
 - Template parameters `p[i]`; a real refit; the checks driver at the seven momenta.
+
+## 12. The user's four confirmations (25 Nov 2026) — what was true, what was changed, what the tests show
+
+### 12.1 Float32 and gradient hygiene (rules 1 and 3)
+
+**Half-swing.** Kept: `H = sup_x ½[sup − inf over (z′, r)] ≤ 1 nat`. The report states the consequence explicitly:
+`magnitude["delta_eff_bound"] = 2H` and the summary line prints `|delta_eff| <= 2H = …` — up to 2 nat after
+normalisation.
+
+**(a) "The overflow cap bounds the raw unshifted |δ| and prevents float32 cancellation" — this was FALSE.**
+`OVERFLOW_CAP = 1e30` only keeps nodes finite. Measured before the change: `0.5·tanh(ζ − 2) + 1e4·x` passed the
+audit (domain safe, H certified at 0.499) while a float32 evaluation damaged its ζ-dependence by 2.5e-4 nat (at
+x = 0.731; the test asserts > 1e-4). Now four mechanisms, all re-applied to the refitted constants:
+
+1. `refit.expression_correction` strips top-level additive terms in x alone (`audit.drop_gauge_terms`) before
+   translation; their constants are neither trained nor counted in k; a pure gauge equation is refused.
+2. `audit.numerics`: the **raw, unshifted |f|** of what remains must stay ≤ 16 nat on the extended box (tight
+   machinery, gauge "none"). This catches gauge-like terms that are not top-level summands:
+   `0.5·tanh(ζ − 2) + 1e4·x·linv(0·ϱ)` is now rejected (raw 4.1e4), `… + 12·linv(0·ϱ)` passes, `… + 20·linv(0·ϱ)`
+   is rejected although its H is certified.
+3. `refit.CorrectedModel` evaluates the correction, its sum with log P_base and the softmax in **float64** and
+   raises `TypeError` for a float32 correction.
+4. `audit.rounding_error_bound`: a first-order forward bound of the rounding error of f on the extended box (interval
+   enclosures of values and derivatives on 16^d sub-boxes; one unit roundoff per arithmetic operation and per
+   constant, 4 per library call). Required: float64 bound ≤ 1e-6 nat. Reported: the float32 bound and
+   `float32_safe` (≤ 1e-5 nat).
+
+**Guaranteed error of the correction after these mechanisms** (for an equation that passes the audit, before or
+after the refit): rounding error of f in the refit ≤ its float64 bound ≤ 1e-6 nat by requirement (measured bounds:
+4.0e-16 nat for `0.5·tanh(ζ − 2)`, 3.7e-14 for `0.99·tanh(ζϱx)`, 3.9e-9 for an expression with an `sqa` cusp);
+adding f to log P_base costs ≤ 2⁻⁵³·(16 + |log P|) ≈ 1e-14 nat. The only float32 step left is the cast of the
+normalised log P, one rounding of |log P| (1.2e-6 nat at |log P| = 20), the same for every model of the campaign.
+If the correction were evaluated in float32 instead: ≤ the float32 bound of the equation (2.1e-7 nat for
+`0.5·tanh(ζ − 2)`; 7.4e-3 nat for the same equation with the unstripped `+ 1e4·x`) plus 2⁻²⁴·(16 + |log P|) < 4e-6 nat for the sum.
+- Tests: the premise test above; stripping and the raw limit; `(exp(6ζ) + 0.5·tanh ϱ) − exp(6ζ)` (1e20 + small −
+  1e20) is rejected with a float64 bound of 2.4e6 nat although it has no pole and stays below the overflow cap;
+  on 60+ random Stage-1 trees the measured float32-against-float64 difference at 3000 points never exceeds the
+  float32 bound; in the refit suite the model with and without the gauge terms `+ 1e4·x + 7` is identical and k = 2.
+- **Not guaranteed:** the rounding bound is first order and assumes 4 ulp per library call; it is pessimistic for
+  float32 (`0.99·tanh(ζϱx)` gets 2.0e-5 and is labelled not float32-safe, from the size of the sub-boxes). A
+  gauge-like constant below 16 nat hidden inside a product is not stripped (harmless in float64). The searches
+  themselves run in Julia Float64 and are not affected.
+
+**(b) "`sqa` cannot produce Inf/NaN gradients at 0" — this was FALSE.** Measured before the change: the gradient of
+the torch `sqa` at exactly +0.0 and −0.0 was NaN in float32 and float64 (inf·0). `softplus` gave 0 instead of ½ at
+exactly 0 (finite, wrong at one point). `abs`, `l1p`, `ppow` give 0 there (finite). Changed in
+`operators.torch_impl`: `sqa` keeps its forward value bit for bit (NaN and Inf inputs still propagate) and has its
+backward pass defined as 0 at exactly 0; `softplus` is the Julia formula forward and `sigmoid(x)` backward.
+- Tests: every total operator is backpropagated at +0.0 and −0.0, in float32 and float64, in every argument
+  position — all gradients finite; a `CorrectedModel` whose `sqa` argument is exactly 0 on 128 grid cells has a
+  finite loss and finite gradients; the round trip against PySR's own predictions is unchanged (91 tests).
+- **Not guaranteed:** next to the cusp the slope is 1/(2√|u|) — finite for every non-zero float, but as large as
+  5e149 at |u| = 1e-300. The harness clips the gradient norm at 5 and counts skipped batches; a constant that
+  sits on a cusp can stall. A cusp of `sqa` inside the tail region makes the tail slope unbounded, and such a
+  finalist cannot be certified (§12.2).
+
+### 12.2 Post-refit certification (rules 2 and 6)
+
+**Before:** the screening audit was already repeated on the refitted equation, but `passed` accepted an undecided
+magnitude bound and there was no tail check. **Now:**
+- `AuditReport.certified` = domain safe ∧ magnitude **certified** ∧ numerics certified; `audit(…,
+  require_certified=True)` makes `passed` equal to it. Screening keeps the plan's literal rule (undecided passes,
+  interval reported).
+- `audit.certify_finalist(expr, baseline_tail=…)` = that certificate plus the tail check: `audit.tail_slopes`
+  (rigorous enclosures of ∂f/∂ln r beyond 700 mm and ∂f/∂z′ beyond 1450 mm on the extended box) added to the tail
+  slopes of the refitted baseline (`checks.baseline_tail_slopes`); required: radial log-log slope < −2, depth
+  slope < 0; "not worse than the baseline" is reported.
+- `refit.fit_candidate(…, finalist=True, baseline_tail=…)` runs it **on the constants after the joint refit** and
+  returns `finalist_certified`; `register_refit`'s specification refuses a finalist without it.
+- Tests: `0.9995·(sin² + cos²)(3ζ)·tanh(ϱ − 5)` at a 2000-box budget is undecided (H in [0.99945, 1.072]) — it passes
+  screening and is refused as a finalist, before the "refit" and after it (constants moved to 0.9993, 3.01, 5.02);
+  the same form at 0.9 is certified and loses the certificate when the refit moves it to 1.3 (`failed`); a refit
+  that moves a pole into the box gives the reason `domain: unsafe_proven`; tail cases (rise beating the baseline,
+  baseline itself not integrable, missing baseline slopes) each refuse with their reason; in the synthetic refit the
+  certificate is computed for the refitted constants (0.798, 1.499, −1.517), not the starting ones.
+- **Not guaranteed:** the tail check needs the refitted baseline's slopes, i.e. the H200; without them
+  `certified` is False by design. The continuation of the baseline beyond the grid is an assumption. The thresholds
+  −2 and 0 are this module's (first session, §7), not the plan's wording. The tail enclosure refines adaptively
+  but can stay loose (reported `converged`), which costs false refusals only. An undecided magnitude bound may be
+  decidable with a larger `max_boxes`; nothing raises the budget automatically. Registration is still a stub, so
+  nothing enforces the rule yet outside `fit_candidate`'s return value.
+
+### 12.3 `ppow` constraint (rule 4)
+
+**Already true for the stated purpose, and kept as it is:** `constraints["ppow"] = (7, 1)` in Stage 1, the raw arm,
+Stage 2 and every template search — exponent size 1, so no compound exponent can be built (confirmed with Julia:
+`ppow(zt, rh + x)` is rejected by `check_constraints`). `(−1, 1)` has the same exponent limit and would only remove
+the cap of 7 on the base, which is one of the plan's argument-size limits; not adopted. The post-search scan stays,
+because a size-1 exponent can still be a variable (`ppow(zt, rh)` is accepted by Julia).
+- Test: `test_ppow_exponent_limit_is_one_in_every_vocabulary`.
+- **Not guaranteed:** the search can still spend evaluations on `ppow(u, variable)`; only a change of
+  `complexity_of_variables` or of the vocabulary would stop that, and both alter pre-registered sizes. The pilot
+  reports the fraction of such members.
+
+### 12.4 Pilot logging and C2 fairness (rules 5 and 7)
+
+**(a) n_eff.** New: `targets.build_residual_target` stores per momentum slice `slice_n_eff` = (Σw)²/Σw² of the
+Horvitz–Thompson weights under the size measure ω^0.5, `slice_n_eff_gamma1` (an equal-size comparison sample under
+strict proportionality, drawn with its own generator so the target does not depend on it), the effective number of
+cells of the population 1/Σω², and the counts; also in `meta_json`. `targets.n_eff_report(target)` and
+`targets.format_n_eff(target)` give the rows and the table for the Gate 2-pilot log. Wording corrected everywhere:
+the HT weights make *linear totals* unbiased; the within-slice weighted variance is a ratio of weighted sums and is
+**design-consistent (asymptotically unbiased), not unbiased**.
+- Tests: stored values equal the weights' n_eff; the comparison draw does not change the target; a Monte Carlo over
+  designs shows the loss estimate biased low at n = 25 (beyond 4 standard errors), within 2 % at n = 400, and a
+  bias of relative order 1/n_eff. Illustration on the synthetic maps (120 of about 280 cells): n_eff 91–96 under
+  ω^0.5, 97–101 under ω^1, 104–112 for the population — synthetic, no statement about the real target.
+- **Not known:** the real n_eff, until the target is built.
+
+**(b) C2.** New: the control polynomial is an expression tree (`refit.c2_tree`; the same function as before, with
+`sqa(ϱ) = √ϱ`), so `fit_candidate(…, role="control")` and `refit.audit_control(model)` run the **same extended-box
+audit** (domain, magnitude with the same gauge and limit, numerics) on the fitted coefficients and return
+`audit_verdict` = {passed, certified, domain, magnitude, H_lower, H_upper, violates_extended_box_bound}, to be
+printed beside Δ(SR) − Δ(C2). It is a report, not a gate. `control_c2(base, k, bounded=True)` is the labelled
+alternative tanh(polynomial), bounded by form.
+- Tests show the issue is real: on the synthetic problem the fitted three-constant polynomial
+  (0.996, −0.008, −1.292) **violates the bound** (H ≥ 1.48 by actual evaluation) while reaching NLL 16.3758; the
+  bounded variant is certified with H ≤ 1 for arbitrary coefficients and starts at the baseline.
+- **Recommendation:** register tanh(polynomial) as C2. A polynomial is free outside the data, where an SR candidate
+  is constrained, so the unbounded control answers an easier problem and Δ(SR) − Δ(C2) would be tilted against SR;
+  the bounded one obeys the same constraint with the same k, and for corrections well below 1 nat it differs from
+  the polynomial only at third order. The unbounded polynomial can be kept as a labelled second control with its
+  verdict. The code default is still the unbounded one (the reading the user accepted): the switch is a decision.
+- **Not verified:** how much the two controls differ in likelihood on real data.
+
+### 12.5 Interface changes (additions only)
+
+- `audit`: `numerics`, `rounding_error_bound`, `tail_slopes`, `certify_finalist`, `canonical_gauge_form`;
+  `audit(…, require_certified=, raw_limit=)`; `AuditReport` gains `numerics`, `certified`, `require_certified`
+  (`passed` now also requires the numerics check). `drop_gauge_terms` returns the tree itself when nothing is
+  dropped. Note for `scripts/sr_post.py`: hashing `canonical_gauge_form(tree)` for every member de-duplicates also
+  members that differ by the bracketing of their top-level sum.
+- `refit`: `expression_correction(…, strip_gauge=True)`, `c2_tree`, `PolyControl(k, bounded=)` (parameter name is now
+  `correction.poly.c`), `control_c2(…, bounded=)`, `audit_control`, `audit_verdict`,
+  `fit_candidate(…, role=, finalist=, baseline_tail=)` with new result keys.
+- `targets`: `effective_sample_size`, `n_eff_report`, `format_n_eff`; new arrays `slice_n_eff*`, `slice_n_sampled`,
+  `slice_n_masked`, `sampling_gamma`.
+- `checks`: `baseline_tail_slopes`. `operators`: only `torch_impl` changed (nothing the search uses).

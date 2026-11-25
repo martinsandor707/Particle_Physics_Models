@@ -107,3 +107,24 @@ def test_seed_null_comparison():
     bad = K.seed_null_comparison(0.040, 0.039, 0.0020, 0.0005)
     assert not bad["passed"]
     assert K.CHECK_MOMENTA_GEV == (0.05, 0.1, 1.0, 5.0, 20.0, 30.0, 50.0)
+
+
+def test_baseline_tail_slopes_feed_the_finalist_certificate():
+    from sfm.sr import audit as A
+    z = np.linspace(-193.5, 1443.5, 128)
+    r = 700.0 * ((np.arange(32) + 0.5) / 32) ** 1.7
+    lr = -3.2 * np.log(r)[None, :] - z[:, None] / 250.0
+    t = K.baseline_tail_slopes(lr, z, r)
+    assert t["dlnr"] == pytest.approx(-3.2) and t["dz_per_mm"] == pytest.approx(-1 / 250.0)
+    assert t["r_fit_mm"][1] == pytest.approx(r[-2]) and t["n_fit"] == 4
+    both = np.stack([lr, -2.4 * np.log(r)[None, :] - z[:, None] / 400.0])      # the worse of two momenta counts
+    t2 = K.baseline_tail_slopes(both, z, r)
+    assert t2["dlnr"] == pytest.approx(-2.4) and t2["dz_per_mm"] == pytest.approx(-1 / 400.0)
+    assert t2["dlnr_median"] == pytest.approx(-2.8)
+    eq = "0.3 * tanh(zt - 2.0) - 0.1 * l1p(rh)"
+    assert A.certify_finalist(eq, baseline_tail=t)["certified"]
+    flat = K.baseline_tail_slopes(-1.95 * np.log(r)[None, :] - z[:, None] / 250.0 + 0 * lr, z, r)
+    c = A.certify_finalist("0.3 * tanh(zt - 2.0)", baseline_tail=flat)       # the baseline itself is not integrable
+    assert not c["certified"] and c["audit_certified"] and "radial tail" in c["reasons"][0]
+    with pytest.raises(ValueError):
+        K.baseline_tail_slopes(lr[:, :3], z, r[:3])

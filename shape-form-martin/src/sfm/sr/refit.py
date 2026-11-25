@@ -21,7 +21,14 @@ The model
     PLAN "all constants trainable"). Both numbers are reported, never mixed.
 
 After the fit (mandatory): the constants have moved, so ``fit_candidate`` audits ``model.current_expr()`` again with
-``sfm.sr.audit.audit`` and returns the report; a refit whose audit fails must not be registered.
+``sfm.sr.audit.audit`` and returns the report; a refit whose audit fails must not be registered. A FINALIST needs
+more than the screening rule: ``fit_candidate(..., finalist=True, baseline_tail=...)`` runs
+``audit.certify_finalist`` on the refitted constants (magnitude bound proven, domain, numerics, tail check).
+
+Numerical hygiene (user's confirmation 1): top-level gauge terms are stripped before translation
+(``expression_correction``); the correction, the sum with log P_base and the softmax are evaluated in float64 and a
+float32 correction is refused; the audit bounds the raw |f| by 16 nat and the float64 rounding error by 1e-6 nat,
+before and after the refit. ``sqa`` cannot give a NaN gradient at 0 (``operators.torch_impl``).
 
 Controls (same schedule = the same ``FitConfig`` as the candidate, only ``name`` / ``out_dir`` differ)
     C1  ``control_c1(base)``: the baseline alone, all its constants trainable, continued with the candidate's
@@ -30,7 +37,10 @@ Controls (same schedule = the same ``FitConfig`` as the candidate, only ``name``
             f = sum_j c_j u^a v^b t^c,  u, v in [-1, 1] the rescaled zt and sqrt(rh) over the data box, t = x,
         the first k monomials in graded lexicographic order, excluding the constant and the pure powers of x
         (the softmax cannot see them), zero start (the model starts exactly at the baseline). SR is credited with
-        Delta(SR) - Delta(C2).
+        Delta(SR) - Delta(C2). Fairness (user's confirmation 4): the fitted polynomial gets the same extended-box
+        audit as an equation (``fit_candidate(role="control")`` / ``audit_control``) and its verdict is reported
+        beside the difference - a polynomial is not bounded outside the data, an SR candidate has to be.
+        ``control_c2(base, k, bounded=True)`` is the labelled alternative tanh(polynomial), bounded by form.
     C3  (seed-null) is a search control: ``targets.build_residual_target(..., halves=...)``.
 
 Trajectories: ``SubstitutedProvider(provider, {name: expr})`` replaces chosen raw parameters of a Track-A provider by
@@ -57,7 +67,8 @@ if str(paths.MARTIN_DIR) not in sys.path:
     sys.path.insert(0, str(paths.MARTIN_DIR))
 import common as C  # noqa: E402
 
-__all__ = ["CorrectedModel", "expression_correction", "PolyControl", "c2_monomials", "control_c1", "control_c2",
+__all__ = ["CorrectedModel", "expression_correction", "PolyControl", "c2_monomials", "c2_tree", "control_c1",
+           "control_c2", "audit_control", "audit_verdict",
            "SubstitutedProvider", "fit_candidate", "check_gradients", "register_refit", "refit_summary",
            "RefitNotAllowed", "ENV_ALLOW"]
 
@@ -73,10 +84,26 @@ def _x_of_lnp(lnp: torch.Tensor, v0: float, vs: float, mass: float) -> torch.Ten
     return (torch.log(p * p / (torch.sqrt(p * p + mass * mass) + mass)) - v0) / vs
 
 
-def expression_correction(expr, variable_names: Sequence[str] = O.VARIABLE_NAMES, dtype=torch.float64):
-    """The translated equation as a correction module f(zt, rh, x); all free constants trainable."""
+def expression_correction(expr, variable_names: Sequence[str] = O.VARIABLE_NAMES, dtype=torch.float64,
+                          strip_gauge: bool = True, gauge_vars: Sequence[str] = ("x",)):
+    """The translated equation as a correction module f(zt, rh, x); all free constants trainable.
+
+    strip_gauge (default True): top-level additive terms that depend on ``gauge_vars`` alone (constants included)
+    are removed first (``audit.drop_gauge_terms``). The softmax cannot see them, their constants have zero
+    gradient, and a large one would cost float32 accuracy for nothing; they are neither trained nor counted in k.
+    The removed terms are kept in ``module.dropped_gauge_terms``. An equation that is a pure gauge term is refused.
+    Use ``strip_gauge=False`` for trajectories, where x is the argument and nothing is a gauge."""
     e = T.parse(expr) if isinstance(expr, str) else expr
-    return T.TorchExpr(e, variable_names, dtype=dtype, trainable=True)
+    dropped: List[str] = []
+    if strip_gauge:
+        e2, dropped = A.drop_gauge_terms(e, gauge_vars)
+        if e2 is None:
+            raise ValueError("the equation depends on the gauge variables alone: it does not change the model "
+                             f"(dropped: {dropped})")
+        e = e2
+    m = T.TorchExpr(e, variable_names, dtype=dtype, trainable=True)
+    m.dropped_gauge_terms = list(dropped)
+    return m
 
 
 class CorrectedModel(nn.Module):
@@ -116,6 +143,9 @@ class CorrectedModel(nn.Module):
         """The correction (B, N_Z, N_R) in float64."""
         x = self.x(lnp).double()[:, None, None]
         f = self.correction(self.zt, self.rh, x)
+        if f.dtype != torch.float64:
+            raise TypeError("the correction must be evaluated in float64: in float32 a gauge-like term of size G "
+                            "costs G * 6e-8 nat of the (z', r) dependence (build it with dtype=torch.float64)")
         f = f.expand(len(lnp), C.N_Z, C.N_R) if f.dim() < 3 or f.shape[0] != len(lnp) else f
         if self.strict and not bool(torch.isfinite(f).all()):
             bad = int((~torch.isfinite(f)).sum())
@@ -167,35 +197,67 @@ def c2_monomials(k: int) -> List[Tuple[int, int, int]]:
     return out
 
 
-class PolyControl(nn.Module):
-    """Control C2: f = sum_j c_j u^a_j v^b_j t^c_j with u = zt and v = sqrt(rh) rescaled to [-1, 1] over the data box
-    (z' in [-200, 1450] mm, r in [0, 700] mm) and t = x; k constants, zero start."""
+def c2_tree(k: int, bounded: bool = False, coefficients: Optional[Sequence[float]] = None) -> T.Expr:
+    """The control polynomial as an expression tree in (zt, rh, x), so that it is evaluated, printed and AUDITED
+    by the same code as an equation:
 
-    def __init__(self, k: int, dtype=torch.float64):
+        p = sum_j c_j u^a_j v^b_j x^c_j,   u = 2 (zt - z_lo) / (z_hi - z_lo) - 1,   v = 2 sqa(rh) / sqrt(rh_hi) - 1
+
+    (u, v in [-1, 1] on the data box z' in [-200, 1450] mm, r in [0, 700] mm; ``sqa(rh) = sqrt(rh)`` for rh >= 0).
+    The scales are structural literals; the k coefficients are the free constants (zero unless given).
+    ``bounded=True`` returns tanh(p): |f| <= 1 by form, like the Stage-1 template."""
+    box = O.data_box()
+    z_lo, z_hi = box["zt"]
+    fx = lambda v: T.const(v, fixed=True)                                  # noqa: E731
+    u = T.op("-", T.op("*", T.op("-", T.var("zt"), fx(z_lo)), fx(2.0 / (z_hi - z_lo))), fx(1.0))
+    v = T.op("-", T.op("*", T.op("sqa", T.var("rh")), fx(2.0 / float(np.sqrt(box["rh"][1])))), fx(1.0))
+    coef = [0.0] * k if coefficients is None else [float(c) for c in coefficients]
+    if len(coef) != k or k < 1:
+        raise ValueError("k must be >= 1 and match the number of coefficients")
+
+    def power(e: T.Expr, n: int) -> Optional[T.Expr]:
+        if n == 0:
+            return None
+        return e if n == 1 else (T.op("square", e) if n == 2 else T.op("pow", e, fx(float(n))))
+
+    total = None
+    for cj, (a, b, c) in zip(coef, c2_monomials(k)):
+        term = T.const(cj)
+        for fac in (power(u, a), power(v, b), power(T.var("x"), c)):
+            if fac is not None:
+                term = T.op("*", term, fac)
+        total = term if total is None else T.op("+", total, term)
+    return T.op("tanh", total) if bounded else total
+
+
+class PolyControl(nn.Module):
+    """Control C2 as a correction module: the polynomial of ``c2_tree`` with k trainable coefficients (zero start:
+    the model starts at the baseline). ``bounded=False`` (default): the plain polynomial - it is NOT bounded on
+    the extended box, so its audit verdict has to be reported beside Delta(SR) - Delta(C2) (``fit_candidate`` /
+    ``audit_control`` do the audit). ``bounded=True``: tanh(polynomial), which passes the magnitude audit by
+    construction (labelled alternative; to second order in the correction it is the same function)."""
+
+    def __init__(self, k: int, dtype=torch.float64, bounded: bool = False):
         super().__init__()
         if k < 1:
             raise ValueError("k must be >= 1")
-        self.k = int(k)
+        self.k, self.bounded = int(k), bool(bounded)
         self.exponents = c2_monomials(self.k)
-        box = O.data_box()
-        self.z_lo, self.z_hi = box["zt"]
-        self.s_hi = float(np.sqrt(box["rh"][1]))
-        self.c = nn.Parameter(torch.zeros(self.k, dtype=dtype))
+        self.poly = T.TorchExpr(c2_tree(self.k, self.bounded), O.VARIABLE_NAMES, dtype=dtype)
+        self.label = "C2 tanh(polynomial), bounded by form" if self.bounded else "C2 polynomial (unbounded)"
 
-    def features(self, zt, rh, x):
-        u = 2.0 * (zt - self.z_lo) / (self.z_hi - self.z_lo) - 1.0
-        v = 2.0 * torch.sqrt(rh) / self.s_hi - 1.0         # rh >= 0 at the cell centres: no guard needed
-        return [u ** a * v ** b * x ** c for a, b, c in self.exponents]
+    @property
+    def c(self) -> torch.Tensor:
+        return self.poly.c
 
     def forward(self, zt, rh, x):
-        zt, rh, x = (t.to(self.c.dtype) for t in (zt, rh, x))
-        out = 0.0
-        for cj, m in zip(self.c, self.features(zt, rh, x)):
-            out = out + cj * m
-        return out
+        return self.poly(zt, rh, x)
 
     def n_params(self) -> int:
         return self.k
+
+    def current_expr(self) -> T.Expr:
+        return self.poly.current_expr()
 
 
 def control_c1(base: nn.Module) -> nn.Module:
@@ -206,10 +268,40 @@ def control_c1(base: nn.Module) -> nn.Module:
     return m
 
 
-def control_c2(base: nn.Module, k: int, freeze_base: bool = False) -> CorrectedModel:
+def control_c2(base: nn.Module, k: int, freeze_base: bool = False, bounded: bool = False) -> CorrectedModel:
     """C2: the baseline plus a tensor polynomial with k constants (k = the candidate equation's free constants,
-    ``CorrectedModel.n_correction()``), zero start; ``freeze_base`` as in the candidate's refit."""
-    return CorrectedModel(copy.deepcopy(base), PolyControl(k), freeze_base=freeze_base)
+    ``CorrectedModel.n_correction()``), zero start; ``freeze_base`` as in the candidate's refit. ``bounded`` as in
+    ``PolyControl``. Fit it with ``fit_candidate(..., role="control")``: the same extended-box audit as for an
+    equation is run on the fitted polynomial and returned, as a report, not as a gate."""
+    return CorrectedModel(copy.deepcopy(base), PolyControl(k, bounded=bounded), freeze_base=freeze_base)
+
+
+def audit_verdict(report_json: Mapping) -> dict:
+    """The few numbers of an audit that are printed beside a likelihood difference: verdicts and the bound."""
+    m, nm = report_json.get("magnitude", {}), report_json.get("numerics", {})
+
+    def num(v):
+        return float(v) if isinstance(v, (int, float)) else (float("inf") if v == "inf" else None)
+    return {"passed": bool(report_json.get("passed")), "certified": bool(report_json.get("certified")),
+            "domain": report_json.get("domain", {}).get("status"), "magnitude": m.get("status"),
+            "H_lower": num(m.get("sup_lower")), "H_upper": num(m.get("sup_upper")),
+            "limit": report_json.get("limit"), "gauge": report_json.get("gauge"),
+            "raw": (nm.get("raw") or {}).get("status"), "violates_extended_box_bound": m.get("status") == "failed"}
+
+
+def audit_control(model_or_correction, box: Optional[Mapping] = None, **audit_kw) -> dict:
+    """The extended-box audit of a control's correction with its PRESENT (fitted) coefficients - the same
+    ``audit.audit`` (domain, magnitude with the same gauge and limit, numerics) as for an equation. Returns
+    {"label", "equation", "verdict": audit_verdict(...), "audit": full report}. For C2 this answers "does the
+    control violate the bound that every SR candidate has to respect?"; print ``verdict`` beside
+    Delta(SR) - Delta(C2)."""
+    corr = getattr(model_or_correction, "correction", model_or_correction)
+    if not hasattr(corr, "current_expr"):
+        raise TypeError("the control has no expression to audit")
+    e = corr.current_expr()
+    rep = A.audit(e, box, **audit_kw).to_json()
+    return {"label": getattr(corr, "label", type(corr).__name__), "equation": T.to_string(e), "k": T.n_constants(e),
+            "verdict": audit_verdict(rep), "audit": rep}
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -233,7 +325,8 @@ class SubstitutedProvider(nn.Module):
         if unknown:
             raise KeyError(f"provider has no parameter(s) {unknown}")
         self.columns = [self.names.index(n) for n in replacements]
-        self.exprs = nn.ModuleList([expression_correction(e, ("x",)) for e in replacements.values()])
+        self.exprs = nn.ModuleList([expression_correction(e, ("x",), strip_gauge=False)
+                                    for e in replacements.values()])
         if replaced_k is None:
             mask = getattr(provider, "mask", None)
             if mask is None:
@@ -288,17 +381,31 @@ def check_gradients(model: nn.Module, data, n_events: int = 64, K: int = 16, see
 
 
 def fit_candidate(model: nn.Module, train, val, config, *, label: str, synthetic: bool = False,
-                  audit_box: Optional[Mapping] = None, audit_kw: Optional[dict] = None, log=print) -> dict:
+                  audit_box: Optional[Mapping] = None, audit_kw: Optional[dict] = None, log=print,
+                  role: str = "candidate", finalist: bool = False,
+                  baseline_tail: Optional[Mapping[str, float]] = None) -> dict:
     """Likelihood refit through the existing harness ``sfm.train.fit`` (all trainable constants, training hits, the
-    metric's fold, no clamps), followed by the mandatory audit of the refitted equation.
+    metric's fold, no clamps), followed by the mandatory audit of the REFITTED equation.
 
     Allowed only on the machine of record (environment ``SFM_SR_REFIT_ALLOWED=1``) or with ``synthetic=True`` for
-    synthetic showers; otherwise ``RefitNotAllowed``. Returns
-        {"label", "fit": FitResult.summary(), "k", "expr_start", "expr_refit", "expr_refit_dict", "audit_refit",
-         "audit_passed", "registered": False}
+    synthetic showers; otherwise ``RefitNotAllowed``.
+
+    role       "candidate" (an equation: ``audit_passed`` is a gate for registration) or "control" (C2: the same
+               audit is run on the fitted polynomial and REPORTED - ``audit_verdict`` goes beside
+               Delta(SR) - Delta(C2); it does not block the control)
+    finalist   True: after the refit ``audit.certify_finalist`` is run on the refitted constants - domain safe,
+               magnitude bound PROVEN (not merely unrefuted), numerics proven, tail check with ``baseline_tail``
+               (the tail slopes of the refitted baseline, ``checks.baseline_tail_slopes``). The result is
+               ``finalist_certified``; a finalist without it must not enter LOCK.json. Certification of the
+               pre-refit constants does not count: the constants move.
+    Returns {"label", "role", "fit", "k", "k_equation", "expr_start", "expr_refit", "expr_refit_dict",
+             "dropped_gauge_terms", "audit_refit", "audit_passed", "audit_certified", "audit_verdict", "finalist",
+             "finalist_certified", "registered": False}.
     The validation numbers inside ``fit`` are the harness's monitoring values; the score of record is produced by
     the registry on the H200 (``register_refit``).
     """
+    if role not in ("candidate", "control"):
+        raise ValueError("role must be 'candidate' or 'control'")
     if not synthetic and os.environ.get(ENV_ALLOW) != "1":
         raise RefitNotAllowed(
             "refits and scores of PySR equations are produced on the H200 (PLAN section 13, A6 revised, point 7): "
@@ -306,32 +413,61 @@ def fit_candidate(model: nn.Module, train, val, config, *, label: str, synthetic
     from .. import train as sfm_train
 
     start = model.current_expr() if hasattr(model, "current_expr") else None
-    res = sfm_train.fit(model, train, val, config, meta={"sr_label": label, "synthetic": bool(synthetic)}, log=log)
-    out = {"label": label, "synthetic": bool(synthetic), "fit": res.summary(),
+    res = sfm_train.fit(model, train, val, config, meta={"sr_label": label, "synthetic": bool(synthetic),
+                                                         "sr_role": role}, log=log)
+    corr = getattr(model, "correction", None)
+    out = {"label": label, "role": role, "synthetic": bool(synthetic), "fit": res.summary(),
            "k": int(model.n_params()) if hasattr(model, "n_params") else None,
+           "k_equation": int(model.n_correction()) if hasattr(model, "n_correction") else None,
            "expr_start": T.to_string(start) if start is not None else None, "expr_refit": None,
-           "expr_refit_dict": None, "audit_refit": None, "audit_passed": None, "registered": False}
+           "expr_refit_dict": None, "dropped_gauge_terms": list(getattr(corr, "dropped_gauge_terms", [])),
+           "audit_refit": None, "audit_passed": None, "audit_certified": None, "audit_verdict": None,
+           "finalist": None, "finalist_certified": None, "registered": False}
     refit = model.current_expr() if hasattr(model, "current_expr") else None
     if refit is not None:
         rep = A.audit(refit, audit_box, **(audit_kw or {}))
-        out.update(expr_refit=T.to_string(refit), expr_refit_dict=T.to_dict(refit), audit_refit=rep.to_json(),
-                   audit_passed=bool(rep.passed))
+        rj = rep.to_json()
+        out.update(expr_refit=T.to_string(refit), expr_refit_dict=T.to_dict(refit), audit_refit=rj,
+                   audit_passed=bool(rep.passed), audit_certified=bool(rep.certified),
+                   audit_verdict=audit_verdict(rj))
         if log is not None:
-            log(f"[{label}] audit of the refitted equation: {rep.summary()}")
+            log(f"[{label}] audit of the refitted {'control' if role == 'control' else 'equation'}: {rep.summary()}")
+        if finalist:
+            kw = {k: v for k, v in (audit_kw or {}).items() if k in ("limit", "gauge", "gauge_vars", "domain_kw",
+                                                                     "magnitude_kw")}
+            cert = A.certify_finalist(refit, audit_box, baseline_tail=baseline_tail, **kw)
+            out.update(finalist=cert, finalist_certified=bool(cert["certified"]))
+            if log is not None:
+                log(f"[{label}] finalist certificate on the refitted constants: "
+                    f"{'CERTIFIED' if cert['certified'] else 'NOT CERTIFIED: ' + '; '.join(cert['reasons'])}")
+    elif finalist:
+        out.update(finalist={"certified": False, "reasons": ["the model has no equation to certify"]},
+                   finalist_certified=False)
     return out
 
 
 def refit_summary(out: Mapping) -> str:
-    f = out["fit"]
-    return (f"{out['label']}: k={out['k']} steps={f['step']} skipped={f['skipped_loss'] + f['skipped_grad']} "
-            f"audit_refit={'n/a' if out['audit_passed'] is None else ('PASS' if out['audit_passed'] else 'REJECT')}")
+    f, v = out["fit"], out.get("audit_verdict")
+    txt = (f"{out['label']}: k={out['k']} steps={f['step']} skipped={f['skipped_loss'] + f['skipped_grad']} "
+           f"audit_refit={'n/a' if out['audit_passed'] is None else ('PASS' if out['audit_passed'] else 'REJECT')}")
+    if v is not None:
+        up = v["H_upper"]
+        txt += (f" magnitude={v['magnitude']} H<={'n/a' if up is None else format(up, '.4g')} "
+                f"certified={v['certified']}")
+    if out.get("finalist_certified") is not None:
+        txt += f" finalist_certified={out['finalist_certified']}"
+    return txt
 
 
 def register_refit(*args, **kwargs):
     """REGISTRATION HOOK - STUB, deliberately not implemented in this session.
 
     What it has to do on the H200 (PLAN section 13, A6 revised, points 4, 5, 7 and Gate 2):
-      * refuse a refit whose ``audit_passed`` is not True (the audit of the REFITTED constants);
+      * refuse a candidate whose ``audit_passed`` is not True (the audit of the REFITTED constants); refuse a
+        FINALIST whose ``finalist_certified`` is not True (``fit_candidate(..., finalist=True, baseline_tail=...)``:
+        proven magnitude bound, domain, numerics and tail check, all on the refitted constants);
+      * for the control C2 store ``audit_verdict`` (does the fitted polynomial violate the extended-box bound?) and
+        print it beside Delta(SR) - Delta(C2);
       * evaluate the refitted model with the registry's evaluation (unmodified ``common.test_nll`` inside
         ``sfm.metric.deterministic()``, validation split) and write one registry row with the machine tag, the
         hash of the equation (``translate.expr_hash``), k, C, the search seed and tier, and the audit report;

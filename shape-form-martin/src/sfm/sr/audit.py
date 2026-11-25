@@ -55,8 +55,27 @@ must be repeated on the refitted equation (``sfm.sr.refit`` does it and refuses 
     The oscillation is computed as a one-sided bound of h = f(z1, r1, x) - f(z2, r2, x) on the product box
     (top-level additive terms that depend on x alone are dropped first: they cancel exactly).
 
+(c) Numerical hygiene (``numerics``; added after the user's confirmation 1 of 25 Nov 2026)
+    OVERFLOW_CAP keeps every node finite. It does NOT bound the raw value of f and does NOT prevent cancellation:
+    f = g(z, r, x) + c(x) with |c| = 1e4 passes (a) and (b) (the gauge-invariant H does not see c) while a float32
+    evaluation loses 1e4 * 2^-24 = 6e-4 nat of g. Three mechanisms close this, and all hold after a refit because
+    the audit is repeated on the refitted constants:
+      * top-level additive terms in the gauge variables alone are stripped before translation and refit
+        (``drop_gauge_terms``; ``refit.expression_correction`` does it): they carry no likelihood, and their
+        constants are neither trained nor counted;
+      * the RAW, unshifted |f| of what remains must stay below RAW_LIMIT_NAT = 16 nat on the extended box (tight
+        machinery, gauge "none"); adding f to log P_base then costs < 4e-6 nat in float32, 1e-14 in float64;
+      * a first-order rounding-error bound of f (``rounding_error_bound``) must stay below 1e-6 nat in float64, the
+        precision in which ``refit.CorrectedModel`` evaluates the correction and the softmax (it refuses a float32
+        correction); the float32 bound is reported with the verdict ``float32_safe`` (<= 1e-5 nat).
+
+Screening and finalists (user's confirmation 2). ``audit().passed`` is the screening rule: an undecided magnitude
+    bound passes. A finalist needs ``certified`` - (a) safe, (b) and (c) PROVEN - together with the tail check, on
+    the constants after the joint refit: ``certify_finalist``.
+
 Limits of the statement: real arithmetic with the constants as parsed; library functions assumed accurate to 64 ulp;
-the float32 allowance tau is heuristic.
+the float32 allowance tau is heuristic; the rounding-error bound is first order (derivative enclosures on sub-boxes,
+4 ulp per library call assumed).
 """
 from __future__ import annotations
 
@@ -73,13 +92,21 @@ from . import operators as O
 from . import translate as T
 
 __all__ = ["OVERFLOW_CAP", "TAU_REL", "MIN_FRAC", "LIMIT_NAT", "audit_box", "enclose", "domain_safety",
-           "magnitude_bound", "audit", "audit_trajectory", "AuditReport", "drop_gauge_terms", "oscillation_expr"]
+           "magnitude_bound", "audit", "audit_trajectory", "AuditReport", "drop_gauge_terms", "oscillation_expr",
+           "RAW_LIMIT_NAT", "ROUNDING_TOL_NAT", "FLOAT32_TOL_NAT", "rounding_error_bound", "numerics",
+           "tail_slopes", "certify_finalist", "canonical_gauge_form"]
 
 OVERFLOW_CAP = 1e30          # eight decades below the float32 limit 3.4e38
 TAU_REL = 1e-5               # float32 allowance around a forbidden set (relative to the subtree's magnitude)
 MIN_FRAC = 2.0 ** -10        # minimum box side as a fraction of the audit box (2.2 mm, 1.5 mm, 0.005 in x)
 LIMIT_NAT = 1.0              # PLAN: sup |delta| <= 1 nat
 SLACK = 1e-9                 # relative slack of every comparison with the limit
+RAW_LIMIT_NAT = 16.0         # bound on the RAW, unshifted |f| (top-level gauge terms stripped) on the extended box
+ROUNDING_TOL_NAT = 1e-6      # largest admissible rounding error of f in the precision the refit uses (float64)
+FLOAT32_TOL_NAT = 1e-5       # an equation is called float32-safe if its float32 rounding-error bound is below this
+U32, U64 = 2.0 ** -24, 2.0 ** -53      # unit roundoff of float32 / float64
+ULP_LIB = 4.0                # assumed accuracy of a library function call, in units of the unit roundoff
+TAIL_R_FROM_MM, TAIL_Z_FROM_MM = 700.0, 1450.0       # where the grid of common.py ends
 _LIB = 64 * np.finfo(np.float64).eps
 _TWO_PI = 2.0 * math.pi
 _HALF_PI = 0.5 * math.pi
@@ -662,12 +689,32 @@ def drop_gauge_terms(e: T.Expr, gauge_vars: Sequence[str] = ("x",)) -> Tuple[Opt
             keep.append((s, t))
     if not keep:
         return None, dropped
+    if not dropped:
+        return e, []                                       # nothing to strip: the tree itself, not a re-association
     s0, acc = keep[0]
     if s0 < 0:
         acc = T.op("neg", acc)
     for s, t in keep[1:]:
         acc = T.op("+" if s > 0 else "-", acc, t)
     return acc, dropped
+
+
+def canonical_gauge_form(e: T.Expr, gauge_vars: Sequence[str] = ("x",)) -> Optional[T.Expr]:
+    """The expression without its top-level gauge terms, with the remaining top-level sum ALWAYS rebuilt in one
+    association ((t1 + t2) - t3 ...), whether or not anything was dropped. Two hall-of-fame members that differ
+    only by gauge terms or by the bracketing of their top-level sum get the same ``translate.expr_hash`` of this
+    form (``drop_gauge_terms`` returns an untouched tree when nothing is dropped, so its hash can differ by
+    bracketing). None for a pure gauge expression. The order of the terms is kept."""
+    gv = set(gauge_vars)
+    keep = [(sg, t) for sg, t in _split_sum(e) if not set(T.variables(t)) <= gv]
+    if not keep:
+        return None
+    s0, acc = keep[0]
+    if s0 < 0:
+        acc = T.op("neg", acc)
+    for sg, t in keep[1:]:
+        acc = T.op("+" if sg > 0 else "-", acc, t)
+    return acc
 
 
 def oscillation_expr(e: T.Expr, spatial: Sequence[str]) -> Tuple[T.Expr, Dict[str, str], Dict[str, str]]:
@@ -967,7 +1014,8 @@ def _osc_bound(e: T.Expr, names: List[str], lo: np.ndarray, hi: np.ndarray, gmas
                 break
             mid = 0.5 * (m + n)
             st = _bnb(T.op("-", e, T.const(mid, fixed=True)), names, slo[None, :], shi[None, :], limit, True,
-                      min_frac=min_frac, max_boxes=min(per_slab, max(1, max_boxes - res["n_boxes"])),
+                      min_frac=min_frac, max_boxes=max(1, max_boxes - res["n_boxes"]) if not gidx else
+                      min(per_slab, max(1, max_boxes - res["n_boxes"])),
                       dense_points=dense_points, root_w=root_w)
             res["n_boxes"] += st["n_boxes"]
             if st["status"] != "failed":
@@ -1009,6 +1057,230 @@ def _osc_bound(e: T.Expr, names: List[str], lo: np.ndarray, hi: np.ndarray, gmas
 
 
 # ----------------------------------------------------------------------------------------------------------------------
+# (c) Numerical hygiene: raw magnitude and rounding-error bound
+# ----------------------------------------------------------------------------------------------------------------------
+def _supabs(iv: Interval) -> np.ndarray:
+    return np.maximum(np.abs(iv[0]), np.abs(iv[1]))
+
+
+def _t(a, b):
+    """a * b for non-negative arrays with 0 * Inf = 0."""
+    q = a * b
+    return np.where(np.isnan(q), 0.0, q)
+
+
+def _rounding_error(prog: _Prog, V: list, u: float, c_lib: float = ULP_LIB) -> np.ndarray:
+    """First-order forward bound of the rounding error of the root, per box: every operation contributes
+    (ulps) * u * sup|value| and inherits the errors of its arguments times sup|partial derivative| on the box.
+    ``sqa`` and ``sqrt`` use min(first-order term, sqrt(error)): |sqrt p - sqrt q| <= sqrt|p - q| holds exactly."""
+    N = len(V[0][0])
+    E: list = []
+    ones = np.ones(N)
+    with np.errstate(all="ignore"):
+        for idx, nd in enumerate(prog.nodes):
+            if nd.kind != "op":                             # a constant given in more digits than the working
+                c = abs(float(nd.value)) if nd.kind == "const" else 0.0    # precision is rounded once: u |c|
+                E.append(np.full(N, u * c if math.isfinite(c) else _INF))
+                continue
+            v, name = V[idx], nd.name
+            mag = _supabs(v)
+            a, Ea = V[nd.ch[0]], E[nd.ch[0]]
+            b, Eb = (V[nd.ch[1]], E[nd.ch[1]]) if len(nd.ch) > 1 else (None, None)
+            local = c_lib * u * mag
+            if name in _UNARY_DER:
+                prop = _t(_supabs(_UNARY_DER[name](a, v)), Ea)
+                if name == "sqa":
+                    prop = np.minimum(prop, np.sqrt(Ea))
+                if name in ("neg", "abs"):
+                    local = 0.0 * mag
+                elif name == "square":
+                    local = u * mag
+            elif name in ("+", "-"):
+                prop, local = Ea + Eb, u * mag
+            elif name == "*":
+                prop, local = _t(_supabs(b), Ea) + _t(_supabs(a), Eb), u * mag
+            elif name == "/":
+                r = _supabs(_recip(b))
+                prop, local = _t(r, Ea) + _t(_t(mag, r), Eb), u * mag
+            elif name == "inv":
+                prop, local = _t(_supabs(_square(v)), Ea), u * mag
+            elif name == "log":
+                prop = _t(_supabs(_recip(a)), Ea)
+            elif name == "log1p":
+                prop = _t(_supabs(_recip(_add(a, (ones, ones)))), Ea)
+            elif name == "sqrt":
+                prop, local = np.minimum(_t(_supabs(_recip(_scale(v, 2.0))), Ea), np.sqrt(Ea)), u * mag
+            elif name == "ppow":
+                dx = _supabs(_mul(_mul(b, v), _l1p_der(a)))
+                dy = _supabs(_mul(v, _UNARY_VAL["l1p"](a)))
+                prop = _t(dx, Ea) + _t(dy, Eb)
+            elif name == "pow":
+                ex = prog.nodes[nd.ch[1]]
+                if ex.kind == "const" and ex.fixed and float(ex.value).is_integer():
+                    n = int(ex.value)
+                    if n == 0:
+                        prop = np.zeros(N)
+                    elif n > 0:
+                        prop = _t(_supabs(_scale(_ipow(a, n - 1), float(n))), Ea)
+                    else:
+                        prop = _t(_supabs(_scale(_recip(_ipow(a, -n + 1)), float(n))), Ea)
+                else:
+                    tiny = np.finfo(float).tiny
+                    apos = (np.maximum(a[0], tiny), np.maximum(a[1], tiny))
+                    prop = _t(_supabs(_mul(v, _mul(b, _recip(apos)))), Ea) + _t(_supabs(_mul(v, _mono(np.log, apos))), Eb)
+            else:
+                raise ValueError(f"no rounding model for operator {name!r}")
+            e = prop + local
+            E.append(np.where(np.isnan(e), _INF, e))
+    return E[prog.root]
+
+
+def _partition(lo: np.ndarray, hi: np.ndarray, n_split: int, max_boxes: float = 3e4):
+    d = lo.shape[1]
+    if d == 0:
+        return lo, hi
+    n = int(n_split)
+    while n ** d > max_boxes and n > 2:
+        n -= 1
+    edges = [np.linspace(lo[0, j], hi[0, j], n + 1) for j in range(d)]
+    idx = np.array(list(itertools.product(range(n), repeat=d)))
+    blo = np.stack([edges[j][idx[:, j]] for j in range(d)], 1)
+    bhi = np.stack([edges[j][idx[:, j] + 1] for j in range(d)], 1)
+    return blo, bhi
+
+
+def rounding_error_bound(expr: Union[str, T.Expr], box: Optional[Mapping[str, Tuple[float, float]]] = None,
+                         n_split: int = 16) -> dict:
+    """Upper bound (first order) of the rounding error of evaluating the expression in float32 and in float64,
+    anywhere on the box: {"float32": nat, "float64": nat}. Inputs are taken as exact in the working precision (the
+    model IS the function of its float inputs); a constant is charged one rounding to that precision, each
+    arithmetic operation one unit roundoff of its result, each library call ``ULP_LIB`` = 4. The bound is the maximum over a partition of the box
+    into n_split^d sub-boxes, with interval enclosures of the values and of the derivatives on each: it can only
+    over-estimate through the size of the sub-boxes. It is what detects cancellation: f = c(x) + g with |c| = 1e4
+    has a float32 bound of about 1e-3 nat although the model only uses g."""
+    e, names, lo, hi = _resolve(expr, box)
+    prog = _Prog(e, names)
+    blo, bhi = _partition(lo, hi, n_split)
+    out = {"float32": 0.0, "float64": 0.0, "n_boxes": int(len(blo)), "ulp_per_library_call": ULP_LIB}
+    for s0 in range(0, len(blo), 4096):
+        run = _run(prog, blo[s0:s0 + 4096], bhi[s0:s0 + 4096])
+        out["float32"] = max(out["float32"], float(np.max(_rounding_error(prog, run.V, U32))))
+        out["float64"] = max(out["float64"], float(np.max(_rounding_error(prog, run.V, U64))))
+    return out
+
+
+def numerics(expr: Union[str, T.Expr], box: Optional[Mapping[str, Tuple[float, float]]] = None, *,
+             raw_limit: float = RAW_LIMIT_NAT, gauge_vars: Sequence[str] = ("x",),
+             magnitude_kw: Optional[dict] = None) -> dict:
+    """Check (c), numerical hygiene of the correction as the refit evaluates it (top-level additive terms in the
+    gauge variables alone are stripped first, exactly as ``refit.expression_correction`` does):
+
+      raw       sup |f| of the RAW, unshifted expression on the box, against ``raw_limit`` (16 nat), with the tight
+                machinery of (b) in gauge "none". The half-oscillation H <= 1 does not bound it: f = g + 1e4 x
+                linv(0 rh) has H < 1 and |f| = 4e4. |f| <= 16 guarantees that adding f to log P_base loses at most
+                2^-24 (16 + |log P|) < 4e-6 nat in float32 and 1e-14 nat in float64.
+      rounding  ``rounding_error_bound``: float64 must stay below ROUNDING_TOL_NAT = 1e-6 nat (the refit evaluates
+                f in float64); ``float32_safe`` says whether the float32 bound is below 1e-5 nat as well.
+
+    ``passed`` = raw not failed and the float64 bound within tolerance; ``certified`` = raw certified and the
+    float64 bound within tolerance."""
+    e0 = T.parse(expr) if isinstance(expr, str) else expr
+    e, dropped = drop_gauge_terms(e0, gauge_vars)
+    res: dict = {"dropped_gauge_terms": dropped, "raw_limit": float(raw_limit), "rounding_tol": ROUNDING_TOL_NAT,
+                 "float32_tol": FLOAT32_TOL_NAT}
+    if e is None:
+        res.update(expression=None, raw={"status": "certified", "passed": True, "sup_lower": 0.0, "sup_upper": 0.0},
+                   rounding={"float32": 0.0, "float64": 0.0, "n_boxes": 0}, float32_safe=True, passed=True,
+                   certified=True, note="nothing remains after the gauge terms are stripped")
+        return res
+    raw = magnitude_bound(e, box, limit=raw_limit, gauge="none", **(magnitude_kw or {}))
+    rnd = rounding_error_bound(e, box)
+    ok64 = bool(rnd["float64"] <= ROUNDING_TOL_NAT)
+    res.update(expression=T.to_string(e), raw=raw, rounding=rnd,
+               float32_safe=bool(raw["passed"] and rnd["float32"] <= FLOAT32_TOL_NAT),
+               passed=bool(raw["passed"] and ok64), certified=bool(raw["status"] == "certified" and ok64))
+    return res
+
+
+def _tail_component(prog: _Prog, l: np.ndarray, h: np.ndarray, j: int, key: str) -> Interval:
+    run = _run(prog, l, h, grad=True)
+    g = (run.G[prog.root][0][:, j], run.G[prog.root][1][:, j])
+    g = _mul(g, (l[:, j], h[:, j])) if key == "dlnr" else _scale(g, 1.0 / O.ZETA_SCALE_MM)
+    return _fix(*g)
+
+
+def tail_slopes(expr: Union[str, T.Expr], box: Optional[Mapping[str, Tuple[float, float]]] = None, *,
+                r_from_mm: float = TAIL_R_FROM_MM, z_from_mm: float = TAIL_Z_FROM_MM, tol_dlnr: float = 0.01,
+                tol_dz_per_mm: float = 2e-5, max_boxes: int = 60_000, n_split: int = 6) -> dict:
+    """What the equation adds to the tail slopes of the density, on the part of the extended box beyond the grid:
+
+        "dlnr"        d f / d ln r   = rh * d f / d rh    for r  >= r_from_mm (700 mm), all z', x of the box
+        "dz_per_mm"   d f / d z'     = (d f / d zt) / 260 for z' >= z_from_mm (1450 mm), all r, x of the box
+
+    each with a rigorous enclosure ("sup", "inf": forward-mode interval derivatives, refined by bisection until
+    the enclosure is within ``tol`` of the largest / smallest value found at a box centre, or ``max_boxes``) and
+    those centre values ("sup_sampled", "inf_sampled"). ln rho_model = ln rho_base + f - ln Z(x), so these add
+    to the baseline's tail slopes; ``certify_finalist`` combines them. Tolerances: 0.01 in the log-log slope,
+    2e-5 per mm (0.005 per 260 mm) in the depth slope."""
+    e = T.parse(expr) if isinstance(expr, str) else expr
+    box = dict(O.extended_box() if box is None else box)
+    out: dict = {"r_from_mm": float(r_from_mm), "z_from_mm": float(z_from_mm)}
+    spec = (("dlnr", "rh", r_from_mm / O.RHO_SCALE_MM, tol_dlnr), ("dz_per_mm", "zt", z_from_mm / O.ZETA_SCALE_MM,
+                                                                  tol_dz_per_mm))
+    for key, vname, start, tol in spec:
+        if vname not in T.variables(e) or vname not in box or start >= box[vname][1]:
+            out[key] = {"sup": 0.0, "inf": 0.0, "sup_sampled": 0.0, "inf_sampled": 0.0, "n_boxes": 0,
+                        "note": "no dependence, or no tail region in the box"}
+            continue
+        sub = dict(box)
+        sub[vname] = (max(float(start), box[vname][0]), box[vname][1])
+        _, names, lo, hi = _resolve(e, sub)
+        prog = _Prog(e, names)
+        d, j = len(names), names.index(vname)
+        root_w = np.where(hi[0] > lo[0], hi[0] - lo[0], 1.0)
+        qlo, qhi = _partition(lo, hi, n_split)
+        sup_s, inf_s, sup_done, inf_done, n_eval = -_INF, _INF, -_INF, _INF, 0
+        while len(qlo):
+            g = _tail_component(prog, qlo, qhi, j, key)
+            c = 0.5 * (qlo + qhi)
+            gc = _tail_component(prog, c, c, j, key)
+            gc = 0.5 * (gc[0] + gc[1])
+            gc = gc[np.isfinite(gc)]
+            n_eval += 2 * len(qlo)
+            if len(gc):
+                sup_s, inf_s = max(sup_s, float(gc.max())), min(inf_s, float(gc.min()))
+            relw = (qhi - qlo) / root_w
+            act = ((g[1] > sup_s + tol) | (g[0] < inf_s - tol)) & (relw.max(1) > MIN_FRAC)
+            if n_eval > max_boxes:
+                act[:] = False
+            if (~act).any():
+                sup_done, inf_done = max(sup_done, float(g[1][~act].max())), min(inf_done, float(g[0][~act].min()))
+            if not act.any():
+                break
+            alo, ahi = qlo[act], qhi[act]
+            best_w, best = np.full(len(alo), _INF), np.zeros(len(alo), int)
+            for k in range(d):                              # bisect along the side that tightens the enclosure most
+                mid = 0.5 * (alo[:, k] + ahi[:, k])
+                h1, l2 = ahi.copy(), alo.copy()
+                h1[:, k], l2[:, k] = mid, mid
+                g1, g2 = _tail_component(prog, alo, h1, j, key), _tail_component(prog, l2, ahi, j, key)
+                n_eval += 2 * len(alo)
+                w = np.maximum(g1[1] - g1[0], g2[1] - g2[0])
+                w = np.where(np.isnan(w) | ((ahi[:, k] - alo[:, k]) / root_w[k] <= MIN_FRAC), _INF, w)
+                better = w < best_w
+                best_w, best = np.where(better, w, best_w), np.where(better, k, best)
+            rows = np.arange(len(alo))
+            mid = 0.5 * (alo[rows, best] + ahi[rows, best])
+            h1, l2 = ahi.copy(), alo.copy()
+            h1[rows, best], l2[rows, best] = mid, mid
+            qlo, qhi = np.concatenate([alo, l2]), np.concatenate([h1, ahi])
+        out[key] = {"sup": sup_done, "inf": inf_done, "sup_sampled": sup_s, "inf_sampled": inf_s,
+                    "n_boxes": int(n_eval), "tolerance": float(tol),
+                    "converged": bool(sup_done <= sup_s + tol * 1.0001 and inf_done >= inf_s - tol * 1.0001)}
+    return out
+
+
+# ----------------------------------------------------------------------------------------------------------------------
 # The audit of one equation
 # ----------------------------------------------------------------------------------------------------------------------
 @dataclass
@@ -1023,6 +1295,9 @@ class AuditReport:
     limit: float
     gauge: str
     notes: List[str] = field(default_factory=list)
+    numerics: dict = field(default_factory=dict)
+    certified: bool = False                # (a) safe, (b) CERTIFIED, (c) certified: what a finalist needs
+    require_certified: bool = False        # True: ``passed`` is ``certified``
 
     def to_json(self) -> dict:
         def clean(o):
@@ -1040,19 +1315,31 @@ class AuditReport:
         return clean(asdict(self))
 
     def summary(self) -> str:
-        m = self.magnitude
+        m, nm = self.magnitude, self.numerics
+        up = m.get("sup_upper", float("nan"))
+        raw = nm.get("raw", {}).get("status", "n/a") if nm else "n/a"
+        e64 = nm.get("rounding", {}).get("float64", float("nan")) if nm else float("nan")
         return (f"{'PASS' if self.passed else 'REJECT'}  domain={self.domain['status']}  magnitude={m.get('status')} "
-                f"[{m.get('sup_lower', float('nan')):.4g}, {m.get('sup_upper', float('nan')):.4g}] "
-                f"(limit {self.limit:g}, gauge {self.gauge})  k={self.k} C={self.complexity}  {self.equation[:100]}")
+                f"H in [{m.get('sup_lower', float('nan')):.4g}, {up:.4g}] (limit {self.limit:g}, gauge {self.gauge}; "
+                f"|delta_eff| <= 2H = {2 * up:.4g})  raw={raw}  err64<={e64:.2g}  certified={self.certified}  "
+                f"k={self.k} C={self.complexity}  {self.equation[:100]}")
 
 
 def audit(expr: Union[str, T.Expr], box: Optional[Mapping[str, Tuple[float, float]]] = None, *,
           limit: float = LIMIT_NAT, gauge: str = "oscillation", gauge_vars: Sequence[str] = ("x",),
           reference: Optional[Mapping[str, float]] = None, domain_kw: Optional[dict] = None,
-          magnitude_kw: Optional[dict] = None) -> AuditReport:
-    """Both audits of one equation (string or tree; a template result is translated first with
-    ``translate.parse_template``). ``passed`` requires (a) "safe" and (b) not "failed". If (a) does not pass, (b)
-    is not run (its coarse grid would only repeat the finding) and is reported as "skipped".
+          magnitude_kw: Optional[dict] = None, require_certified: bool = False,
+          raw_limit: float = RAW_LIMIT_NAT) -> AuditReport:
+    """The audit of one equation (string or tree; a template result is translated first with
+    ``translate.parse_template``): (a) domain safety, (b) magnitude bound, (c) numerical hygiene (``numerics``).
+
+    ``passed``      (a) "safe", (b) not "failed", (c) raw magnitude not failed and float64 rounding within tolerance.
+                    This is the SCREENING rule of the search stage: as the plan says, (b) fails only on an actual
+                    evaluation above the limit, so an undecided bound passes with its interval reported.
+    ``certified``   (a) "safe", (b) "certified", (c) certified. A FINALIST needs this, on the constants after the
+                    joint refit: call with ``require_certified=True`` (then ``passed`` is ``certified``), or use
+                    ``certify_finalist``, which adds the tail check.
+    If (a) does not pass, (b) and (c) are not run and are reported as "skipped".
 
     Run it on the search result AND on the refitted equation: the constants move in the refit."""
     e = T.parse(expr) if isinstance(expr, str) else expr
@@ -1062,15 +1349,81 @@ def audit(expr: Union[str, T.Expr], box: Optional[Mapping[str, Tuple[float, floa
     if dom["safe"]:
         mag = magnitude_bound(e, box, limit=limit, gauge=gauge, gauge_vars=gauge_vars, reference=reference,
                               **(magnitude_kw or {}))
+        num = numerics(e, box, raw_limit=raw_limit, gauge_vars=(gauge_vars if gauge != "none" else ()),
+                       magnitude_kw=magnitude_kw)
     else:
         mag = {"status": "skipped", "passed": False, "gauge": gauge, "limit": float(limit),
                "note": "domain safety did not pass"}
+        num = {"status": "skipped", "passed": False, "certified": False, "note": "domain safety did not pass"}
     if mag.get("status") == "not_refuted":
         notes.append("magnitude bound not certified: no evaluation exceeds the limit, the rigorous upper bound "
                      f"is {mag['sup_upper']:.6g}")
-    return AuditReport(equation=T.to_string(e), passed=bool(dom["safe"] and mag.get("passed", False)), domain=dom,
+    if dom["safe"] and not num["passed"]:
+        notes.append("numerical hygiene: raw |f| " + str(num["raw"].get("status")) +
+                     f" against {raw_limit:g} nat, float64 rounding bound {num['rounding']['float64']:.3g} nat")
+    screen = bool(dom["safe"] and mag.get("passed", False) and num.get("passed", False))
+    cert = bool(dom["safe"] and mag.get("status") == "certified" and num.get("certified", False))
+    if require_certified and screen and not cert:
+        notes.append("not certified: a finalist needs a proven magnitude bound (and proven raw bound), not only "
+                     "the absence of a violating evaluation")
+    return AuditReport(equation=T.to_string(e), passed=(cert if require_certified else screen), domain=dom,
                        magnitude=mag, box={k: tuple(v) for k, v in box.items()}, k=T.n_constants(e),
-                       complexity=T.complexity(e), limit=float(limit), gauge=gauge, notes=notes)
+                       complexity=T.complexity(e), limit=float(limit), gauge=gauge, notes=notes, numerics=num,
+                       certified=cert, require_certified=bool(require_certified))
+
+
+def certify_finalist(expr: Union[str, T.Expr], box: Optional[Mapping[str, Tuple[float, float]]] = None, *,
+                     baseline_tail: Optional[Mapping[str, float]] = None, limit: float = LIMIT_NAT,
+                     gauge: str = "oscillation", gauge_vars: Sequence[str] = ("x",), r_slope_max: float = -2.0,
+                     z_slope_max: float = 0.0, domain_kw: Optional[dict] = None,
+                     magnitude_kw: Optional[dict] = None) -> dict:
+    """The certificate a FINALIST needs. Call it on the equation WITH THE CONSTANTS AFTER THE JOINT REFIT
+    (``refit.fit_candidate(..., finalist=True)`` does); a certificate of the pre-refit constants says nothing.
+
+      1. ``audit(..., require_certified=True)``: domain safe, magnitude bound PROVEN (status "certified", not merely
+         "not_refuted"), raw magnitude proven, rounding within tolerance;
+      2. tail check: ``tail_slopes`` of the equation added to the tail slopes of the REFITTED baseline,
+         ``baseline_tail = {"dlnr": largest d ln rho_base / d ln r beyond 700 mm, "dz_per_mm": largest
+         d ln rho_base / d z' beyond 1450 mm}`` (``checks.baseline_tail_slopes`` on the H200): the model's largest
+         radial log-slope must stay below ``r_slope_max`` (-2: integrable in r dr) and its largest depth slope
+         below ``z_slope_max`` (0: still falling). Whether the equation makes the tail worse than the baseline's
+         (a positive supremum) is reported, not required.
+
+    Returns {"certified", "audit_certified", "tail", "reasons", "audit", "equation", "hash"}. Without
+    ``baseline_tail`` the tail check cannot be evaluated and ``certified`` is False (reason given)."""
+    e = T.parse(expr) if isinstance(expr, str) else expr
+    rep = audit(e, box, limit=limit, gauge=gauge, gauge_vars=gauge_vars, domain_kw=domain_kw,
+                magnitude_kw=magnitude_kw, require_certified=True)
+    reasons: List[str] = []
+    if not rep.domain["safe"]:
+        reasons.append(f"domain: {rep.domain['status']}")
+    else:
+        if rep.magnitude.get("status") != "certified":
+            reasons.append(f"magnitude bound {rep.magnitude.get('status')}: a finalist needs it certified")
+        if not rep.numerics.get("certified", False):
+            reasons.append("numerical hygiene not certified (raw magnitude / rounding)")
+    tail: dict = {"evaluated": False, "slopes": None, "r_slope_max": r_slope_max, "z_slope_max": z_slope_max}
+    tail_ok = False
+    if rep.domain["safe"]:
+        sl = tail_slopes(e, box)
+        tail["slopes"] = sl
+        if baseline_tail is None:
+            reasons.append("tail check not evaluated: the tail slopes of the refitted baseline are needed "
+                           "(checks.baseline_tail_slopes on the machine that holds the model)")
+        else:
+            s_r, s_z = float(baseline_tail["dlnr"]), float(baseline_tail["dz_per_mm"])
+            m_r, m_z = s_r + sl["dlnr"]["sup"], s_z + sl["dz_per_mm"]["sup"]
+            r_ok, z_ok = bool(m_r < r_slope_max), bool(m_z < z_slope_max)
+            tail.update(evaluated=True, baseline={"dlnr": s_r, "dz_per_mm": s_z}, model_dlnr_max=m_r,
+                        model_dz_per_mm_max=m_z, r_ok=r_ok, z_ok=z_ok,
+                        not_worse_than_baseline=bool(sl["dlnr"]["sup"] <= 0.0 and sl["dz_per_mm"]["sup"] <= 0.0))
+            tail_ok = r_ok and z_ok
+            if not r_ok:
+                reasons.append(f"radial tail: largest d ln rho / d ln r can reach {m_r:.4g} (needs < {r_slope_max:g})")
+            if not z_ok:
+                reasons.append(f"depth tail: largest d ln rho / d z' can reach {m_z:.4g} / mm (needs < {z_slope_max:g})")
+    return {"certified": bool(rep.passed and tail_ok), "audit_certified": bool(rep.passed), "tail": tail,
+            "reasons": reasons, "audit": rep.to_json(), "equation": T.to_string(e), "hash": T.expr_hash(e)}
 
 
 def audit_trajectory(expr: Union[str, T.Expr], x_range: Tuple[float, float] = O.TRAJECTORY_BOX,

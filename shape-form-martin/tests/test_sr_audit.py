@@ -491,3 +491,151 @@ def test_unknown_variable_and_unresolved_template():
     with pytest.raises(ValueError):
         A.domain_safety(T.parse("#1 + 1.0"), {"#1": (0.0, 1.0)}) if False else A.enclose(
             T.Expr("sub", name="u", args=(T.var("zt"),)))
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# (c) numerical hygiene: raw magnitude, float32 cancellation (user confirmation 1)
+# ----------------------------------------------------------------------------------------------------------------------
+def test_overflow_cap_alone_does_not_prevent_cancellation():
+    """The premise that had to be checked: a node cap of 1e30 says nothing about a gauge term of 1e4."""
+    e = T.parse("0.5 * tanh(zt - 2.0) + 1.0e4 * x")
+    assert A.domain_safety(e)["safe"]                                       # far below the overflow cap
+    assert A.magnitude_bound(e)["status"] == "certified"                    # H does not see the gauge term
+    rng = np.random.default_rng(0)
+    zt = rng.uniform(*BOX["zt"], 5000).astype(np.float32)
+    x = np.full(5000, 0.731, dtype=np.float32)
+    with torch.inference_mode():
+        f64 = T.TorchExpr(e)(torch.tensor(zt), torch.zeros(5000), torch.tensor(x)).numpy()
+        f32 = T.TorchExpr(e, dtype=torch.float32)(torch.tensor(zt), torch.zeros(5000), torch.tensor(x)).double().numpy()
+    err = np.abs((f32 - f32.mean()) - (f64 - f64.mean())).max()
+    assert err > 1e-4                                                        # measured: the (z) variation is damaged
+    assert A.rounding_error_bound(e)["float32"] > 1e-3 and A.rounding_error_bound(e)["float64"] < 1e-10
+
+
+def test_gauge_terms_are_stripped_and_the_raw_value_is_bounded():
+    r = A.audit("0.5 * tanh(zt - 2.0) + 1.0e4 * x")
+    n = r.numerics
+    assert r.passed and r.certified and n["dropped_gauge_terms"] == ["+ 10000.0 * x"]
+    assert n["expression"] == "0.5 * tanh(zt - 2.0)" and n["raw"]["status"] == "certified"
+    assert n["raw"]["sup_upper"] <= 0.5 + 1e-9 and n["rounding"]["float32"] < 1e-6 and n["float32_safe"]
+    # the same gauge term hidden inside a product is not a top-level summand: the raw bound catches it
+    hidden = A.audit("0.5 * tanh(zt - 2.0) + 1.0e4 * x * linv(rh * 0.0)")
+    assert not hidden.passed and hidden.numerics["raw"]["status"] == "failed" and hidden.domain["safe"]
+    assert abs(hidden.numerics["raw"]["witness"]["value"]) > A.RAW_LIMIT_NAT
+    assert hidden.numerics["rounding"]["float32"] > 1e-3 and "numerical hygiene" in " ".join(hidden.notes)
+    # the limit itself: 16 nat on the raw value, whatever the gauge-invariant H says
+    ok, bad = A.audit("0.5 * tanh(zt - 2.0) + 12.0 * linv(rh * 0.0)"), A.audit("0.5 * tanh(zt - 2.0) + 20.0 * linv(rh * 0.0)")
+    assert ok.passed and bad.magnitude["status"] == "certified" and not bad.passed
+    assert ok.magnitude["sup_upper"] == pytest.approx(bad.magnitude["sup_upper"], rel=1e-6)
+    assert A.RAW_LIMIT_NAT == 16.0 and A.U32 * (A.RAW_LIMIT_NAT + 40.0) < 4e-6
+    # a pure gauge expression has nothing left to evaluate
+    g = A.numerics("3.0 * x + exp(x)")
+    assert g["passed"] and g["certified"] and g["expression"] is None
+
+
+def test_catastrophic_cancellation_is_rejected_even_in_float64():
+    s = "(exp(zt * 6.0) + 0.5 * tanh(rh)) - exp(zt * 6.0)"                 # 1e20 + small - 1e20
+    assert A.domain_safety(s)["safe"]                                       # no pole, below the overflow cap
+    r = A.audit(s)
+    assert not r.passed and r.numerics["rounding"]["float64"] > 1.0
+
+
+def test_rounding_bound_covers_the_measured_float32_error():
+    rng = np.random.default_rng(4)
+    names = ("zt", "rh", "x")
+    checked = 0
+    for _ in range(120):
+        e = random_expr(rng, int(rng.integers(2, 5)), UNARY_S1, ["+", "-", "*", "ppow"])
+        if not T.variables(e) or not A.domain_safety(e, max_boxes=2000)["safe"]:
+            continue
+        bound = A.rounding_error_bound(e)
+        pts = {n: rng.uniform(*BOX[n], 3000).astype(np.float32) for n in names}
+        with torch.inference_mode():
+            cols = [torch.tensor(pts[n]) for n in names]
+            f64 = (T.TorchExpr(e)(*cols) + torch.zeros(3000, dtype=torch.float64)).numpy()
+            f32 = (T.TorchExpr(e, dtype=torch.float32)(*cols) + torch.zeros(3000)).double().numpy()
+        ok = np.isfinite(f32) & np.isfinite(f64)
+        err = np.abs(f32 - f64)[ok].max()
+        assert err <= bound["float32"] * 1.0001 + 1e-30, (T.to_string(e), err, bound)
+        assert bound["float64"] <= bound["float32"]
+        checked += 1
+    assert checked > 60
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# screening against finalists (user confirmation 2)
+# ----------------------------------------------------------------------------------------------------------------------
+UNDECIDED = "0.9995 * (square(sin(zt * 3.0)) + square(cos(zt * 3.0))) * tanh(rh - 5.0)"   # true H = 0.99945
+SMALL_BUDGET = {"max_boxes": 2000}
+
+
+def test_undecided_passes_screening_but_not_the_finalist_rule_before_and_after_a_refit():
+    e = T.parse(UNDECIDED)
+    before = A.audit(e, magnitude_kw=SMALL_BUDGET)
+    assert before.magnitude["status"] == "not_refuted" and before.passed and not before.certified
+    assert before.magnitude["sup_lower"] <= 1.0 < before.magnitude["sup_upper"]       # neither proven nor refuted
+    strict = A.audit(e, magnitude_kw=SMALL_BUDGET, require_certified=True)
+    assert not strict.passed and strict.require_certified and "finalist needs a proven" in " ".join(strict.notes)
+    after = T.with_constants(e, [0.9993, 3.01, 3.01, 5.02])                           # the refit moved the constants
+    a2 = A.audit(after, magnitude_kw=SMALL_BUDGET)
+    assert a2.magnitude["status"] == "not_refuted" and a2.passed and not a2.certified
+    c = A.certify_finalist(after, magnitude_kw=SMALL_BUDGET, baseline_tail={"dlnr": -3.0, "dz_per_mm": -0.004})
+    assert not c["certified"] and not c["audit_certified"]
+    assert any("needs it certified" in r for r in c["reasons"])
+
+
+def test_refit_that_moves_the_equation_outside_the_bound_loses_its_certificate():
+    e = T.with_constants(T.parse(UNDECIDED), [0.9, 3.0, 3.0, 5.0])
+    tail = {"dlnr": -3.0, "dz_per_mm": -0.004}
+    c0 = A.certify_finalist(e, baseline_tail=tail)
+    assert c0["certified"] and c0["audit_certified"] and c0["reasons"] == [] and c0["tail"]["evaluated"]
+    assert c0["audit"]["magnitude"]["status"] == "certified" and c0["audit"]["certified"] is True
+    moved = T.with_constants(e, [1.3, 3.0, 3.0, 5.0])                                # after the refit
+    c1 = A.certify_finalist(moved, baseline_tail=tail)
+    assert not c1["certified"] and c1["audit"]["magnitude"]["status"] == "failed"
+    assert c1["hash"] != c0["hash"] and len(c1["reasons"]) >= 1
+    pole = T.with_constants(T.parse("0.3 * linv((rh * 0.05) - 4.0) / (zt + 1.5)"), [0.3, 0.05, 4.0, 1.1])
+    c2 = A.certify_finalist(pole, baseline_tail=tail)
+    assert not c2["certified"] and c2["reasons"] == ["domain: unsafe_proven"] and c2["tail"]["slopes"] is None
+
+
+def test_tail_slopes_and_the_tail_part_of_the_certificate():
+    s = "-0.5 * l1p(rh) * 0.2 + 0.3 * tanh(zt - 6.0)"
+    t = A.tail_slopes(s)
+    r0, r1 = 700.0 / 21.9, BOX["rh"][1]
+    lo, hi = -0.1 * r1 / (1 + r1), -0.1 * r0 / (1 + r0)                    # d f / d ln r = -0.1 rh / (1 + rh)
+    assert t["dlnr"]["inf"] <= lo <= t["dlnr"]["inf_sampled"] and t["dlnr"]["sup_sampled"] <= hi <= t["dlnr"]["sup"]
+    assert t["dlnr"]["sup"] - hi < 0.01
+    assert t["dz_per_mm"]["sup"] == pytest.approx(0.3 / 260.0, rel=1e-9)   # the steepest point zt = 6 is in the tail
+    assert t["dz_per_mm"]["inf"] >= 0.0 and t["dz_per_mm"]["sup_sampled"] <= t["dz_per_mm"]["sup"]
+    ok = A.certify_finalist(s, baseline_tail={"dlnr": -3.1, "dz_per_mm": -0.004})
+    assert ok["certified"] and ok["tail"]["r_ok"] and ok["tail"]["z_ok"] and not ok["tail"]["not_worse_than_baseline"]
+    assert ok["tail"]["model_dz_per_mm_max"] == pytest.approx(-0.004 + 0.3 / 260.0)
+    flat = A.certify_finalist(s, baseline_tail={"dlnr": -3.1, "dz_per_mm": -0.001})   # the rise beats the baseline
+    assert not flat["certified"] and flat["audit_certified"] and "depth tail" in flat["reasons"][0]
+    shallow = A.certify_finalist("0.2 * l1p(rh) * 0.5", baseline_tail={"dlnr": -2.05, "dz_per_mm": -0.004})
+    assert not shallow["certified"] and "radial tail" in shallow["reasons"][0]
+    missing = A.certify_finalist(s)                                          # no baseline slopes: not a certificate
+    assert not missing["certified"] and missing["audit_certified"] and not missing["tail"]["evaluated"]
+    assert "tail check not evaluated" in missing["reasons"][0]
+    assert A.tail_slopes("0.3 * tanh(x)")["dlnr"]["sup"] == 0.0
+
+
+def test_report_states_the_bound_after_normalisation():
+    r = A.audit("0.9 * tanh(zt)")
+    assert r.magnitude["delta_eff_bound"] == pytest.approx(2 * r.magnitude["sup_upper"])
+    assert "|delta_eff| <= 2H" in r.summary() and "certified=True" in r.summary()
+    j = r.to_json()
+    assert j["certified"] is True and j["require_certified"] is False and "raw" in j["numerics"]
+
+
+def test_canonical_gauge_form_for_de_duplication():
+    a = T.parse("tanh(zt) + (linv(rh) + (square(zt) * 0.1))")
+    b = T.parse("((tanh(zt) + x) + linv(rh)) + ((square(zt) * 0.1) - 3.0)")
+    ca, cb = A.canonical_gauge_form(a), A.canonical_gauge_form(b)
+    assert T.expr_hash(ca) == T.expr_hash(cb) and T.to_string(ca) == "(tanh(zt) + linv(rh)) + (square(zt) * 0.1)"
+    kept, dropped = A.drop_gauge_terms(a)
+    assert kept is a and dropped == []                     # nothing to strip: the tree itself
+    assert T.expr_hash(kept) != T.expr_hash(A.drop_gauge_terms(b)[0])     # which is why the canonical form exists
+    assert A.canonical_gauge_form(T.parse("3.0 * x - exp(x)")) is None
+    assert T.to_string(A.canonical_gauge_form(T.parse("x - tanh(zt)"))) == "neg(tanh(zt))"

@@ -8,6 +8,7 @@ defaults are this module's proposals (STATUS.md section 7) except where the plan
     containment(P, z_edges, r_edges)      r50, r90, z50, z90 of a normalised map
     monotone_sequence(values, tol)        "r50, r90, z50, z90 monotone from 20 -> 30 -> 50 GeV": no reversal beyond tol
     slope_sign_changes(log_rho, coord)    sign changes of d ln rho / d coord along a profile (tails)
+    baseline_tail_slopes(log_rho, z, r)   largest tail slopes of a grid density: the input of the finalist tail check
     modulation_expr(expr)                 f minus f with every sin / cos replaced by 0 (free-form Stage 2), or
     template_modulation(parts)            the modulation term of the Stage-2 templates
     modulation_amplitude(expr, box)       sup |modulation| on the extended box (tight machinery of the audit), <= 0.3
@@ -33,7 +34,7 @@ from . import operators as O
 from . import translate as T
 
 __all__ = ["MLP_BASE_PERIOD_MM", "sign_changes", "count_extrema", "containment", "monotone_sequence",
-           "slope_sign_changes", "modulation_expr", "template_modulation", "modulation_amplitude", "trig_periods",
+           "slope_sign_changes", "baseline_tail_slopes", "modulation_expr", "template_modulation", "modulation_amplitude", "trig_periods",
            "period_check", "period_band_coverage", "seed_null_comparison", "CHECK_MOMENTA_GEV",
            "MODULATION_LIMIT_NAT"]
 
@@ -119,6 +120,36 @@ def slope_sign_changes(log_rho, coord, start: Optional[float] = None, min_peak: 
     d = np.diff(y) / np.diff(c)
     return {"n": sign_changes(d, min_peak), "max_slope": float(d.max()), "min_slope": float(d.min()),
             "points": int(len(y))}
+
+
+def baseline_tail_slopes(log_rho, z_mm, r_mm, n_fit: int = 4) -> dict:
+    """Tail slopes of a grid density, the input ``baseline_tail`` of ``audit.certify_finalist``.
+
+    log_rho   (NZ, NR) or (B, NZ, NR) log-density (log P - log cell volume) of the REFITTED model's baseline part
+              at the momenta of interest, on the grid with cell centres ``z_mm`` (NZ,), ``r_mm`` (NR,)
+    Returns   "dlnr": the largest, over depth rows (and maps), least-squares slope of ln rho against ln r on the
+              last ``n_fit`` interior rings (the outermost ring is left out: it is the border cell of the metric);
+              "dz_per_mm": the largest, over rings (and maps), least-squares slope of ln rho against z' on the
+              last ``n_fit`` rows before the last one; plus the medians, for information.
+    The grid ends at r = 700 mm and z' = 1450 mm; beyond it the baseline is taken to continue as this power law
+    in r and exponential in z' (an assumption: nothing constrains the baseline there)."""
+    lr = np.asarray(log_rho, dtype=np.float64)
+    lr = lr[None] if lr.ndim == 2 else lr
+    z, r = np.asarray(z_mm, dtype=np.float64), np.asarray(r_mm, dtype=np.float64)
+    if lr.shape[1:] != (len(z), len(r)) or n_fit < 2 or len(r) < n_fit + 1 or len(z) < n_fit + 1:
+        raise ValueError("log_rho must be (NZ, NR) or (B, NZ, NR) with at least n_fit + 1 rings and rows")
+
+    def ls_slope(y, t):                                     # y (..., n), t (n,)
+        tc = t - t.mean()
+        return np.sum((y - y.mean(-1, keepdims=True)) * tc, -1) / np.sum(tc * tc)
+    sr = ls_slope(lr[:, :, -(n_fit + 1):-1], np.log(r[-(n_fit + 1):-1]))                 # (B, NZ)
+    sz = ls_slope(np.moveaxis(lr[:, -(n_fit + 1):-1, :], 1, -1), z[-(n_fit + 1):-1])     # (B, NR)
+    sr, sz = sr[np.isfinite(sr)], sz[np.isfinite(sz)]
+    if not len(sr) or not len(sz):
+        raise ValueError("no finite tail slope: the map is not finite in its last rings / rows")
+    return {"dlnr": float(sr.max()), "dz_per_mm": float(sz.max()), "dlnr_median": float(np.median(sr)),
+            "dz_per_mm_median": float(np.median(sz)), "n_fit": int(n_fit),
+            "r_fit_mm": [float(r[-(n_fit + 1)]), float(r[-2])], "z_fit_mm": [float(z[-(n_fit + 1)]), float(z[-2])]}
 
 
 # ----------------------------------------------------------------------------------------------------------------------

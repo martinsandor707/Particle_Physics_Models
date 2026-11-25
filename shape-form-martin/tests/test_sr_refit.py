@@ -101,10 +101,15 @@ def _cpu_suite(out_json: str, tmp: str) -> None:
         R.fit_candidate(m, tr, va, cfg, label="x")
     except R.RefitNotAllowed as err:
         refused = str(err)
-    out = R.fit_candidate(m, tr, va, cfg, label="synthetic recovery", synthetic=True, log=None)
+    out = R.fit_candidate(m, tr, va, cfg, label="synthetic recovery", synthetic=True, log=None, finalist=True,
+                          baseline_tail={"dlnr": -3.0, "dz_per_mm": -0.004})
     rep["recovery"] = {"refused_without_flag": refused, "c": m.correction.c.tolist(), "nll0": nll0,
                        "nll_true": nll_true, "nll_fit": float(np.mean(train.val_nll(m, va, 1))),
-                       "out": {k: v for k, v in out.items() if k != "audit_refit"},
+                       "out": {k: v for k, v in out.items() if k not in ("audit_refit", "finalist")},
+                       "finalist": {"certified": out["finalist"]["certified"], "reasons": out["finalist"]["reasons"],
+                                    "tail": {k: v for k, v in out["finalist"]["tail"].items() if k != "slopes"},
+                                    "status": out["finalist"]["audit"]["magnitude"]["status"],
+                                    "require_certified": out["finalist"]["audit"]["require_certified"]},
                        "audit_status": [out["audit_refit"]["domain"]["status"], out["audit_refit"]["magnitude"]["status"]],
                        "summary": R.refit_summary(out), "grad_check": R.check_gradients(m, tr)}
     json.dumps(out)
@@ -113,8 +118,36 @@ def _cpu_suite(out_json: str, tmp: str) -> None:
     c2 = R.control_c2(base, 3)
     with torch.no_grad():
         d0 = float((c2(lnp) - base(lnp)).abs().max())
-    res2 = train.fit(c2, tr, va, train.FitConfig(steps=120, lr=0.05, lr_end=0.003, batch=64, k_train=1, k_val=1,
-                                                 eval_every=60, name="c2", out_dir=str(tmp / "c2")), log=None)
+        zt, rh, xx = c2.zt, c2.rh, torch.tensor([-0.7, 0.1, 0.9], dtype=torch.float64)[:, None, None]
+        box = __import__("sfm.sr.operators", fromlist=["x"]).data_box()
+        u = 2.0 * (zt - box["zt"][0]) / (box["zt"][1] - box["zt"][0]) - 1.0
+        v = 2.0 * torch.sqrt(rh) / math.sqrt(box["rh"][1]) - 1.0
+        probe = R.PolyControl(7)
+        probe.c.copy_(torch.tensor([0.3, -0.2, 0.1, 0.05, -0.4, 0.25, 0.15], dtype=torch.float64))
+        direct = sum(cj * u ** a * v ** b * xx ** c for cj, (a, b, c) in zip(probe.c, probe.exponents))
+        tree_diff = float((probe(zt, rh, xx) - direct).abs().max())
+        uv_range = [float(u.min()), float(u.max()), float(v.min()), float(v.max())]
+    c2_nll_start = float(np.mean(train.val_nll(c2, va, 1)))
+    out2 = R.fit_candidate(c2, tr, va, train.FitConfig(steps=120, lr=0.05, lr_end=0.003, batch=64, k_train=1, k_val=1,
+                                                       eval_every=60, name="c2", out_dir=str(tmp / "c2")),
+                           label="C2 polynomial", synthetic=True, log=None, role="control")
+    json.dumps(out2)
+    after = R.audit_control(c2)
+    wild = R.PolyControl(3)                                 # a polynomial that fits the data box and leaves the bound
+    with torch.no_grad():
+        wild.c.copy_(torch.tensor([0.9, 0.0, 0.6], dtype=torch.float64))
+    wild_rep = R.audit_control(wild)
+    bounded = R.control_c2(base, 5, bounded=True)
+    with torch.no_grad():
+        d0b = float((bounded(lnp) - base(lnp)).abs().max())
+        bounded.correction.c.copy_(torch.tensor([3.0, -2.0, 1.5, 4.0, -2.5], dtype=torch.float64))
+    bounded_rep = R.audit_control(bounded)
+    rep["c2"] = {"tree_diff": tree_diff, "uv_range": uv_range, "nll_start": c2_nll_start,
+                 "out": {k: v for k, v in out2.items() if k not in ("audit_refit",)},
+                 "after": {k: v for k, v in after.items() if k != "audit"}, "c_fit": c2.correction.c.tolist(),
+                 "wild": wild_rep["verdict"], "wild_eq": wild_rep["equation"],
+                 "bounded_zero_start_diff": d0b, "bounded": bounded_rep["verdict"], "bounded_label": bounded_rep["label"],
+                 "bounded_k": bounded.n_correction(), "label": after["label"]}
 
     class Trainable(nn.Module):
         def __init__(self):
@@ -129,8 +162,8 @@ def _cpu_suite(out_json: str, tmp: str) -> None:
     b1 = Trainable()
     c1 = R.control_c1(b1)
     rep["controls"] = {"c2_zero_start_diff": d0, "c2_k": c2.n_params(), "c2_exponents": c2.correction.exponents,
-                       "c2_nll_fit": float(np.mean(train.val_nll(c2, va, 1))), "c2_history": [h["train_nll"] for h in res2.history],
-                       "c2_expr": c2.current_expr() is None, "c1_trainable": [p.requires_grad for p in c1.parameters()],
+                       "c2_nll_fit": float(np.mean(train.val_nll(c2, va, 1))),
+                       "c2_expr": T.to_string(c2.current_expr()), "c1_trainable": [p.requires_grad for p in c1.parameters()],
                        "c1_is_copy": c1 is not b1 and not b1.s.requires_grad}
 
     # strict mode ------------------------------------------------------------------------------------------------------
@@ -144,6 +177,33 @@ def _cpu_suite(out_json: str, tmp: str) -> None:
     rep["loose_has_nan"] = bool(torch.isnan(loose(lnp)).any())
     rep["sqa_grad"] = R.check_gradients(R.CorrectedModel(BaseMap(), R.expression_correction("0.3 * sqa(rh - 0.2)")), tr)
     rep["pole_audit"] = A.audit("0.1 * log(zt)").domain["status"]
+
+    # numerical hygiene (user confirmation 1) --------------------------------------------------------------------------
+    g = R.expression_correction("0.5 * tanh(zt - 2.0) + 1.0e4 * x + 7.0")
+    plain = R.CorrectedModel(BaseMap(), R.expression_correction("0.5 * tanh(zt - 2.0)"))
+    gauge = R.CorrectedModel(BaseMap(), g)
+    raw = R.CorrectedModel(BaseMap(), R.expression_correction("0.5 * tanh(zt - 2.0) + 1.0e4 * x + 7.0",
+                                                              strip_gauge=False))
+    with torch.no_grad():
+        same = float((gauge(lnp) - plain(lnp)).abs().max())
+        unstripped = float((raw(lnp) - plain(lnp)).abs().max())      # float64 inside: still the same model
+    pure = None
+    try:
+        R.expression_correction("3.0 * x + exp(x)")
+    except ValueError as err:
+        pure = str(err)
+    f32 = None
+    try:
+        R.CorrectedModel(BaseMap(), R.expression_correction("0.5 * tanh(zt)", dtype=torch.float32))(lnp)
+    except TypeError as err:
+        f32 = str(err)
+    r5 = float(C.RR.double()[0, 5] / 21.9)                  # sqa(rh - r5) is exactly 0 on ring 5: a cusp on the grid
+    cusp = R.CorrectedModel(BaseMap(), R.expression_correction(f"0.3 * sqa(rh - {r5!r}) + 0.2 * sqa(zt * 0.0)"))
+    with torch.no_grad():
+        zero_cells = int((cusp.rh - r5 == 0).sum())
+    rep["hygiene"] = {"k": gauge.n_correction(), "dropped": g.dropped_gauge_terms, "same": same,
+                      "unstripped": unstripped, "pure": pure, "float32": f32, "zero_cells": zero_cells,
+                      "cusp_grad": R.check_gradients(cusp, tr)}
 
     # trajectory substitution -------------------------------------------------------------------------------------
     prov = PolyProvider(["a", "b"], {"a": 3, "b": 1}, init={"a": [0.1, 0.2, 0.3, 0.4], "b": [1.0, -0.5]})
@@ -218,9 +278,60 @@ def test_controls(suite):
     r = suite["controls"]
     assert r["c2_zero_start_diff"] < 5e-6 and r["c2_k"] == 3            # zero start: the baseline (float32 rounding)
     assert r["c2_exponents"] == [[1, 0, 0], [0, 1, 0], [2, 0, 0]]
-    assert r["c2_history"][-1] < r["c2_history"][0] and r["c2_expr"] is True
+    assert r["c2_nll_fit"] < suite["c2"]["nll_start"] - 1e-3            # the control does fit something
     assert r["c2_nll_fit"] > suite["recovery"]["nll_fit"]              # 3 polynomial constants do not reach the truth
+    assert "sqa(rh)" in r["c2_expr"] and "zt" in r["c2_expr"]
     assert r["c1_trainable"] == [True] and r["c1_is_copy"]
+
+
+def test_c2_is_the_polynomial_and_gets_the_same_audit(suite):
+    """User confirmation 4: C2 in (zeta, sqrt(rho), x) is audited on the extended box like an equation, after its
+    fit, and the verdict is returned so that it can be printed beside Delta(SR) - Delta(C2)."""
+    r = suite["c2"]
+    assert r["tree_diff"] < 1e-12                                       # the tree is u^a v^b x^c, as before
+    u0, u1, v0, v1 = r["uv_range"]
+    assert -1.0 < u0 < -0.98 and 0.98 < u1 < 1.0 and -1.0 < v0 < v1 < 1.0   # rescaled to [-1, 1] on the data box
+    out = r["out"]
+    assert out["role"] == "control" and out["k"] == 3 and out["k_equation"] == 3 and out["registered"] is False
+    v = out["audit_verdict"]
+    assert set(v) >= {"passed", "certified", "domain", "magnitude", "H_lower", "H_upper", "violates_extended_box_bound"}
+    assert v["domain"] == "safe" and v["magnitude"] in ("certified", "not_refuted", "failed")
+    assert r["after"]["verdict"] == v and r["after"]["k"] == 3 and r["label"] == "C2 polynomial (unbounded)"
+    assert out["expr_refit"] == r["after"]["equation"] and out["finalist_certified"] is None
+    # a polynomial that is harmless on the data box is not bounded outside it: reported, not hidden
+    w = r["wild"]
+    assert w["domain"] == "safe" and w["magnitude"] == "failed" and w["violates_extended_box_bound"] and not w["passed"]
+    assert w["H_lower"] > 1.0
+    # the labelled alternative tanh(polynomial) passes by construction, whatever the coefficients
+    b = r["bounded"]
+    assert b["passed"] and b["certified"] and b["magnitude"] == "certified" and b["H_upper"] <= 1.0 + 1e-9
+    assert not b["violates_extended_box_bound"] and r["bounded_k"] == 5 and r["bounded_zero_start_diff"] < 5e-6
+    assert r["bounded_label"] == "C2 tanh(polynomial), bounded by form"
+
+
+def test_finalist_certificate_is_computed_on_the_refitted_constants(suite):
+    """User confirmation 2: the proven bound, the domain check and the tail check are re-run after the refit."""
+    r = suite["recovery"]
+    f = r["finalist"]
+    assert r["out"]["finalist_certified"] is True and f["certified"] and f["reasons"] == []
+    assert f["status"] == "certified" and f["require_certified"] is True
+    assert f["tail"]["evaluated"] and f["tail"]["r_ok"] and f["tail"]["z_ok"]
+    assert r["out"]["audit_certified"] is True and r["out"]["audit_verdict"]["certified"] is True
+    from sfm.sr import audit as A, translate as T
+    e = T.from_dict(r["out"]["expr_refit_dict"])                        # the certificate is of THESE constants
+    assert T.constants(e) == pytest.approx(r["c"]) and T.constants(e) != [0.5, 1.0, -1.0]
+    assert A.certify_finalist(e, baseline_tail={"dlnr": -3.0, "dz_per_mm": -0.004})["certified"]
+    assert "finalist_certified=True" in r["summary"] and "certified=True" in r["summary"]
+
+
+def test_gauge_terms_are_stripped_and_float64_is_enforced(suite):
+    """User confirmation 1: no float32 cancellation from a pure-x gauge term in the refit."""
+    r = suite["hygiene"]
+    assert r["k"] == 2 and r["dropped"] == ["+ 10000.0 * x", "+ 7.0"]   # k = 2 of 4: gauge constants not counted
+    assert r["same"] == 0.0 and r["unstripped"] < 1e-5                  # the model is the same; float64 inside
+    assert "does not change the model" in r["pure"] and "float64" in r["float32"]
+    assert r["zero_cells"] == 128                                       # an exact zero of the sqa argument on the grid
+    assert r["cusp_grad"]["loss_finite"] and r["cusp_grad"]["gradients_finite"]
 
 
 def test_c2_monomials_exclude_what_the_softmax_cannot_see(suite):

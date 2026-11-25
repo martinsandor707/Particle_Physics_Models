@@ -23,6 +23,14 @@ Target (iii) - residual (``build_residual_target``)
     cells are represented; units with pi >= 1 are taken with certainty), Horvitz-Thompson weight omega_c / pi_c.
     The residual itself is not used in the design. Gauge: y has HT-weighted mean zero per slice, so the weighted L2
     of f = 0 equals the gauge loss of f = 0 (the null loss).
+    What the weights do and do not guarantee: sum_sample (omega/pi) g is an UNBIASED estimate of the linear total
+    sum_cells omega g. The search loss is not such a total: the within-slice weighted variance
+    sum w (e - ebar)^2 / sum w is a nonlinear function of three weighted sums (a ratio estimator), so it is
+    DESIGN-CONSISTENT (asymptotically unbiased, with a bias of relative order 1 / n_eff), not unbiased.
+    The effective sample size n_eff = (sum w)^2 / sum w^2 of the weights is stored per slice (``slice_n_eff``,
+    and in ``meta_json``), next to the value a sample of the same size would have under strict proportionality
+    (gamma = 1, ``slice_n_eff_gamma1``) and the effective number of cells of the population 1 / sum omega^2:
+    Gate 2-pilot logs them (``n_eff_report`` / ``format_n_eff``).
     Seed-null (control C3): y_null = kappa [ln R rho_A - ln R rho_B] for two halves of the ensemble on the same rows
     and weights, kappa = sqrt((1/M) / (1/a + 1/b)), so that its noise variance equals that of the full teacher.
 
@@ -50,6 +58,7 @@ from . import operators as O
 from . import translate as T
 
 __all__ = ["SCHEMA_VERSION", "event_slices", "ht_sample", "build_residual_target", "seed_null_kappa",
+           "effective_sample_size", "n_eff_report", "format_n_eff", "inclusion_probabilities",
            "fisher_from_hit_scores", "score_covariance_from_hit_scores", "trajectory_weights",
            "build_trajectory_target", "cubic_guesses", "save_target", "load_target_arrays", "null_loss",
            "estimate_response", "hit_loglik", "fisher_scores", "ShiftedProvider", "RESIDUAL_MASK_DEFAULTS"]
@@ -95,7 +104,8 @@ def inclusion_probabilities(size: np.ndarray, n: int) -> np.ndarray:
 def ht_sample(omega: np.ndarray, n: int, gamma: float = 0.5, rng=None) -> Tuple[np.ndarray, np.ndarray]:
     """Fixed-size systematic sample with pi proportional to omega^gamma. Returns (indices, pi of all units).
     The Horvitz-Thompson weight of a sampled unit is omega / pi: sum over the sample of (omega/pi) g is an unbiased
-    estimate of sum over all units of omega g."""
+    estimate of the LINEAR total sum over all units of omega g. A nonlinear function of such sums - the weighted
+    variance that the search minimises - is design-consistent (asymptotically unbiased), not unbiased."""
     rng = np.random.default_rng(rng)
     omega = np.asarray(omega, dtype=np.float64)
     pi = inclusion_probabilities(np.where(omega > 0, omega ** gamma, 0.0), int(n))
@@ -108,6 +118,12 @@ def ht_sample(omega: np.ndarray, n: int, gamma: float = 0.5, rng=None) -> Tuple[
     picks = np.searchsorted(cum, u + np.arange(total), side="right")
     picks = np.clip(picks, 0, len(order) - 1)
     return np.sort(order[np.unique(picks)]), pi
+
+
+def effective_sample_size(w) -> float:
+    """n_eff = (sum w)^2 / sum w^2 (Kish): the number of equally weighted rows with the same variance inflation."""
+    w = np.asarray(w, dtype=np.float64)
+    return float(w.sum() ** 2 / np.sum(w * w)) if len(w) and np.sum(w * w) > 0 else 0.0
 
 
 def seed_null_kappa(m: int, a: int, b: int) -> float:
@@ -171,7 +187,7 @@ def build_residual_target(log_rho_teacher, log_rho_base, slice_p, energy_w, n_hi
         geom &= np.asarray(a_bar, dtype=np.float64) > a_min
     x_s = O.x_of_p(slice_p)
     order = np.argsort(x_s)
-    out: Dict[str, list] = {k: [] for k in ("X", "y", "w", "sid", "iz", "ir", "pi", "omega", "se", "ynull")}
+    out: Dict[str, list] = {k: [] for k in ("X", "y", "w", "sid", "iz", "ir", "pi", "omega", "se", "ynull", "neff")}
     counts = {"geometry": int(geom.sum()), "per_slice": []}
     kappa = None
     if halves is not None:
@@ -208,6 +224,11 @@ def build_residual_target(log_rho_teacher, log_rho_base, slice_p, energy_w, n_hi
         omega = omega / omega.sum()
         pick, pi = ht_sample(omega, n_per_slice, gamma, rng)
         w = omega[pick] / pi[pick]
+        # for the pilot log: the same sample size under strict proportionality (own generator: the sample above
+        # does not depend on this comparison draw)
+        pick1, pi1 = ht_sample(omega, n_per_slice, 1.0, np.random.default_rng([int(seed), 7919, int(new_id)]))
+        n_eff, n_eff_1 = effective_sample_size(w), effective_sample_size(omega[pick1] / pi1[pick1])
+        out["neff"].append((n_eff, n_eff_1, 1.0 / float(np.sum(omega * omega)), len(pick), len(idx)))
         yy = y[idx][pick]
         yy = yy - np.sum(w * yy) / np.sum(w)               # gauge: HT-weighted mean zero per slice
         cells = idx[pick]
@@ -226,7 +247,8 @@ def build_residual_target(log_rho_teacher, log_rho_base, slice_p, energy_w, n_hi
             out["ynull"].append(v - np.sum(w * v) / np.sum(w))
         counts["per_slice"].append({"p": float(slice_p[s]), "x": float(x_s[s]), "masked_cells": int(len(idx)),
                                     "sampled": int(len(cells)), "certain": int((pi[pick] >= 1.0).sum()),
-                                    "ht_weight_sum": float(w.sum())})
+                                    "ht_weight_sum": float(w.sum()), "n_eff": n_eff, "n_eff_gamma1": n_eff_1,
+                                    "n_eff_population": 1.0 / float(np.sum(omega * omega))})
     X = np.concatenate(out["X"])
     info = {"kind": "residual", "n_members": int(M), "single_teacher": bool(single or M == 1),
             "se_mask_applied": bool(M > 1), "acceptance_mask_applied": a_bar is not None,
@@ -236,18 +258,65 @@ def build_residual_target(log_rho_teacher, log_rho_base, slice_p, energy_w, n_hi
             "n_per_slice": int(n_per_slice), "gamma": float(gamma), "seed": int(seed), "p_min": float(p_min),
             "counts": counts, "seed_null_kappa": kappa, "scales_mm": [O.ZETA_SCALE_MM, O.RHO_SCALE_MM],
             "loss_note": "rows of a slice are contiguous and share one x: use operators.gauge_loss_julia(3) with "
-                         "batching=False; weights are Horvitz-Thompson weights (sum ~ 1 per slice)"}
+                         "batching=False; weights are Horvitz-Thompson weights (sum ~ 1 per slice)",
+            "estimator_note": "HT weights make linear totals unbiased; the within-slice weighted variance (the "
+                              "loss) is a nonlinear function of weighted sums: design-consistent, asymptotically "
+                              "unbiased, bias of relative order 1 / n_eff",
+            "n_eff_note": "n_eff = (sum w)^2 / sum w^2 per slice under the size measure omega^gamma; "
+                          "n_eff_gamma1 = the same for a comparison sample of equal size with gamma = 1; "
+                          "n_eff_population = 1 / sum omega^2 over the masked cells"}
     info.update(dict(meta or {}))
     res = {"X": X, "y": np.concatenate(out["y"]), "weights": np.concatenate(out["w"]),
            "variable_names": np.array(O.VARIABLE_NAMES), "slice_id": np.concatenate(out["sid"]).astype(np.int64),
            "slice_p": slice_p[order], "slice_x": x_s[order], "cell_iz": np.concatenate(out["iz"]).astype(np.int64),
            "cell_ir": np.concatenate(out["ir"]).astype(np.int64), "pi": np.concatenate(out["pi"]),
            "omega": np.concatenate(out["omega"]), "seed_se": np.concatenate(out["se"]),
+           "slice_n_eff": np.array([r[0] for r in out["neff"]]),
+           "slice_n_eff_gamma1": np.array([r[1] for r in out["neff"]]),
+           "slice_n_eff_population": np.array([r[2] for r in out["neff"]]),
+           "slice_n_sampled": np.array([r[3] for r in out["neff"]], dtype=np.int64),
+           "slice_n_masked": np.array([r[4] for r in out["neff"]], dtype=np.int64),
+           "sampling_gamma": np.array(float(gamma)),
            "kind": np.array("residual"), "loss": np.array("gauge"), "schema_version": np.array(SCHEMA_VERSION),
            "meta_json": np.array(json.dumps(info))}
     if halves is not None:
         res["y_null"] = np.concatenate(out["ynull"])
     return res
+
+
+def n_eff_report(target: Mapping[str, np.ndarray]) -> List[dict]:
+    """Per momentum slice: sampled rows, effective sample size of the Horvitz-Thompson weights (recomputed from the
+    stored weights and checked against the stored value), the comparison value under gamma = 1, the effective
+    number of cells of the population, and the design effect n / n_eff. For the Gate 2-pilot log."""
+    sid, w = np.asarray(target["slice_id"]), np.asarray(target["weights"], dtype=np.float64)
+    rows = []
+    for s in range(len(np.asarray(target["slice_p"]))):
+        m = sid == s
+        ne = effective_sample_size(w[m])
+        stored = float(np.asarray(target["slice_n_eff"])[s])
+        if abs(ne - stored) > 1e-6 * max(1.0, stored):
+            raise ValueError(f"slice {s}: stored n_eff {stored} does not match the weights ({ne})")
+        rows.append({"slice": s, "p_GeV": float(np.asarray(target["slice_p"])[s]),
+                     "x": float(np.asarray(target["slice_x"])[s]), "n": int(m.sum()), "n_eff": ne,
+                     "n_eff_gamma1": float(np.asarray(target["slice_n_eff_gamma1"])[s]),
+                     "n_eff_population": float(np.asarray(target["slice_n_eff_population"])[s]),
+                     "n_masked_cells": int(np.asarray(target["slice_n_masked"])[s]),
+                     "design_effect": float(m.sum() / ne) if ne > 0 else math.inf,
+                     "gamma": float(np.asarray(target["sampling_gamma"]))})
+    return rows
+
+
+def format_n_eff(target: Mapping[str, np.ndarray]) -> str:
+    """The table Gate 2-pilot logs (one line per slice)."""
+    rows = n_eff_report(target)
+    g = rows[0]["gamma"] if rows else float("nan")
+    out = [f"effective sample size per momentum slice (size measure omega^{g:g}; loss = within-slice weighted "
+           "variance: design-consistent, asymptotically unbiased, not unbiased)",
+           " slice    p/GeV        x      n   n_eff  n_eff(gamma=1)  n_eff(population)  masked cells"]
+    for r in rows:
+        out.append(f" {r['slice']:5d} {r['p_GeV']:8.3f} {r['x']:8.3f} {r['n']:6d} {r['n_eff']:7.1f} "
+                   f"{r['n_eff_gamma1']:15.1f} {r['n_eff_population']:18.1f} {r['n_masked_cells']:13d}")
+    return "\n".join(out)
 
 
 def null_loss(target: Mapping[str, np.ndarray], key: str = "y") -> float:
