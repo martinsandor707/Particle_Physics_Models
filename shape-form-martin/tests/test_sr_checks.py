@@ -109,8 +109,7 @@ def test_seed_null_comparison():
     assert K.CHECK_MOMENTA_GEV == (0.05, 0.1, 1.0, 5.0, 20.0, 30.0, 50.0)
 
 
-def test_baseline_tail_slopes_feed_the_finalist_certificate():
-    from sfm.sr import audit as A
+def test_baseline_tail_slopes_summary():
     z = np.linspace(-193.5, 1443.5, 128)
     r = 700.0 * ((np.arange(32) + 0.5) / 32) ** 1.7
     lr = -3.2 * np.log(r)[None, :] - z[:, None] / 250.0
@@ -120,11 +119,119 @@ def test_baseline_tail_slopes_feed_the_finalist_certificate():
     both = np.stack([lr, -2.4 * np.log(r)[None, :] - z[:, None] / 400.0])      # the worse of two momenta counts
     t2 = K.baseline_tail_slopes(both, z, r)
     assert t2["dlnr"] == pytest.approx(-2.4) and t2["dz_per_mm"] == pytest.approx(-1 / 400.0)
-    assert t2["dlnr_median"] == pytest.approx(-2.8)
-    eq = "0.3 * tanh(zt - 2.0) - 0.1 * l1p(rh)"
-    assert A.certify_finalist(eq, baseline_tail=t)["certified"]
-    flat = K.baseline_tail_slopes(-1.95 * np.log(r)[None, :] - z[:, None] / 250.0 + 0 * lr, z, r)
-    c = A.certify_finalist("0.3 * tanh(zt - 2.0)", baseline_tail=flat)       # the baseline itself is not integrable
-    assert not c["certified"] and c["audit_certified"] and "radial tail" in c["reasons"][0]
     with pytest.raises(ValueError):
         K.baseline_tail_slopes(lr[:, :3], z, r[:3])
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# the tail criterion of a baseline, decided once from the baseline alone (PLAN 17.11, S4)
+# ----------------------------------------------------------------------------------------------------------------------
+Z = np.linspace(-193.5, 1443.5, 128)
+RN = np.exp(np.linspace(np.log(150.0), np.log(1500.0), 41))
+MOM = np.array(K.CHECK_MOMENTA_GEV)
+Z90 = np.array([120.0, 100.0, 380.0, 660.0, 850.0, 900.0, 950.0])
+
+
+def baseline(kind):
+    """ln rho (P, NZ, NR) of three synthetic baselines: "steep" r^-3.2; "halo" with a far halo exp(-r/3000)/(r + 10 mm)
+    like the legacy formula; "rising" = halo with a density that rises with depth beyond z_90; "bump" = halo with
+    a radial bump at 600 mm (not monotone in r)."""
+    zz, rr = np.meshgrid(Z, RN, indexing="ij")
+    if kind == "steep":
+        lr = -3.2 * np.log(rr) - zz / 250.0
+    else:
+        lr = np.log(1e7 * rr ** -4.5 + np.exp(-rr / 3000.0) / (rr + 10.0)) - zz / 250.0
+        if kind == "rising":
+            lr = lr + 1.5 / (1.0 + np.exp(-(zz - 1200.0) / 60.0))
+        if kind == "bump":
+            lr = lr + 0.8 * np.exp(-((np.log(rr) - np.log(600.0)) / 0.1) ** 2)
+    return np.stack([lr + 0.01 * j for j in range(len(MOM))])
+
+
+def record(kind, **kw):
+    return K.decide_tail_criterion(baseline(kind), Z, RN, MOM, Z90, baseline_hash=f"hash-of-{kind}",
+                                   label=f"synthetic {kind} baseline", **kw)
+
+
+def test_tail_criterion_is_decided_from_the_baseline_alone():
+    steep, halo = record("steep"), record("halo")
+    assert steep["criterion"]["radial"] == "loglog_slope_le_limit" and steep["radial"]["baseline_satisfies_limit"]
+    assert steep["radial"]["baseline_max"] == pytest.approx(-3.2) and steep["radial"]["baseline_monotone"]
+    assert halo["criterion"]["radial"] == "monotone_and_no_flattening"
+    assert not halo["radial"]["baseline_satisfies_limit"] and halo["radial"]["baseline_monotone"]
+    assert -1.6 < halo["radial"]["baseline_max"] < -1.0                    # the halo exp(-r/R)/(r + 1 cm) is flatter
+    assert 0.3 < halo["radial"]["fraction_above_limit"] <= 1.0
+    for rec in (steep, halo):
+        assert rec["criterion"]["depth"] == "dz_le_0_beyond_z90" and rec["depth"]["baseline_satisfies"]
+        assert rec["depth"]["baseline_max"] == pytest.approx(-1 / 250.0)
+        assert rec["momenta_GeV"] == list(K.CHECK_MOMENTA_GEV) and rec["slope_limit"] == -2.0
+        assert rec["r_nodes_mm"][0] < 200.0 < rec["r_nodes_mm"][1] and rec["r_nodes_mm"][-1] == pytest.approx(1500.0)
+        assert rec["covers_r_max"] and rec["n_depths"] == 128 and "not of the ring mass" in rec["density"]
+        assert np.array(rec["radial"]["max_loglog_slope"]).shape == (7, 8, len(rec["r_nodes_mm"]) - 1)
+        assert np.array(rec["depth"]["max_dz_per_mm"]).shape == (7, 4, 41)
+        assert "not selectable per equation" in rec["criterion"]["decided_from"]
+        json_bytes = len(__import__("json").dumps(rec))
+        assert json_bytes < 200_000
+    txt = K.format_tail_criterion(halo)
+    assert "3-D density" in txt and "monotone_and_no_flattening" in txt and "hash-of-halo"[:16] in txt
+    short = K.decide_tail_criterion(baseline("steep")[:, :, :20], Z, RN[:20], MOM, Z90, baseline_hash="h", label="map")
+    assert not short["covers_r_max"]                                        # a grid map that ends before 1500 mm
+
+
+def test_density_not_ring_mass():
+    """rho ~ r^-2.5 is integrable in r dr (slope -2.5 <= -2); its ring mass 2 pi r rho has slope -1.5. The rule is
+    stated for rho: feeding the ring mass by mistake flips the decision."""
+    zz, rr = np.meshgrid(Z, RN, indexing="ij")
+    lr = np.stack([-2.5 * np.log(rr) - zz / 250.0] * len(MOM))
+    a = K.decide_tail_criterion(lr, Z, RN, MOM, Z90, baseline_hash="h", label="rho")
+    b = K.decide_tail_criterion(lr + np.log(2 * np.pi * rr)[None], Z, RN, MOM, Z90, baseline_hash="h", label="ring mass")
+    assert a["radial"]["baseline_max"] == pytest.approx(-2.5) and a["criterion"]["radial"] == "loglog_slope_le_limit"
+    assert b["radial"]["baseline_max"] == pytest.approx(-1.5) and b["criterion"]["radial"] == "monotone_and_no_flattening"
+    c = K.decide_tail_criterion(lr + np.arange(len(MOM))[:, None, None] * 3.0, Z, RN, MOM, Z90, baseline_hash="h", label="rho")
+    assert c["criterion"] == a["criterion"]                                 # a normalisation per momentum is irrelevant
+
+
+def test_tail_record_is_bound_to_its_baseline_and_cannot_be_edited():
+    import copy
+    halo = record("halo")
+    K.verify_tail_criterion(halo)
+    K.verify_tail_criterion(halo, "hash-of-halo")
+    with pytest.raises(ValueError, match="belongs to baseline"):
+        K.verify_tail_criterion(halo, "hash-of-steep")
+    forged = copy.deepcopy(halo)
+    forged["criterion"]["radial"] = "loglog_slope_le_limit"
+    with pytest.raises(ValueError, match="altered"):
+        K.verify_tail_criterion(forged)
+    forged["record_hash"] = K._tail_record_hash(forged)                     # even with a fresh hash
+    with pytest.raises(ValueError, match="does not follow"):
+        K.verify_tail_criterion(forged)
+    moved = copy.deepcopy(halo)
+    moved["baseline_hash"] = "hash-of-steep"
+    with pytest.raises(ValueError, match="altered"):
+        K.verify_tail_criterion(moved, "hash-of-steep")
+    with pytest.raises(ValueError, match="baseline_hash is required"):
+        K.decide_tail_criterion(baseline("steep"), Z, RN, MOM, Z90, baseline_hash="", label="x")
+    with pytest.raises(ValueError):
+        K.decide_tail_criterion(baseline("steep"), Z, RN, MOM, np.full(7, 5000.0), baseline_hash="h", label="x")
+
+
+def test_depth_rule_when_the_baseline_itself_fails():
+    """Not covered by the user's decision S4: the accepted rule stays in force and the record says that the
+    baseline fails it; the analogue of the radial alternative exists but is off unless explicitly allowed."""
+    rec = record("rising")
+    assert not rec["depth"]["baseline_satisfies"]
+    assert rec["depth"]["baseline_max"] == pytest.approx(1.5 / 240.0 - 1 / 250.0, rel=0.02)   # +0.0022 / mm
+    assert rec["depth"]["baseline_max_at"]["z_band_mm"][0] > 1000.0 and rec["criterion"]["depth"] == "dz_le_0_beyond_z90"
+    assert rec["radial"]["baseline_monotone"] and not record("bump")["radial"]["baseline_monotone"]
+    assert len(rec["depth"]["baseline_max_per_momentum"]) == 7
+    alt = record("rising", allow_depth_alternative=True)
+    assert alt["criterion"]["depth"] == "no_depth_flattening" and alt["depth"]["alternative_allowed"]
+    ok = record("halo", allow_depth_alternative=True)                        # allowed, but the baseline passes
+    assert ok["criterion"]["depth"] == "dz_le_0_beyond_z90"
+    K.verify_tail_criterion(alt)
+    import copy
+    forged = copy.deepcopy(rec)
+    forged["criterion"]["depth"] = "no_depth_flattening"
+    forged["record_hash"] = K._tail_record_hash(forged)
+    with pytest.raises(ValueError, match="depth rule"):
+        K.verify_tail_criterion(forged)

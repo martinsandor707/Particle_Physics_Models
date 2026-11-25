@@ -1,9 +1,10 @@
-# `sfm.sr` — status of the math-author modules (second session, 25 Nov 2026; updated after the user's review)
+# `sfm.sr` — status of the math-author modules (25 Nov 2026; updated after the user's decisions S1–S5)
 
 Written for whoever continues. All six modules are implemented; each section says what the code does, what was
 verified and what was not. Section 8 holds the decisions and the plan rules they touch (**all eight accepted by
-the user on 25 Nov 2026**); **section 12 answers the user's four confirmations** and lists what they added;
-section 10 holds the interfaces for the runner. **Numbers are measured only where they say so.**
+the user on 25 Nov 2026**); section 12 answers the user's four confirmations; **section 13 builds in the user's
+decisions S1–S5 (PLAN §17.11) and holds the tail-criterion preview for the legacy formula**; section 10 holds
+the interfaces for the runner. Where sections 12 and 13 differ, 13 is in force. **Numbers are measured only where they say so.**
 
 ## 1. Status per module
 
@@ -11,13 +12,13 @@ section 10 holds the interfaces for the runner. **Numbers are measured only wher
 |---|---|---|---|
 | `operators.py` | done (first session); `UNCONFIRMED` emptied, `CONFIRMED_WITH_JULIA` added; torch `sqa` / `softplus` gradients fixed (§12.1) | 70 pass | every item of `UNCONFIRMED` is now confirmed against Julia, see §9 |
 | `translate.py` | **done** | 91 pass (`tests/test_sr_translate.py`, 1.3 s) | torch only on demand; checked against real PySR strings, predictions and losses |
-| `audit.py` | **done** | 77 pass (`tests/test_sr_audit.py`, 9 s) | NumPy only; (a) domain, (b) magnitude, (c) numerics; `certify_finalist` |
-| `checks.py` | **done** | 9 pass (`tests/test_sr_checks.py`) | NumPy only; tolerances are arguments with stated defaults |
+| `audit.py` | **done** | 81 pass (`tests/test_sr_audit.py`, 10 s) | NumPy only; (a) domain, (b) magnitude, (c) numerics; stripped-term log; `tail_check`, `certify_finalist` |
+| `checks.py` | **done** | 13 pass (`tests/test_sr_checks.py`) | NumPy only; tolerances are arguments with stated defaults |
 | `targets.py` | **done**, not yet run on real data | 18 pass (`tests/test_sr_targets.py`) | constructions tested on synthetic maps; event-level estimators on synthetic showers (CPU child process) |
-| `refit.py` | **done except registration** (stub, by instruction) | 11 pass (`tests/test_sr_refit.py`, CPU child process) | constants recovered on synthetic showers; no real refit run |
+| `refit.py` | **done except registration** (stub, by instruction) | 15 pass (`tests/test_sr_refit.py`, CPU child process) | constants recovered on synthetic showers; no real refit run |
 | `__init__.py` | empty, as `test_sr_package_init_is_empty` requires | | |
 
-Run: `uv run pytest shape-form-martin/tests -q -k "sr_ and not search"` → 280 passed (about 18 s): 276 in the six
+Run: `uv run pytest shape-form-martin/tests -q -k "sr_ and not search"` → 292 passed (about 23 s): 288 in the six
 files of this table plus the 4 of another worker's `tests/test_sr_post.py`, which the same filter selects.
 
 Nothing outside the write set was touched; no git state changed; the test split was not opened; no `*.csv` was
@@ -290,7 +291,7 @@ covariance.
    plan says only "smooth tensor polynomial with the same number of constants".
 8. **Complexity weights** (first session, still open): `sqa` and `linv` cost 2, not 1.
 
-**New choices made while building in the four confirmations — not yet seen by the user:**
+**Choices made while building in the four confirmations — decided by the user as S1–S5 (PLAN §17.11), see §13:**
 
 9. **Raw magnitude limit:** the raw, unshifted |f| (top-level gauge terms stripped) must stay below 16 nat on the
    extended box (`RAW_LIMIT_NAT`). A new rejection criterion; it only rejects more.
@@ -421,7 +422,7 @@ backward pass defined as 0 at exactly 0; `softplus` is the Julia formula forward
   sits on a cusp can stall. A cusp of `sqa` inside the tail region makes the tail slope unbounded, and such a
   finalist cannot be certified (§12.2).
 
-### 12.2 Post-refit certification (rules 2 and 6)
+### 12.2 Post-refit certification (rules 2 and 6) — the tail part is superseded by §13.4
 
 **Before:** the screening audit was already repeated on the refitted equation, but `passed` accepted an undecided
 magnitude bound and there was no tail check. **Now:**
@@ -503,3 +504,161 @@ alternative tanh(polynomial), bounded by form.
 - `targets`: `effective_sample_size`, `n_eff_report`, `format_n_eff`; new arrays `slice_n_eff*`, `slice_n_sampled`,
   `slice_n_masked`, `sampling_gamma`.
 - `checks`: `baseline_tail_slopes`. `operators`: only `torch_impl` changed (nothing the search uses).
+
+## 13. The user's decisions S1–S5 (PLAN §17.11) — built in
+
+### 13.1 S1 — tanh(polynomial) is the registered C2
+
+- `PolyControl(k)`, `c2_tree(k)` and `control_c2(base, k)` now default to `bounded=True`: f = tanh(Σ c_j u^a v^b x^c).
+  This is the only C2 that `fit_candidate(…, role="control")` accepts, and the only one `c2_report` labels as used
+  for Δ(SR) − Δ(C2).
+- The plain polynomial is `control_c2(base, k, bounded=False)` with `fit_candidate(…, role="diagnostic")`: a
+  non-governing row carrying its audit verdict. `role="control"` refuses it; a `PolyControl` is refused as
+  `role="candidate"`; `c2_report(governing, diagnostic)` raises if the two records are swapped.
+- Tests (synthetic showers, 120 steps, one seed): the governing control is certified by form (H ≤ 0.979) and its
+  refitted tree starts with `tanh(`; the plain polynomial is refused as governing, runs as diagnostic and its row
+  prints `audit: FAIL` (H ≥ 1.48) beside it. NLL on the synthetic validation set: start 16.49732, tanh control
+  16.38709, plain polynomial 16.37578, equation 16.36762.
+- **Not guaranteed / to keep in mind:** on that synthetic problem the true correction is 0.8 nat, and there the
+  bounded control fits 0.011 nat worse than the plain polynomial: the two are close only for corrections well
+  below 1 nat. How far they differ on real data is not known.
+
+### 13.2 S2 — 16 nat raw limit, 1e-6 nat rounding tolerance, float64
+
+Nothing to change: `RAW_LIMIT_NAT = 16`, `ROUNDING_TOL_NAT = 1e-6` and the float64 evaluation enforced by
+`CorrectedModel` are as accepted (§12.1; tests unchanged and passing).
+
+### 13.3 S3 — stripped gauge terms: not trained, not counted, always logged
+
+- `audit.gauge_term_records(expr, gauge_vars, stage)`: one record per stripped term — signed text, the values of
+  its constants, its variables, and the stage.
+- `AuditReport` gains `stripped_gauge_terms`, `k_as_written`, `k_stripped`, `stage`; **`k` is now the count without
+  the stripped constants** (it used to include them). `audit(…, stage=, carried_stripped=)`.
+- `refit.expression_correction` records what it strips (stage "before translation") on the module;
+  `fit_candidate(…, pre_refit_audit=)` carries the pre-refit audit's records (stage "before refit") and its own
+  into the post-refit audit record (stage "after refit" for anything stripped there) and into its return value
+  (`stripped_gauge_terms`, `k_equation`, `k_as_written`); it warns if the two lists of stripped terms differ.
+- Test, end to end: `0.5·tanh(ζ − 1) + 3.0·x + 7.0` → pre-refit record k = 3 of 5 with `+ 3.0 * x` [3.0] and
+  `+ 7.0` [7.0]; the model has three trainable numbers, none of them 3.0 or 7.0; the refit record lists the two
+  terms twice (before refit, before translation), `k_equation = 3`; the post-refit audit carries the same list,
+  has k = 3 and an equation without x-only terms.
+- **Not guaranteed:** only top-level summands are recognised as gauge terms (a hidden one is caught by the raw
+  limit, not stripped).
+
+### 13.4 S4 — tail criterion: decided once per baseline, from the baseline alone
+
+**(a) Which quantity.** Every slope is of the **3-D density ρ(z′, r)** — probability per volume, `log P − log(cell
+volume)` or the density functional — never of the ring mass 2πrρ (whose log-log slope is larger by one; a test
+shows that feeding the ring mass flips the decision for ρ ∝ r^−2.5). The correction adds `∂f/∂ln r` and `∂f/∂z′`
+because `ln ρ_model = ln ρ_base + f − ln Z(x)`. **Where:** the baseline is evaluated at the seven pre-registered
+momenta 0.05, 0.1, 1, 5, 20, 30, 50 GeV, at every depth row given (128 rows, z′ from −194 to 1444 mm, for a model on
+the grid) and at radii covering 200–1500 mm; depth slopes at every radius up to 1500 mm for z′ > z_90(p), with
+z_90 from the baseline's own map. The equation's part is enclosed on the same boxes at x(p) of those momenta; under
+the alternative radial rule it is enclosed for *all* z′ and x of the audit box.
+
+**(b) The decision** — `checks.decide_tail_criterion(log_rho, z, r, momenta, z90, baseline_hash=, label=)`:
+radial log-log slopes by finite differences over r ∈ [200, 1500] mm; if the largest is ≤ −2 the rule is
+`loglog_slope_le_limit`, otherwise `monotone_and_no_flattening` (∂_r ln ρ < 0 and ∂_r δ ≤ 0 for r > 200 mm). The
+record stores the measured slopes (maxima per momentum × 8 depth bands × radial interval; per momentum × 4 depth
+bands beyond z_90 × radius), whether the baseline satisfies each rule, the rule, the baseline hash and its own
+hash. `verify_tail_criterion` refuses a record that was edited, whose rule does not follow from its slopes, or
+that belongs to another baseline; `certify_finalist(…, tail_criterion=, baseline_hash=)` calls it and refuses to
+run without the hash. **The rule cannot be chosen per equation.** For a closed-form baseline
+`refit.tail_criterion_for_baseline(model_std, model_ext, baseline_hash=, label=)` continues the density to 1500 mm
+(`extended_ring_grid`, `continued_log_density`: the model on a grid with 24 extra rings, each component matched to
+the baseline on the shared rings) and makes the record.
+
+**(c) Both rules, soundly** — `audit.tail_check`: interval enclosures of the correction's slopes, refined where
+the baseline leaves little room. Tests: an equation that only inherits the halo (`−0.1·l1p(ϱ)`) is certified
+under the alternative on a halo baseline and would fail "≤ −2" there (shown with a forged record, which
+`certify_finalist` rejects); `+0.1·l1p(ϱ)` fails the alternative ("flattens") and passes "≤ −2" on a steep
+baseline; borrowing the steep baseline's record for the halo baseline raises; a baseline that is not monotone
+itself gives that reason; `measured_tail=` uses the slopes of the jointly refitted baseline while the rule stays
+that of the record. After the synthetic refit the certificate is granted on a baseline with depth slope
+−0.01/mm and refused on one with −0.004/mm, because the refitted equation rises by 0.0046/mm beyond z_90.
+
+**(d) PREVIEW — legacy component formula, NOT the refitted baseline of record** (laptop, CPU, float64, read-only
+checkpoint `new3_std_n3.pt`; density before the acceptance template; continuation mismatch on the shared rings
+7e-15; radii 183–1477 mm, 128 depth rows):
+
+| p / GeV | 0.05 | 0.1 | 1 | 5 | 20 | 30 | 50 |
+|---|---|---|---|---|---|---|---|
+| largest d ln ρ / d ln r, r ≥ 200 mm | −0.95 | −0.95 | −0.89 | −1.21 | −1.27 | −1.13 | −0.92 |
+| same, restricted to the grid (r < 700 mm) | −0.96 | −0.96 | −0.90 | −1.92 | −1.91 | −1.78 | −2.02 |
+| z_90 / mm | 124 | 98 | 385 | 663 | 857 | 908 | 950 |
+| largest d ln ρ / d z′ beyond z_90, per 100 mm | −0.08 | −0.08 | **+0.33** | **+0.55** | +0.02 | +0.04 | +0.02 |
+| share of (z′, r) points beyond z_90 where ρ rises | 0 | 0 | 0.5 % | 0.4 % | 7.0 % | 18.5 % | 9.7 % |
+| radii where it rises / mm | — | — | 1–227 | 74–329 | 711–1182 | 610–1260 | 610–917 |
+| r-integrated depth profile beyond z_90, largest slope per 100 mm | −0.08 | −0.08 | +0.02 | +0.13 | −0.24 | −0.22 | −0.21 |
+
+- **Radial: the legacy formula is flatter than −2 at every momentum** (largest slope −0.89 at 1 GeV, z′ = 1173 mm,
+  r ≈ 193 mm; 41 % of the evaluated points are above −2) and it is monotone (all slopes negative). **Expected
+  branch: `monotone_and_no_flattening`.** Within the grid only 50 GeV meets −2.
+- **Depth: the legacy formula itself violates "∂_z′ ln ρ ≤ 0 beyond z_90"** at 1, 5, 20, 30 and 50 GeV — from the
+  axis out to 227 mm at 1 GeV (on the axis +0.15 per 100 mm), at 74–329 mm at 5 GeV, and at 610–1260 mm at 20–50
+  GeV. The r-integrated depth profile also rises at 1 and 5 GeV. Under the accepted rule no correction could then
+  be certified, δ = 0 included. The cause was not investigated (candidates: the range end of the track component
+  beyond z_90 at low momentum, the widening of the profile with depth at high momentum).
+
+**Open, for the user (S4 names an alternative for the radial rule only).** If the refitted Track A finalist behaves
+like the legacy formula in depth, the depth rule needs the same kind of decision. Built in, **off by default**:
+`decide_tail_criterion(…, allow_depth_alternative=True)` makes the rule "no depth flattening" (∂_z′ δ ≤ 0 beyond
+z_90 at the registered momenta) when — and only when — the baseline itself fails. Until that is decided the
+accepted rule governs, the record states that the baseline fails it, and `tail_check` reports both verdicts
+(`literal_rule_passed`, `no_flattening_passed`). Other readings the user may prefer: the r-integrated profile, or
+the axis only.
+
+**Not guaranteed.** The preview is for the legacy formula; the decision of record is taken on the H200 for the
+refitted Track A finalist, which does not exist yet. The continuation needs a model with `components(lnp)` and a
+`grid` (the component and mixture models of `sfm.families`); a grid-only baseline (an MLP map) is evaluated to
+700 mm and the record says `covers_r_max: False`. Depth is covered to the last grid row (1444 mm), not to the
+2000 mm of the audit box. The baseline slopes are finite differences at the registered momenta, not a continuum
+bound. The measured slopes of the *jointly refitted* baseline have to be supplied (`measured_tail`) for the "≤ −2"
+rule to be exact after a joint refit; under the alternative only its monotonicity enters. Enclosures that stay
+loose cost false refusals.
+
+### 13.5 S5 — gradient-clip log
+
+- `refit.ClipMonitor` (tensor hooks; no change to `sfm.train`) records at every step the gradient norm **before**
+  clipping over all trainable parameters and the raw gradient and value of every constant of the correction;
+  `fit_candidate` attaches it and returns `clip_log` = `refit.clip_statistics(…)` and `cusp_stalled`.
+- **Definitions** (`refit.CLIP_DEFINITIONS`, repeated in every log):
+  - *clipped step*: pre-clip norm > `FitConfig.clip`;
+  - *driven by constant i*: a clipped step with g_i² ≥ ½ of the squared norm;
+  - ***persistent***: constant i drives ≥ 20 consecutive steps, or more than half of the steps of the final quarter
+    of the run (if that quarter has ≥ 8 steps);
+  - *stalled*: persistent, and over that window |net change| ≤ 0.25 × Σ|step-to-step change|;
+  - ***cusp-stalled (run)***: a stalled constant lies inside the argument of an `sqa` node.
+  The log holds counts per constant (driven steps, longest run, share of the final quarter, net/path, sign flips)
+  and per step (clipped or not, driven by which constants), plus steps without a backward pass and with a
+  non-finite gradient.
+- Tests: the definitions on synthetic gradient histories (bouncing on a cusp → flagged; the same outside an `sqa`
+  argument → stalled, not cusp-stalled; clipped but progressing → persistent only; ten clipped steps → not
+  persistent; another parameter driving → not flagged). With the real harness, a fit whose optimum lies on a kink
+  of the gridded likelihood (truth `0.6·sqa(ζ − ζ_k)`, ζ_k a grid row): at clip norm 1e-4 all 160 steps are
+  clipped, the constant inside the `sqa` drives 127 of them (longest run 20, 78 % of the final quarter, net/path
+  0.011) → **cusp-stalled**.
+- **Not guaranteed — the flag as specified does not fire at the harness's default clip norm.** The same fit with
+  `clip = 5` has **0 clipped steps of 160** (largest pre-clip norm 0.019): at a V-shaped kink the gradient is
+  bounded, far below 5, so the constant hovers at the cusp without ever being clipped. Clip counts flag a cusp
+  stall only if the clip norm is within the range of the gradients.
+- **Supplementary indicator, mine, reported and not part of the flag:** `refit.cusp_hover_statistics` /
+  `cusp_hover_suspect` — for every `sqa` node, whether its argument changed sign in a grid cell during the final
+  quarter of the run, or came within 3 of its own excursions of zero. It flags the default-clip run above (distance
+  1.1 excursions) and not a control whose `sqa` argument has no zero on the grid (154 excursions). For a constant
+  unrelated to any cusp it fires by chance at a rate of roughly 6 excursions per grid spacing of the argument.
+  Whether it should become part of the flag is a decision.
+- The monitor's state is not in the harness's checkpoint: after a resume the log covers the steps of that process.
+
+### 13.6 Interface changes of this round
+
+- `audit`: `gauge_term_records`, `tail_check`, `FLAT_SLACK`; `AuditReport.k` excludes stripped constants;
+  `certify_finalist(…, tail_criterion=, baseline_hash=, measured_tail=, carried_stripped=)` — the two-number
+  `baseline_tail=` of §12.2 is refused with a pointer to the new arguments.
+- `checks`: `decide_tail_criterion`, `verify_tail_criterion`, `format_tail_criterion`.
+- `refit`: defaults `bounded=True`; `fit_candidate(…, role="control" | "diagnostic", tail_criterion=,
+  baseline_hash=, measured_tail=, pre_refit_audit=)` with new result keys (`governing`, `control_label`,
+  `stripped_gauge_terms`, `k_as_written`, `clip_log`, `cusp_stalled`, `cusp_hover`, `warnings`); `c2_report`,
+  `ClipMonitor`, `clip_statistics`, `cusp_hover_statistics`, `constants_inside_sqa`, `extended_ring_grid`,
+  `continued_log_density`, `tail_criterion_for_baseline`.
+- Nothing that `scripts/sr_post.py` or the search runner uses was renamed or removed.
