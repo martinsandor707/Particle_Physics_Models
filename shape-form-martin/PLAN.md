@@ -1921,3 +1921,47 @@ Both recommendations of §17.12 are accepted, each with a tightening rule. In pr
   (6,000 steps) and for the convergence reruns are proposed, not implemented. The definitions of a divergence
   (non-finite validation value; at least half the batches skipped in the last evaluation window; more than 1 nat per
   event above the best of history, the step-0 value or the comparator). Stage 2 refuses while a diagnosis is pending.
+
+## 18. Checkpoint — 25 Nov 2026, about 22:15 UTC (session usage limit; campaign continues later)
+
+**To resume:** read §17.10–§17.14 and this section; check `git status` (uncommitted worker edits, see below), the
+test suite, and that `results/test_access.log` still has exactly two lines. Operating rules for the H200: §16.10.
+
+**Running on the H200 (detached, may finish unattended):** the Track A job `m2a`, started 20:41 UTC at commit
+`5ddfd9f`. All Stage-1 fits were done at 21:56 UTC (68 registered runs); it was in the `guards` phase (27 runs) and
+ends with the Stage-1 report. Log, PID and exit files: `<area>/sfm_out/jobs/m2a_20261125T204118Z.{log,pid,exit}`.
+It is finished when the `.exit` file exists (0 = success). Nothing else of the campaign runs there.
+
+**Next actions, in order**
+1. H200: confirm the job has ended (`.exit` = 0, log ends with `=== finished`); if it stopped with an error, report
+   it and do not continue.
+2. Copy the machine directory back as for batch 1 (§17.10): check the JSON files for local paths, `tar` without
+   `checkpoint.pt`, `scp`, unpack at the laptop repository root, commit the tracked JSON files (label: not gated),
+   remove the archive on the H200. Never copy while a job writes.
+3. H200: `git pull` (the clone must end at a commit whose Track A files equal the re-reviewed commit `a05c86e`; see
+   the warning below), then one job through the launcher:
+   `run_m2a.py warmstart-check warmstart-rerun a2c report` (re-review: GO, `results/m2a_dist/REVIEW.md` section 8).
+   Approved by the user's decisions of §17.11. Copy back and commit again.
+4. Show the user the Stage-1 table (`RESULTS.md` of `runs/m2a_dist/`), with A2c and the initialisation table. No
+   Stage 2 without the user's approval file.
+5. Gate 1 (Fable, fresh context) on Track A and Track B; on a pass commit and push Milestone 2.
+6. Then: PySR targets and pilot → Gate 2-pilot; code for the redefined θ track and the geometry arm (E7); the
+   remaining Track B list of `AUDIT.md` §4.2 on the H200 (E6); `final_test.py` and `LOCK.json` (E8).
+
+**Uncommitted worker edits in the laptop working tree (do NOT commit or push without the checks named):**
+- Track A worker, fixes for the re-review findings B8-1 … B8-3 and C8-3 … C8-5 (`scripts/run_m2a*.py`,
+  `src/sfm/models/`, their tests, `results/m2a_dist/STATUS.md`): possibly unfinished. They must not reach the H200
+  before step 3 has run from `a05c86e`, and need a Fable re-check before Stage 2.
+- PySR mathematics worker, the user's decisions T1 and T2 of §17.13 (`src/sfm/sr/`, its tests, its `STATUS.md`):
+  possibly unfinished. Run the PySR tests before committing.
+Both workers can be continued from their status files.
+
+**Awaiting the user**
+- From the Track A re-review: (1) the conditional rule for further controls — A2c_x2 if and only if the rules use a
+  doubled-step rerun pair, A2c6k if and only if a mixture rung passes keep or one-seed equal NLL, either before A11
+  is decided; (2) divergence criterion: count only a non-finite last value or a fit that did not recover, instead
+  of any non-finite value in the history; (3) if replicate re-runs of the network pilots change the network learning
+  rate without a column below the floor, the change comes to the user before the re-runs are used.
+- From §17.13: which fixed baseline anchors the depth rule (the Track A finalist before any PySR refit, or the C1
+  refit-only control) — the worker's recommendation is pending; and that `sign_changes(model) ≤
+  sign_changes(baseline)` is evaluated per profile (the orchestrator's reading).
