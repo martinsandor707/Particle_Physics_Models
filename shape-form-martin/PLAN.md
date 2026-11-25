@@ -1656,3 +1656,24 @@ bound of the correction after the gauge mechanism; finite gradients of every ope
   passed. The run stops before Stage 2: no combination (A11) is formed and no selection or gate decision is taken
   before the user has seen the Stage-1 table. Gate 1 follows.
 - The geometry-arm questions G1–G3 of §17.3 remain open; nothing depends on them yet.
+
+### 17.7 The four confirmations of §17.5 — built in (commit `a29cd3a`; 276 tests pass)
+
+| # | Confirmation asked | Was it true? | State now |
+|---|---|---|---|
+| 1a | the raw correction is bounded so that float32 cancellation from large pure-x gauge terms cannot occur | **no** — the 10³⁰ cap only prevents overflow; `0.5·tanh(ζ−2) + 10⁴·x` passed the audit while float32 damaged its ζ-dependence by 2.5·10⁻⁴ nat | terms in x alone are stripped before translation and refit; the raw value of what remains must stay ≤ 16 nat on the extended box; the correction, its sum with the baseline and the softmax are evaluated in float64 (a float32 correction is refused); a rounding-error bound ≤ 10⁻⁶ nat is required. All of it is applied again to the refitted constants |
+| 1b | `sqa(x)` gives no infinite or undefined gradient at 0 | **no** — the gradient at exactly ±0 was undefined; `softplus` gave 0 instead of ½ at 0 | `sqa` keeps its forward value bit for bit, its derivative at exactly 0 is defined as 0; `softplus` has its exact derivative. Every operator is back-propagated at ±0 in both precisions in the tests |
+| 2 | finalists need a proven magnitude bound and the domain and tail checks, after the joint refit | partly — the screening audit was repeated after the refit, but an undecided bound passed and there was no tail check | `certify_finalist` requires a certified bound and adds a tail check; `fit_candidate(finalist=True)` runs it on the refitted constants. The tail check needs the refitted baseline's slopes, so it can complete only on the H200 |
+| 3 | exponent of `ppow` limited in the search, scan kept | yes — `(7, 1)` in Stage 1, the raw arm, Stage 2 and every template search (now tested); the scan stays, because a bare variable is still accepted as an exponent | unchanged |
+| 4a | n_eff per momentum slice for Gate 2-pilot | new | stored in the target file under ω^0.5, with the ω^1 value for comparison; wording corrected (design-consistent, not unbiased; a Monte-Carlo test shows the loss biased low at n = 25 and within 2 % at n = 400) |
+| 4b | C2 audited like SR, or its violation reported | new | the control is an expression tree, the same extended-box audit runs on its fitted coefficients and is reported beside Δ(SR) − Δ(C2). On the synthetic problem the fitted polynomial violates the bound (half-swing ≥ 1.48) |
+
+**New choices that came out of this work — awaiting the user's confirmation:**
+
+| # | Choice | Note |
+|---|---|---|
+| S1 | which C2 is registered: the plain polynomial (accepted in §17.5, still the code default) or `tanh(polynomial)`, which passes the audit by construction | the worker recommends the bounded one: a plain polynomial is free outside the data where SR is constrained, which tilts the comparison against SR |
+| S2 | raw limit of 16 nat and rounding tolerance of 10⁻⁶ nat | both can only reject more |
+| S3 | constants of stripped gauge terms are not trained and not counted in k | they have no effect on the density |
+| S4 | finalist tail thresholds: radial log-log slope ≤ −2, depth slope ≤ 0 | the worker's numbers, not the plan's wording |
+| S5 | derivative of `sqa` at exactly 0 defined as 0 | next to the cusp the slope is finite but can be very large; the harness clips and counts |
