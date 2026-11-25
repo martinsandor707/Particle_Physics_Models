@@ -1507,3 +1507,22 @@ earlier per-event test arrays of the same size (`test_nll.npz`, `test_v2_nll.npz
 entry 12 MB). So per-event test scores of the earlier study's models are still on the H200, inside that archive. The
 second pion hit table (5.7 GB, dated 8 Nov, "…with_model_outputs") is not identified: whether it holds the campaign's
 events is not known and it was not opened. Both remain with the user to decide.
+
+**Outcome, 25 Nov 2026, 15:40 (user decisions).** The user deleted the archive as well. A search of `<area>` by file
+name (any size; the clone and the user's other folders, the virtual environment excluded) finds none of the eight
+deferred files and no archive. The hit tables of another project of the user,
+`<particle>_hits_with_model_outputs.parquet` (electron, muon, pion), stay in `<area>` by the user's decision: they are
+needed there, and the campaign never opens, moves or deletes them. Whether the pion table shares events with the
+campaign's sample is not established; the guarantee below does not depend on it.
+
+**Guarantee as restated.** It replaces "before Gate 2c the H200 holds no test-event hits or scores in any form" in
+§13 (A6 revised, point 8) and §16.1. Before Gate 2c:
+1. None of the eight deferred files is in `<area>`. Checked for the clone by `make_transfer_package.py verify` (name
+   and size) and for the whole of `<area>` by a search by name; Gate 2c repeats both. (To do, packaging: an option of
+   `verify` that searches a wider folder by name and lists archives, so that the search is part of the script.)
+2. No campaign process opens a path in `<area>` outside the clone, its output root and its cache directory, and none
+   opens a file that has one of the deferred names or matches `*_hits_with_model_outputs.parquet`, wherever it is.
+   This is enforced by a guard in the start-up function of every campaign command (part of E10: an audit hook on file
+   opens, refusal of `pyarrow` imports because Parquet reads raise no such event, every refusal logged) and checked
+   at Gate 2c from the guard log. The limits of such a guard (C extensions, subprocesses) are documented with the code.
+3. The rest of the shared account lies outside the orchestrator's permitted scope and outside this guarantee.
