@@ -463,7 +463,7 @@ likelihood fit. Not run: free row factor / free lateral conditional (answered by
   persists under G-bulk and with a front + side-only acceptance, so that it is not inflated by the flat `z_b`
   back-face cut. Report: `results/m2c_theta/geometry/GEOMETRY.md`.
 
-## 15. Checkpoint — 25 Nov 2026, 23:20 UTC (campaign paused at the user's request)
+## 15. Checkpoint — 25 Nov 2026, 00:20 CET (24 Nov 23:20 UTC; campaign paused at the user's request)
 
 The running batch needed about five more hours, so every worker was stopped at a clean point. Nothing is running; all
 GPU jobs are resumable from their checkpoints. **To resume:** read §13, §14 and this section, then the STATUS files
@@ -524,3 +524,89 @@ about 7 GB without holding the lock. Every GPU-using script must keep its tensor
 - "Exponent a constant" for `ppow` is enforced by the hall-of-fame scan, not by the search itself.
 - Fisher weights for trajectory targets must use the expected Hessian of the energy-weighted pseudo-likelihood.
 - The moved notebook writes to `shape-form-martin/results`; a full run would retrain rather than reuse old checkpoints.
+
+### 15.1 Second checkpoint — 25 Nov 2026, 01:00 CET: the H200 transfer task was started and paused
+
+**Resume order set by the user:** first finish the H200 transfer task below (its two workers), write section 16,
+commit and push it as a plan amendment, give the manifest summary, and then **stop and wait for the user's go-ahead**.
+Only after that go-ahead continue with the five work items of the table above.
+
+**Decisions taken by the user (25 Nov 2026)**
+- An **H200 machine becomes the machine of record** for everything moved there and for the final test evaluation.
+  This laptop's numbers stay in the plan as "laptop, other sample points". To be recorded as an amendment to §13 (A6)
+  together with section 16.
+- **Moved to the H200:** the Track A distribution fits (`AUDIT.md` §4.1); the remaining Track B seeds (three
+  fine-tunes, two controls) and the ensembles; the remaining Track B runs (`AUDIT.md` §4.2); the θ track Θ1–Θ3.
+- **Not moved:** the PySR searches, the geometry audit, the Fable gates.
+
+**The task: new section "16. H200 transfer package" plus the file set needed to run the moved steps there.** It is a
+planning and packaging task: no training, no campaign batch. Mathematical or statistical judgement goes to Fable,
+packaging work to Opus. Section 16 must contain:
+1. A manifest of every file the moved steps read, in three groups: (a) already in the pushed branch; (b) git-ignored
+   and to be copied by hand, each with size and SHA-256; (c) regenerated on the H200, with command and expected time.
+   Derived from the code (what `sfm.paths`, `sfm.data`, `sfm.legacy`, `sfm.registry`, `sfm.models`, the `run_m2a` /
+   `run_m2b` scripts and the configs actually open), each file's tracked/ignored status confirmed with git. Group (b)
+   is expected to include at least the Parquet data file, the `shape-form-proton` pion result files the legacy adapter
+   loads, the checkpoints of the 8 registered Track B networks and the per-event pairing arrays — to be verified, and
+   anything missed listed.
+2. `shape-form-martin/scripts/make_transfer_package.py`: writes the group (b) list as an rsync/tar file list plus a
+   checksum file, with a matching verify mode for the H200. It must not read the 15 GB CSV and must not open the test
+   cache beyond a plain file hash. State whether the test cache is copied or rebuilt, and that it stays unopened until
+   the final evaluation after Gate 2c.
+3. The ordered run-book for the H200: environment setup with uv and how to confirm the CUDA build of torch; path
+   settings (`SFM_DATA_DIR` etc.); cache build or verification; the parity check of the two benchmarks there, including
+   whether the H200 reproduces the stored 18.1208 / 18.1235 directly; recomputing the validation pairing arrays;
+   re-scoring the 8 registered networks; then each moved step with its exact resume command and expected duration.
+4. What must be recomputed there versus what carries over unchanged (Gate 0 conclusions, Milestone 1 audit, code,
+   tests), one line of justification each.
+5. A proposal (for the user to approve, not a change already made) for running fits side by side on the H200: how
+   many at once, how the GPU lock is relaxed or replaced, and the memory check that keeps it safe.
+6. How results come back: which files the H200 run produces that are git-ignored and must be copied back for the
+   gates, and which are committed.
+Rules: every guardrail stays in force (test split locked, explicit-path staging, nothing under `shape-form-proton/` or
+`shape-form-original/` modified, no data files committed). When done: copy `PLAN.md` to the saved plan file, commit
+and push the plan change and the script (labelled as a plan amendment, not a milestone), and report the manifest
+summary — file count and total size per group — and anything that could not be verified.
+
+**State when paused** (both workers were stopped a few minutes after starting; section 16 is NOT written)
+
+| Work item | Agent type | STATUS file |
+|---|---|---|
+| Trace of file reads, group a/b/c manifest, `make_transfer_package.py` with `list` and `verify`, its test, table of run-book commands that exist versus are missing, list of machine-specific constants | Opus | `transfer/STATUS.md` |
+| Review: what is machine-dependent and must be recomputed, parity criteria on the H200, mixed laptop/H200 provenance of networks, safeguard against pairing arrays from different GPUs, side-by-side proposal, wording of the A6 amendment | Fable (read-only; its one allowed file is the status file) | `transfer/REVIEW_STATUS.md` |
+
+**Already known and to be stated in section 16**
+- Run-book steps without a command today: validation-only recomputation of the pairing arrays (`scripts/parity.py` in
+  its default mode opens the test split), re-scoring of already registered runs, the Track A report / guards / Stage 2,
+  the remaining Track B runs, the θ track.
+- Laptop-specific constants in the code: `scripts/run_m2a.py` (`FORMULA_OF_RECORD = 18.120061`, stops the track if
+  step-0 parity differs), `tests/test_refstream.py` (asserts a launch grid of 144), `scripts/audit_lib.py` (`RECORD`).
+- `sfm.registry` pairs new scores against whatever arrays sit in `results/m0_parity/` and does not know on which GPU
+  they were computed: laptop arrays copied into place would be silently mis-paired on the H200.
+- If the H200 has the reference machine's launch grid (1056, readable with `sfm.refstream.local_grid()`), its
+  validation numbers should equal the stored 18.118084 / 18.120407 and the test numbers follow by inference from C1.
+  Evaluating the two benchmarks on test there would be a third test access: a decision for the user, not taken.
+
+**Where the two workers stopped (25 Nov 2026, 01:15 CET)**
+- *Opus, packaging* (`transfer/STATUS.md`): the trace of file reads is mostly done (audit hook plus `strace`, on CPU,
+  with opens of the test cache and of any `*.csv` refused); groups (a), (b), (c) are drafted; 20 machine-specific
+  constants are listed; the table of existing versus missing run-book commands is drafted. **Not done:**
+  `make_transfer_package.py` and its test are not written, `list` never ran (no `files_b.txt`, `SHA256SUMS`,
+  `MANIFEST.json`), SHA-256 of most group (b) files not computed, per-file `git ls-files` / `git check-ignore` not yet run.
+  Its recommendation so far: copy BOTH cache files and check them by SHA-256 (a rebuild on another CPU is not
+  guaranteed bit-identical, and only a byte copy carries Gate 0 and C1 over); laptop per-event arrays go to a
+  quarantine folder on the H200, never to the live path.
+- *Fable, review* (`transfer/REVIEW_STATUS.md`): questions 1–4 answered, 5–7 partly. Measured on validation: pairing
+  the same model across the two random streams gives +2.26 ± 2.71 (×10⁻⁴) where the truth is zero, so a cross-machine
+  pairing fakes about 2.3 against the MLP and 3.5 against the formula; no decision of `AUDIT.md` §4 is within reach
+  of a stream change (the D6(c) rule would be crossed with probability 0.2 %). It contains predicted H200 validation
+  numbers for the two benchmarks and the eight registered networks (valid if the H200's launch grid is 1056), a
+  nine-point specification of the mis-pairing safeguard, and a draft of the A6 amendment.
+
+**Decisions the user still has to take for section 16**
+1. Test parity on the H200: (A) no test access before the final run, which recomputes the benchmark test arrays as its
+   abort-on-fail first step; or (B) a third logged Gate-0-type parity access on the H200 now.
+2. Whether the control `b0_seed0` is retrained on the H200 so that the control's seed scatter comes from one machine.
+
+**Gap in the move as stated:** PySR refits and the geometry arm's scores enter paired deltas, so they must be produced
+on the H200 even though the searches and the geometry audit stay on the laptop.
