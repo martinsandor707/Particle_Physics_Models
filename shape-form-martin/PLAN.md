@@ -1526,3 +1526,37 @@ campaign's sample is not established; the guarantee below does not depend on it.
    opens, refusal of `pyarrow` imports because Parquet reads raise no such event, every refusal logged) and checked
    at Gate 2c from the guard log. The limits of such a guard (C extensions, subprocesses) are documented with the code.
 3. The rest of the shared account lies outside the orchestrator's permitted scope and outside this guarantee.
+
+## 17. Progress after the go-ahead (25 Nov 2026 onward)
+
+### 17.1 PySR mathematics modules — written, not yet gated (commit `c3d51cb`)
+
+`src/sfm/sr/`: `translate.py`, `audit.py`, `checks.py`, `targets.py`, `refit.py` are written, `operators.py` has all
+its former "to confirm with Julia" points confirmed. 239 tests pass (run by the worker and again by the orchestrator).
+Detail, derivations and interfaces: `src/sfm/sr/STATUS.md`.
+
+- **Shown by tests:** the translator equals PySR's own predictions to 1e-12 (rule 1e-5), free form and all four
+  templates; interval arithmetic is sound against brute force; the earlier study's `c/(r − 0.017)` and its three
+  descendants are rejected, as is a pole that a 100,001-point grid does not see; of 307 random Stage-1 trees none was
+  rejected wrongly; a dependency-problem case (naive bound ±1.8, true supremum 0.9) is certified; the refit recovers
+  the constants of a synthetic problem; the expected-Hessian Fisher weights agree with the loss curvature (the
+  squared-score estimator would have been wrong by the number of hits).
+- **Not done:** no target was built on real data (the Track A finalist and the teacher ensemble do not exist yet), no
+  refit was run, registration is a stub (refits and scores are made on the H200), the audit has not seen real search
+  output. `refit.fit_candidate` refuses to run unless explicitly enabled.
+- **Next:** live runner tests and smoke tests a–f on synthetic targets (started, `results/m3_sr/smoke/STATUS.md`);
+  then the pilot and Gate 2-pilot once real targets exist.
+
+**Readings of plan rules that await the user's confirmation** (the worker's decisions; each can be changed by one
+argument before the pilot; Gate 2-pilot reviews them in any case):
+
+| # | Plan rule | Reading implemented | Note |
+|---|---|---|---|
+| 1 | `sup|δ| ≤ 1 nat` on the extended box (§7) | half the oscillation of the correction over (z′, r) at fixed momentum is ≤ 1 nat | the softmax ignores an additive constant, so a bound on `|δ|` itself has no meaning; the proposal "δ minus its value at a reference point" depends on the reference by up to a factor 2. Implied bound on the normalised correction: 2 nat; a guaranteed 1 nat needs the limit 0.5 |
+| 2 | "an equation fails only if an actual evaluation exceeds the bound" (§7) | a magnitude result that is neither certified nor refuted passes, with its interval reported | the plan's wording taken literally; the stricter alternative is to require certification |
+| 3 | domain safety by interval arithmetic (§7) | three additions that only reject more: an overflow cap of 1e30 on every node, a float32 allowance around forbidden sets, raw `sqrt` rejected at 0 | applies to Stage 1 too |
+| 4 | "`ppow` exponent a constant" (§7) | enforced by a scan of the hall of fame after the search, not inside it | PySR accepts `ppow(z, r)` under the argument-size constraint; violating members are dropped before any refit |
+| 5 | probability-proportional sampling of ~650 cells per slice (§7) | size measure ω^0.5 | Horvitz–Thompson weights keep the loss unbiased for any exponent; 0.5 puts more points in the tails; exponent 1 is the strict reading |
+| 6 | "refit: all constants trainable" (§7) | baseline and equation are trained together | this is what makes control C1 (refit only) meaningful; the equation's constants and the whole model's are counted separately |
+| 7 | C2 "smooth tensor polynomial with the same number of constants" (§7) | polynomial in (ζ, √ϱ, x) without the monomials the softmax cannot see | — |
+| 8 | operator complexities (§7) | `sqa` and `linv` cost 2, not 1 | the plan fixes only "transcendental 2, `erf`/`erfc` 3" |
