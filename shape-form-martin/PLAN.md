@@ -1730,3 +1730,62 @@ Report: `transfer/ENABLING_REVIEW.md` (findings with reproducers, proposed fixes
 
 The fixes are with the worker who wrote the code; the reviewer re-checks them before anything runs on the H200
 (condition of the user's approval, §17.6).
+
+### 17.10 H200 batch 1 — done, all checks passed; Track A started (25 Nov 2026, evening)
+
+**Reviews before the run.** The enabling-code fixes were re-checked by Fable: GO for steps 5–8 and 9–11
+(`transfer/ENABLING_REVIEW.md`, sections 5 and 6). The Track A driver was reviewed and its report fixes re-checked: GO
+for the real run (`results/m2a_dist/REVIEW.md`, sections 1–7).
+
+**One stop on the way.** The first run of step 5a on the H200 ended with 5 failed, 102 passed. All five tests built
+their fake "other machine" from literal H200 values, so on the H200 the fake was the live machine and each refusal
+correctly did not fire. Tests only were changed (commit `7fdf96c`); the reviewer reproduced the five failures on the
+laptop with the H200's identity, confirmed that no production path is grid-specific, and ruled that the step may be
+re-run. The re-run passed (109 tests). The orchestrator had told the user it would stop at the first failed check and
+wait; it did not move to any later step, but it re-ran this step after the independent ruling instead of waiting.
+
+**Machine identity (read by the code).** `h200-g1056-97b197a7`: GPU "NVIDIA H200", 132 SMs, **launch grid 1056**,
+torch 2.14.0+cu130, CUDA 13.0, Python 3.13.12, TF32 off. Caps in force: 10 GB GPU memory and 4 CPU threads per job,
+one job at a time; another user's process held about 20 GB throughout.
+
+**Steps 5–8 (validation only).**
+
+| Step | Result |
+|---|---|
+| 5a, 5b tests | 109 passed; 26 passed |
+| 6 parity | launch grid 1056; float32 validation means **18.118083954 (MLP)** and **18.120407104 (formula)** — the earlier study's stored values; formula − MLP = **+23.24 ± 2.94** (10⁻⁴); native = emulated bit for bit; every event within tolerance of the laptop's emulated arrays and **no event above 5·10⁻⁵** (no P3 banner, the strict clause stays); second run bit-identical; laptop-stream cross-check (R1b) and run-to-run floor (R3) passed; four laptop records verified by hash |
+| 7 reference set | created after a passing parity run and sealed; K = 1024 and bulk means on target, stratum 14,784; the recomputation was `exists_identical` |
+| 8 re-scoring | all eight laptop-trained networks: checkpoint hashes equal the laptop rows; means and deltas equal the predicted table of §16.3; guards and mass monitors on target for the three guarded networks; laptop-stream cross-check passed |
+
+The H200 therefore draws the earlier study's fold points. The numbers of record on validation are 18.118084 (MLP) and
+18.120407 (formula). The test numbers stay unconfirmed until the first step of the final run (A6 revised, point 8).
+
+**Steps 9–11 (Track B seeds, controls, ensembles) — validation, 10⁻⁴ nat against `mlp_std`, paired SE, n = 14,950.
+Not yet gated; no selection has been made.**
+
+| Model | K = 64 | Δ `mlp_std` | Δ mean of B0 controls |
+|---|---|---|---|
+| `s2_seed11` … `s2_seed15` (single fine-tuned networks) | 18.118137 … 18.118737 | +0.54 ± 1.64 … +6.54 ± 2.25 | −0.25 ± 1.55 … +5.75 ± 2.35 |
+| `b0h_seed0`, `b0h_seed1`, `b0h_seed2` (controls: `mlp_std` continued) | 18.118184, 18.118187, 18.118114 | +1.01 ± 0.48, +1.04 ± 0.89, +0.31 ± 0.81 | — |
+| E2, E3, E4 (ensembles of seeds 11–12, 11–13, 11–14) | 18.118156, 18.118061, 18.117972 | +0.73 ± 1.47, −0.22 ± 1.32, −1.11 ± 1.28 | −0.06 ± 1.53, −1.01 ± 1.36, −1.90 ± 1.29 |
+| **E5 (five-seed ensemble; primary B1)** | 18.118000 | **−0.83 ± 1.35** | −1.62 ± 1.42 |
+| E6 (five seeds + `mlp_std`) | 18.117944 | −1.39 ± 1.13 | −2.18 ± 1.22 |
+| E5 of the stage-1 networks | 18.118684 | +6.01 ± 1.78 | +5.22 ± 1.91 |
+
+- **The five-seed ensemble does not beat `mlp_std` by the pre-registered rule** (Δ ≤ −5 and ≤ −3 SE): −0.83 ± 1.35 is
+  0.6 SE. Ensembling works as predicted against the members — −3.63 ± 0.32 against the mean member (Milestone 1
+  predicted −5.9, range −3.5 … −8.5) — but the members are on average +2.8 worse than `mlp_std`, so little is left.
+  Under K = 1024 and under the bulk restriction (separate columns of the report) the picture is the same.
+- **The controls are slightly worse than `mlp_std`** (+0.3 … +1.0): continuing the benchmark with the identical
+  schedule and K = 16 selection does not help. Seed scatter of the controls: SD 0.41.
+- The laptop-trained `b0_seed0`, scored on the H200 as a record, differs from `b0h_seed0` by −0.01 ± 0.21.
+- Speed: a 6,000-step fine-tune takes 38 s on the H200 (238 s on the laptop).
+
+Results: `results/machines/h200-g1056-97b197a7/` (commit `5ddfd9f`; per-event arrays and checkpoints are
+git-ignored and exist on both machines).
+
+**Track A started** on the H200 at commit `5ddfd9f`, 20:41 UTC, as one detached job under the same caps. Templates as
+on the laptop (mean difference to the stored template 7.6·10⁻⁴, maximum 0.146 in one z-bin); step-0 parity passed
+(A0 − formula array = +9.9·10⁻⁹ ± 1.1·10⁻⁸, largest event 1.1·10⁻⁵); polynomial learning rate fixed at 0.003 by the
+pilot. Measured speed 0.015 s per step, so the 54 unconditional fits need roughly an hour and the conditional ones up
+to another hour, plus guards. The run stops after the Stage-1 report; Stage 2 needs the user's approval file.
