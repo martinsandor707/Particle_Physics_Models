@@ -1,3 +1,4 @@
+shape-form-original/data/pion_standalone_N100000_M0_20GeV_reg_balanced_s1_v3.parquet
 shape-form-martin/cache/pion_s1_test.pt
 shape-form-proton/results/particles/pion/test_v3_nll.npz
 shape-form-martin/results/m0_parity/test_event_number.npy

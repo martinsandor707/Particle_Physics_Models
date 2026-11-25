@@ -1,19 +1,20 @@
-# SHA-256 of the H200 transfer package (group b), generated at commit fcd223af5051d40244f8743ce9843149d2f8f4f4 (2026-11-25T11:08:49+00:00) by make_transfer_package.py list.
+# SHA-256 of the H200 transfer package (group b), generated at commit 83ab7bd8d37f0a3731dccec2a93433384fb2df1e (2026-11-25T11:46:58+00:00) by make_transfer_package.py list.
 # Paths are repo-relative. Four sections; each is checked relative to its own DESTINATION ROOT on the H200,
-# and each header gives its list, phase and the one-liner to run from <repo>/ on the H200.
-# Phase 'now': copy and check now. Phase 'AFTER GATE 2c': TEST-DERIVED files, copied to the H200 only after
-# Gate 2c has passed; before that, their absence is required (make_transfer_package.py verify).
+# and each header gives its list, phase, contents and the one-liner to run from <repo>/ on the H200.
+# Phase 'now': copy and check now. Phase 'AFTER GATE 2c': the DEFERRED files (the seven test-derived files and
+# the raw Parquet table, which contains the test events), copied to the H200 only after Gate 2c has passed;
+# before that, their absence is required (make_transfer_package.py verify).
 # On the laptop (all four lists at their live source paths), from <repo>/: sha256sum -c shape-form-martin/transfer/SHA256SUMS
 # shape-form-martin/cache/pion_s1_test.pt is hashed as an opaque byte stream; it stays unopened until the final evaluation after Gate 2c.
 # No *.csv is listed.
 #
-# ---- section 1/4: inputs  (20 files, 2993885926 bytes, files_b_inputs.txt)
+# ---- section 1/4: inputs  (19 files, 389052272 bytes, files_b_inputs.txt)
 #   phase: now
+#   holds: group b1 inputs needed now (no test-event content)
 #   destination root: <repo>/
 #   copy:  rsync -a --files-from=shape-form-martin/transfer/files_b_inputs.txt <repo>/ <user>@<h200>:<repo>/
 #   check: sed -n '/^# BEGIN inputs$/,/^# END inputs$/p' shape-form-martin/transfer/SHA256SUMS | sha256sum -c
 # BEGIN inputs
-92c060f0b218ffe2fed28609f9dab270c1c3458b9a7ebb482aa9efdece743eb1  shape-form-original/data/pion_standalone_N100000_M0_20GeV_reg_balanced_s1_v3.parquet
 9984886fb90214b9c556489bfb3a913aba89509239c9b4a190797a540a6ab4b4  shape-form-martin/cache/pion_s1_trainval.pt
 d73b2eb06e3f07a484d92b5391e559cea24c7fd53bf641390bfd0c541313e75e  shape-form-martin/cache/pion_s1_meta.json
 ee1978a4b4cb3b3c1ea16d19e280327b4df433e24506f5a3f782f6d1fc120469  shape-form-proton/results/particles/pion/mlp_std.pt
@@ -37,6 +38,7 @@ c0d23ad25b8a555bc9b1bef3429fef0e2704d7865af737e1207a19e6fbe3c1f2  shape-form-mar
 #
 # ---- section 2/4: laptop_records  (51 files, 5749702 bytes, files_b_laptop_records.txt)
 #   phase: now
+#   holds: group b2 laptop records on validation (comparison only)
 #   destination root: <repo>/shape-form-martin/cache/laptop_records/
 #   copy:  rsync -a --files-from=shape-form-martin/transfer/files_b_laptop_records.txt <repo>/ <user>@<h200>:<repo>/shape-form-martin/cache/laptop_records/
 #   check: (cd shape-form-martin/cache/laptop_records && sed -n '/^# BEGIN laptop_records$/,/^# END laptop_records$/p' ../../transfer/SHA256SUMS | sha256sum -c)
@@ -94,19 +96,22 @@ e35f0f74662b4c7a7b629c108fcf5e2d2eb85b51a7f7c85651a5d972c8d067e1  shape-form-mar
 0fa899fc22274370fde38c0bde36d9d1ea646619112c391997a8f42100290e7c  shape-form-martin/results/gates/gate0_checks/val_grid144_new3_std_n6.npy
 # END laptop_records
 #
-# ---- section 3/4: test_derived_inputs  (3 files, 69197473 bytes, files_b_test_derived_inputs.txt)
-#   phase: AFTER GATE 2c (test-derived; do not copy before)
+# ---- section 3/4: test_derived_inputs  (4 files, 2674031127 bytes, files_b_test_derived_inputs.txt)
+#   phase: AFTER GATE 2c (deferred; do not copy before)
+#   holds: the three test-derived inputs (test cache, test_v3_nll.npz, test_event_number.npy) plus the raw Parquet table (contains_test_events; not test-derived)
 #   destination root: <repo>/
 #   copy:  rsync -a --files-from=shape-form-martin/transfer/files_b_test_derived_inputs.txt <repo>/ <user>@<h200>:<repo>/
 #   check: sed -n '/^# BEGIN test_derived_inputs$/,/^# END test_derived_inputs$/p' shape-form-martin/transfer/SHA256SUMS | sha256sum -c
 # BEGIN test_derived_inputs
+92c060f0b218ffe2fed28609f9dab270c1c3458b9a7ebb482aa9efdece743eb1  shape-form-original/data/pion_standalone_N100000_M0_20GeV_reg_balanced_s1_v3.parquet
 14955929e0a6cfad42e43aa6fa81787a072d9f26d37c3054ef627faac4c9ec88  shape-form-martin/cache/pion_s1_test.pt
 174524ef734a50ed96a2e7a2a1b8be71349d2efed2da68a6f1702519d32fd81b  shape-form-proton/results/particles/pion/test_v3_nll.npz
 ab5dcf3828d0fd1968d64eae28250a99c835851c9bd7ef60e0c0dc6f595263a4  shape-form-martin/results/m0_parity/test_event_number.npy
 # END test_derived_inputs
 #
 # ---- section 4/4: test_derived_records  (4 files, 239808 bytes, files_b_test_derived_records.txt)
-#   phase: AFTER GATE 2c (test-derived; do not copy before)
+#   phase: AFTER GATE 2c (deferred; do not copy before)
+#   holds: the four test-derived laptop records ({mlp,formula}_test_nll{,_ref1056}.npy)
 #   destination root: <repo>/shape-form-martin/cache/laptop_records/
 #   copy:  rsync -a --files-from=shape-form-martin/transfer/files_b_test_derived_records.txt <repo>/ <user>@<h200>:<repo>/shape-form-martin/cache/laptop_records/
 #   check: (cd shape-form-martin/cache/laptop_records && sed -n '/^# BEGIN test_derived_records$/,/^# END test_derived_records$/p' ../../transfer/SHA256SUMS | sha256sum -c)

@@ -1,8 +1,8 @@
 """Tests of scripts/make_transfer_package.py on synthetic git repositories in temporary directories.
 
 Nothing here touches the real repository's data: the script's tables are replaced by a small synthetic table
-(same entry format, same test-cache path, a glob pattern with an expected count, three test-derived files), so the
-tests also run on a machine where the real group-b files are absent or quarantined. Standard library + pytest only.
+(same entry format, same test-cache path, a glob pattern with an expected count, three test-derived files and a raw
+table that contains test events), so the tests also run on a machine where the real group-b files are absent or quarantined. Standard library + pytest only.
 """
 from __future__ import annotations
 
@@ -36,6 +36,10 @@ Q = M.QUARANTINE_REL
 TD_INPUTS = [TEST_CACHE, "results/m0/test_event_number.npy"]          # test-derived, b1
 TD_RECORDS = ["results/m0/bench_test_nll.npy"]                          # test-derived, b2 (stream-dependent)
 TD_ALL = TD_INPUTS + TD_RECORDS
+RAW = "data/raw.parquet"                                                # contains_test_events (deferred, not test-derived)
+DEFERRED_INPUTS = [RAW] + TD_INPUTS
+DEFERRED_ALL = DEFERRED_INPUTS + TD_RECORDS
+N_DEFERRED = "4 checked: 3 test-derived + the raw Parquet table"
 GITIGNORE = "cache/\n*.npy\n*.npz\n*.parquet\n*.csv\n"
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
 
@@ -52,8 +56,8 @@ def sha(b: bytes) -> str:
 def synthetic_tables() -> dict:
     a = [M._a("code/tool.py", role="code"),
          M._a("results/registry.jsonl", kind="record", laptop_record=True, role="rows", hazard="trusted by the code")]
-    b1 = [M._b("data/raw.parquet", "b1", "raw table", ["reader"], False, "none", M.COPY_LIVE, {"command": "-"},
-               test_note="contains the raw hits of all events"),
+    b1 = [M._b(RAW, "b1", "raw table", ["reader"], False, "none", M.AFTER_G2C_RAW, {"command": "-"},
+               test_note="contains the raw hits of all events", contains_test_events=True),
           M._b(TEST_CACHE, "b1", "test cache", ["load_sets(allow_test=True)"], False, "none", M.AFTER_G2C,
                {"command": "-"}, cross_check={"kind": "meta", "key": "test"}, opaque=True, test_derived=True),
           M._b(META, "b1", "meta", ["load_meta"], False, "none", M.COPY_LIVE, {"command": "-"},
@@ -143,28 +147,37 @@ def verify_json(repo: Path, *extra, capsys) -> tuple:
 def test_four_lists_and_manifest_fields(src):
     assert M.main(["list", "--repo", str(src)]) == 0
     rd = lambda n: (src / OUT / n).read_text().splitlines()                                   # noqa: E731
-    assert rd("files_b_inputs.txt") == ["data/raw.parquet", META]
+    assert rd("files_b_inputs.txt") == [META]
     assert rd("files_b_laptop_records.txt") == ["results/m0/bench_val_nll.npy", "results/m0/mon.npz",
                                                 "results/grid/g1.npy", "results/grid/g2.npy"]
-    assert rd("files_b_test_derived_inputs.txt") == TD_INPUTS
+    assert rd("files_b_test_derived_inputs.txt") == DEFERRED_INPUTS       # 2 test-derived inputs + the raw table
     assert rd("files_b_test_derived_records.txt") == TD_RECORDS
     man = json.loads((src / OUT / "MANIFEST.json").read_text())
     assert man["schema"] == 2
     for g in ("b1", "b2"):
         for x in man["groups"][g]["files"]:
             assert x["test_derived"] == (x["path"] in TD_ALL), x["path"]
-            assert x["transfer_phase"] == ("after_gate2c" if x["path"] in TD_ALL else "now")
+            assert x["contains_test_events"] == (x["path"] == RAW), x["path"]
+            assert x["transfer_phase"] == ("after_gate2c" if x["path"] in DEFERRED_ALL else "now")
+            assert x["list"] == ("files_b_test_derived_inputs.txt" if x["path"] in DEFERRED_INPUTS else
+                                 "files_b_test_derived_records.txt" if x["path"] in TD_RECORDS else
+                                 "files_b_inputs.txt" if g == "b1" else "files_b_laptop_records.txt")
             assert x["destination"] == (x["path"] if g == "b1" else f"{Q}/{x['path']}")
     g = man["groups"]
-    n_tc = len(TEST_BYTES)
-    assert g["b1"]["totals"] == {"files": 4, "bytes": 5000 + n_tc + len((src / META).read_bytes()) + 400}
-    assert g["b1"]["totals_by_phase"]["after_gate2c"] == {"files": 2, "bytes": n_tc + 400}
+    n_tc, n_meta = len(TEST_BYTES), len((src / META).read_bytes())
+    assert g["b1"]["totals"] == {"files": 4, "bytes": 5000 + n_tc + n_meta + 400}
+    assert g["b1"]["totals_by_phase"] == {"now": {"files": 1, "bytes": n_meta},
+                                          "after_gate2c": {"files": 3, "bytes": 5000 + n_tc + 400}}
     assert g["b2"]["totals"] == {"files": 5, "bytes": 800 + 300 + 100 + 120 + 700}
     assert g["b2"]["totals_by_phase"] == {"now": {"files": 4, "bytes": 1320}, "after_gate2c": {"files": 1, "bytes": 700}}
-    assert man["totals_by_phase"]["after_gate2c"] == {"files": 3, "bytes": n_tc + 400 + 700}
-    assert man["totals_by_phase"]["now"]["files"] == 6
-    assert {k: v["totals"]["files"] for k, v in man["lists"].items()} == {
-        "inputs": 2, "laptop_records": 4, "test_derived_inputs": 2, "test_derived_records": 1}
+    assert man["totals_by_phase"] == {"now": {"files": 5, "bytes": n_meta + 1320},
+                                      "after_gate2c": {"files": 4, "bytes": 5000 + n_tc + 400 + 700}}
+    lists = man["lists"]
+    assert {k: v["totals"]["files"] for k, v in lists.items()} == {
+        "inputs": 1, "laptop_records": 4, "test_derived_inputs": 3, "test_derived_records": 1}
+    tdi = lists["test_derived_inputs"]
+    assert tdi["test_derived_files"] == 2 and tdi["contains_test_events_files"] == 1 and tdi["deferred"]
+    assert "raw Parquet table" in tdi["holds"] and "three test-derived inputs" in tdi["holds"]
     tcmd = man["transfer_commands"]
     assert tcmd["phases"] == {"now": ["inputs", "laptop_records"],
                               "after_gate2c": ["test_derived_inputs", "test_derived_records"]}
@@ -174,7 +187,12 @@ def test_four_lists_and_manifest_fields(src):
         assert tcmd[key] == f"rsync -a --files-from={OUT}/{f} <repo>/ <user>@<h200>:{root}"
     pol = man["policies"]
     assert "Gate 2c" in pol["test_derived"] and "absence" in pol["test_derived"] and "\n" not in pol["test_derived"]
+    raw_pol = pol["raw_table"]
+    assert "\n" not in raw_pol and "25 Nov 2026" in raw_pol and "contains_test_events" in raw_pol
+    assert "NOT test-derived" in raw_pol and "after Gate 2c" in raw_pol
+    assert "DEFERRED" in pol["test_events_in_raw_parquet"] and "geometry arm" in pol["test_events_in_raw_parquet"]
     assert [x["path"] for x in pol["test_derived_files"]] == TD_ALL
+    assert [x["path"] for x in pol["deferred_files"]] == DEFERRED_ALL
     assert {x["path"] for x in pol["test_summary_metadata_now"]} >= {META}
     assert "Gate 2c" in pol["test_cache"] and "opaque" in pol["test_cache"]
     tc = next(x for x in g["b1"]["files"] if x["path"] == TEST_CACHE)
@@ -187,40 +205,50 @@ def test_four_lists_and_manifest_fields(src):
 
 REAL = {k: getattr(M, k) for k in ("GROUP_B1", "GROUP_B2")}
 REAL_GROUP_A = M.GROUP_A
+REAL_GROUP_C = M.GROUP_C
+REAL_PARQUET = "shape-form-original/data/pion_standalone_N100000_M0_20GeV_reg_balanced_s1_v3.parquet"
 
 
-def test_real_tables_mark_exactly_the_seven_test_derived_files():
-    td = sorted(e["pattern"] for g in REAL.values() for e in g if e["test_derived"])
+def test_real_tables_mark_the_eight_deferred_files():
+    entries = [e for g in REAL.values() for e in g]
+    td = sorted(e["pattern"] for e in entries if e["test_derived"])
     assert td == sorted([TEST_CACHE, f"{M.PION}/test_v3_nll.npz", f"{M.MARTIN}/results/m0_parity/test_event_number.npy"]
                         + [f"{M.MARTIN}/results/m0_parity/{m}_test_nll{s}.npy" for m in ("mlp", "formula")
                            for s in ("", "_ref1056")])
-    assert all(e["count"] == 1 for g in REAL.values() for e in g if e["test_derived"])
-    now_with_note = {e["pattern"] for g in REAL.values() for e in g if e["test_note"]}
+    raw = [e for e in entries if e["contains_test_events"]]
+    assert [e["pattern"] for e in raw] == [REAL_PARQUET] and not raw[0]["test_derived"] and raw[0]["group"] == "b1"
+    assert sorted(e["pattern"] for e in entries if M.is_deferred(e)) == sorted(td + [REAL_PARQUET])
+    assert all(e["count"] == 1 for e in entries if M.is_deferred(e))
+    now_with_note = {e["pattern"] for e in entries if e["test_note"] and not M.is_deferred(e)}
     assert {f"{M.PION}/test_v3.json", META} <= now_with_note
+    origin = [c for c in REAL_GROUP_C if "absolute shower origin" in c["path"]]
+    assert len(origin) == 1 and "NOT YET EXISTING" in origin[0]["path"] and "event_number" in origin[0]["command"]
 
 
-def test_round_trip_before_gate2c_passes_with_test_derived_absent(src, tmp_path, capsys):
+def test_round_trip_before_gate2c_passes_with_deferred_absent(src, tmp_path, capsys):
     dst = round_trip(src, tmp_path)
     rc, res = verify_json(dst, capsys=capsys)
     assert rc == 0 and res["ok"], res["failures"]
     assert res["mode"] == "target machine, before Gate 2c" and res["phase"] == "before_gate2c"
-    td = res["test_derived"]
-    assert td["absent"] is True and td["offending_paths"] == [] and td["checked"] == 3
-    assert td["summary"] == "test-derived files absent: yes (3 checked)"
-    assert sum(1 for l in res["lines"] if l[1] == "test-absent" and l[0] == "OK") == 3
+    d = res["deferred"]
+    assert d["absent"] is True and d["offending_paths"] == [] and d["checked"] == 4
+    assert d["test_derived"] == 3 and d["contains_test_events"] == 1
+    assert d["summary"] == f"deferred files absent: yes ({N_DEFERRED})"
+    assert sum(1 for l in res["lines"] if l[1] == "deferred-absent" and l[0] == "OK") == 4
     assert "ABSENT" in res["test_cache"] and "Gate 2c" in res["test_cache"] and "byte hash" in res["test_cache"]
+    assert RAW in res["raw_table"] and "ABSENT" in res["raw_table"]
     assert res["tracked_laptop_record_hazards"][0]["pattern"] == "results/registry.jsonl"
     assert any(l[1] == "c" and "to be regenerated" in l[2] for l in res["lines"])
     capsys.readouterr()
     assert M.main(["verify", "--repo", str(dst)]) == 0                     # human-readable mode
     out = capsys.readouterr().out
     assert "SUMMARY:" in out and "PASS" in out and "TEST CACHE:" in out and "trusted by the code" in out
-    assert "SUMMARY: test-derived files absent: yes (3 checked)" in out
+    assert f"SUMMARY: deferred files absent: yes ({N_DEFERRED})" in out and "RAW TABLE:" in out
 
 
-@pytest.mark.parametrize("rel", TD_ALL)
+@pytest.mark.parametrize("rel", DEFERRED_ALL)
 @pytest.mark.parametrize("where", ["live", "quarantine", "elsewhere"])
-def test_default_verify_fails_when_a_test_derived_file_is_present(src, tmp_path, capsys, rel, where):
+def test_default_verify_fails_when_a_deferred_file_is_present(src, tmp_path, capsys, rel, where):
     dst = round_trip(src, tmp_path)
     target = {"live": dst / rel, "quarantine": dst / Q / rel,
               "elsewhere": dst / "old" / "backup copy" / Path(rel).name}[where]
@@ -229,18 +257,19 @@ def test_default_verify_fails_when_a_test_derived_file_is_present(src, tmp_path,
     prel = target.relative_to(dst).as_posix()
     rc, res = verify_json(dst, capsys=capsys)
     assert rc == 1 and not res["ok"]
-    td = res["test_derived"]
-    assert td["absent"] is False and td["offending_paths"] == [prel]
-    assert td["summary"] == "test-derived files absent: no (3 checked)"
+    d = res["deferred"]
+    assert d["absent"] is False and d["offending_paths"] == [prel]
+    assert d["summary"] == f"deferred files absent: no ({N_DEFERRED})"
     msg = next(f for f in res["failures"] if prel in f)
     assert "PRESENT BEFORE GATE 2c" in msg
+    assert ("RAW TABLE (contains test events)" if rel == RAW else "TEST-DERIVED FILE") in msg
     capsys.readouterr()
     assert M.main(["verify", "--repo", str(dst)]) == 1
     out = capsys.readouterr().out
-    assert f"TEST-DERIVED FILE ON THIS MACHINE: {prel}" in out and "test-derived files absent: no (3 checked)" in out
+    assert f"DEFERRED FILE ON THIS MACHINE: {prel}" in out and f"deferred files absent: no ({N_DEFERRED})" in out
     target.unlink()
     rc, res = verify_json(dst, capsys=capsys)
-    assert rc == 0 and res["test_derived"]["absent"], res["failures"]
+    assert rc == 0 and res["deferred"]["absent"], res["failures"]
 
 
 def test_absence_search_by_name_and_size(src, tmp_path, capsys):
@@ -255,7 +284,7 @@ def test_absence_search_by_name_and_size(src, tmp_path, capsys):
     assert rc == 0 and any("different SHA-256" in w and "elsewhere/pion_s1_test.pt" in w for w in res["warnings"])
     other.write_bytes(TEST_BYTES)                                       # identical: failure
     rc, res = verify_json(dst, capsys=capsys)
-    assert rc == 1 and res["test_derived"]["offending_paths"] == ["elsewhere/pion_s1_test.pt"]
+    assert rc == 1 and res["deferred"]["offending_paths"] == ["elsewhere/pion_s1_test.pt"]
     rc, res = verify_json(dst, "--skip-large-hash", "0", capsys=capsys)  # not hashed: treated as present
     assert rc == 1 and any("not checked: treated as present" in f for f in res["failures"])
     other.unlink()
@@ -269,27 +298,66 @@ def test_absence_search_by_name_and_size(src, tmp_path, capsys):
     assert verify_json(dst, capsys=capsys)[0] == 0
 
 
-def test_after_gate2c_requires_all_test_derived_files(src, tmp_path, capsys):
+def test_raw_table_absence_rules(src, tmp_path, capsys, monkeypatch):
+    dst = round_trip(src, tmp_path)
+    raw_bytes = (src / RAW).read_bytes()
+    extract = dst / "scratch" / "raw.parquet"                          # same name, another size: information only
+    extract.parent.mkdir(parents=True)
+    extract.write_bytes(raw_bytes[:1234])
+    (dst / "scratch" / "trainval_extract.parquet").write_bytes(b"PAR1 train/val rows only")  # another name: info
+    rc, res = verify_json(dst, capsys=capsys)
+    assert rc == 0 and res["deferred"]["absent"], res["failures"]
+    infos = [l[2] for l in res["lines"] if l[0] == "INFO" and l[1] == "deferred-absent"]
+    assert any("scratch/raw.parquet" in i and "train/val-only extract" in i for i in infos)
+    assert any("scratch/trainval_extract.parquet" in i and "information only" in i for i in infos)
+    (dst / RAW).parent.mkdir(parents=True, exist_ok=True)
+    (dst / RAW).write_bytes(b"any content at the live path")           # live path: any content fails
+    rc, res = verify_json(dst, capsys=capsys)
+    assert rc == 1 and res["deferred"]["offending_paths"] == [RAW]
+    assert any("RAW TABLE (contains test events) PRESENT BEFORE GATE 2c at its live path" in f and
+               "different size" in f for f in res["failures"])
+    (dst / RAW).unlink()
+    calls = []                                                          # identical copies: one SHA-256 per file
+    real_sha = M.sha256_file
+    monkeypatch.setattr(M, "sha256_file", lambda p: calls.append(os.path.realpath(p)) or real_sha(p))
+    monkeypatch.setattr(M, "LARGE_HASH_NOTE", 1000)                     # the synthetic table counts as large
+    shutil.copy2(src / RAW, dst / RAW)
+    extract.write_bytes(raw_bytes)
+    rc, res = verify_json(dst, capsys=capsys)
+    assert rc == 1 and sorted(res["deferred"]["offending_paths"]) == sorted([RAW, "scratch/raw.parquet"])
+    raw_calls = [c for c in calls if c.endswith("raw.parquet")]
+    assert sorted(raw_calls) == sorted({os.path.realpath(dst / RAW), os.path.realpath(extract)})  # once each
+    assert sum("SHA-256 of 5000 B computed once" in f for f in res["failures"]) == 2
+
+
+def test_after_gate2c_requires_all_deferred_files(src, tmp_path, capsys):
     dst = round_trip(src, tmp_path)
     rc, res = verify_json(dst, "--after-gate2c", capsys=capsys)
     assert rc == 1 and res["phase"] == "after_gate2c"
     assert sorted(f for f in res["failures"] if "missing" in f) == sorted(
-        [f"[b1-test] missing: {r}" for r in TD_INPUTS] + [f"[b2-test] missing: {Q}/{r}" for r in TD_RECORDS])
-    assert res["test_derived"]["verified"] is False
-    assert res["test_derived"]["summary"] == "test-derived files present and verified (after Gate 2c): no (3 checked)"
+        [f"[b1-deferred] missing: {r}" for r in DEFERRED_INPUTS] + [f"[b2-deferred] missing: {Q}/{r}" for r in TD_RECORDS])
+    assert res["deferred"]["verified"] is False
+    assert res["deferred"]["summary"] == f"deferred files present and verified (after Gate 2c): no ({N_DEFERRED})"
     copy_after_gate2c(src, dst)
     rc, res = verify_json(dst, "--after-gate2c", capsys=capsys)
     assert rc == 0 and res["ok"], res["failures"]
-    assert res["test_derived"]["summary"] == "test-derived files present and verified (after Gate 2c): yes (3 checked)"
+    assert res["deferred"]["summary"] == f"deferred files present and verified (after Gate 2c): yes ({N_DEFERRED})"
     assert "byte hash only" in res["test_cache"] and "Gate 2c" in res["test_cache"]
-    assert any(l[1] == "b1-test" and "[opaque byte hash]" in l[2] for l in res["lines"])
+    assert "one SHA-256" in res["raw_table"]
+    assert any(l[1] == "b1-deferred" and "[opaque byte hash]" in l[2] for l in res["lines"])
+    assert any(l[1] == "b1-deferred" and l[2].endswith(RAW) for l in res["lines"])
     rc, res = verify_json(dst, capsys=capsys)                           # before-Gate-2c mode now fails
-    assert rc == 1 and sorted(res["test_derived"]["offending_paths"]) == sorted(TD_INPUTS + [f"{Q}/{r}" for r in TD_RECORDS])
+    assert rc == 1 and sorted(res["deferred"]["offending_paths"]) == sorted(
+        DEFERRED_INPUTS + [f"{Q}/{r}" for r in TD_RECORDS])
     f = dst / TEST_CACHE                                                # corrupted after the copy
     f.write_bytes(f.read_bytes()[:-1] + b"X")
     rc, res = verify_json(dst, "--after-gate2c", capsys=capsys)
     assert rc == 1 and any("SHA-256 mismatch" in x and TEST_CACHE in x for x in res["failures"])
     shutil.copy2(src / TEST_CACHE, f)
+    (dst / RAW).unlink()                                                # the raw table is required too
+    rc, res = verify_json(dst, "--after-gate2c", capsys=capsys)
+    assert rc == 1 and res["failures"] == [f"[b1-deferred] missing: {RAW}"]
+    shutil.copy2(src / RAW, dst / RAW)
     rel = TD_RECORDS[0]                                                 # a test record at its LIVE path
     shutil.copy2(src / rel, dst / rel)
     rc, res = verify_json(dst, "--after-gate2c", capsys=capsys)
@@ -297,7 +365,7 @@ def test_after_gate2c_requires_all_test_derived_files(src, tmp_path, capsys):
     (dst / rel).unlink()
     (dst / Q / rel).unlink()
     rc, res = verify_json(dst, "--after-gate2c", capsys=capsys)
-    assert rc == 1 and res["failures"] == [f"[b2-test] missing: {Q}/{rel}"]
+    assert rc == 1 and res["failures"] == [f"[b2-deferred] missing: {Q}/{rel}"]
 
 
 def test_sha256sums_sections_and_commands(src, tmp_path):
@@ -309,6 +377,10 @@ def test_sha256sums_sections_and_commands(src, tmp_path):
         assert sums.count(f"\n# BEGIN {key}\n") == 1 and sums.count(f"\n# END {key}\n") == 1
     assert sums.count("#   phase: now") == 2 and sums.count("#   phase: AFTER GATE 2c") == 2
     assert sums.count(f"#   destination root: <repo>/{Q}/") == 2 and sums.count("#   destination root: <repo>/\n") == 2
+    holds = [l for l in sums.splitlines() if l.startswith("#   holds: ")]
+    assert len(holds) == 4 and "three test-derived inputs" in holds[2] and "raw Parquet table" in holds[2]
+    section3 = sums.split("# BEGIN test_derived_inputs\n")[1].split("# END test_derived_inputs")[0].splitlines()
+    assert [l.split("  ", 1)[1] for l in section3] == DEFERRED_INPUTS
     checks = [l.split("#   check: ", 1)[1] for l in sums.splitlines() if l.startswith("#   check: ")]
     assert len(checks) == 4
 
@@ -330,12 +402,12 @@ def test_sha256sums_sections_and_commands(src, tmp_path):
 
 def test_corrupted_file_is_detected(src, tmp_path, capsys):
     dst = round_trip(src, tmp_path)
-    f = dst / "data/raw.parquet"
+    f = dst / META
     b = bytearray(f.read_bytes())
-    b[100] ^= 0xFF
+    b[10] ^= 0xFF
     f.write_bytes(bytes(b))
     rc, res = verify_json(dst, capsys=capsys)
-    assert rc == 1 and any("SHA-256 mismatch" in x and "data/raw.parquet" in x for x in res["failures"])
+    assert rc == 1 and any("SHA-256 mismatch" in x and META in x for x in res["failures"])
     q = dst / Q / "results/grid/g2.npy"                                # a record in the quarantine root
     q.write_bytes(q.read_bytes() + b"x")
     rc, res = verify_json(dst, capsys=capsys)
@@ -343,7 +415,7 @@ def test_corrupted_file_is_detected(src, tmp_path, capsys):
     (dst / META).unlink()
     rc, res = verify_json(dst, capsys=capsys)
     assert any("missing" in x and META in x for x in res["failures"])
-    rc, res = verify_json(dst, "--skip-large-hash", "1000", capsys=capsys)  # size-only pass still sees size/missing
+    rc, res = verify_json(dst, "--skip-large-hash", "50", capsys=capsys)  # size-only pass still sees size/missing
     assert rc == 1 and any("NOT checked" in w for w in res["warnings"])
 
 
@@ -370,13 +442,14 @@ def test_source_machine_mode(src, capsys):
     assert M.main(["list", "--repo", str(src)]) == 0
     rc, res = verify_json(src, "--source-machine", capsys=capsys)
     assert rc == 0 and res["mode"] == "source machine", res["failures"]
-    td = res["test_derived"]
-    assert td["verified"] is True and td["absent"] is None and "not a failure" in td["summary"] and "(3 checked)" in td["summary"]
-    assert sum(1 for l in res["lines"] if l[1] in ("b1-test", "b2-test") and l[0] == "OK") == 3
-    assert not [l for l in res["lines"] if l[1] == "test-absent"]
+    d = res["deferred"]
+    assert d["verified"] is True and d["absent"] is None and "not a failure" in d["summary"]
+    assert f"({N_DEFERRED})" in d["summary"]
+    assert sum(1 for l in res["lines"] if l[1] in ("b1-deferred", "b2-deferred") and l[0] == "OK") == 4
+    assert not [l for l in res["lines"] if l[1] == "deferred-absent"]
     rc, res = verify_json(src, capsys=capsys)                              # without the flag: records at live paths
     assert rc == 1 and any("LIVE PATH" in x for x in res["failures"])
-    assert res["test_derived"]["absent"] is False and len(res["test_derived"]["offending_paths"]) == 3
+    assert res["deferred"]["absent"] is False and len(res["deferred"]["offending_paths"]) == 4
 
 
 def test_csv_is_refused(src, tables, monkeypatch, capsys, tmp_path):
@@ -422,6 +495,16 @@ def test_list_refuses_tracked_unignored_and_mismatched_files(src, tables, monkey
                                                                      ["-"], True, "s", M.COPY_Q, {"command": "-"})])
     assert M.main(["list", "--repo", str(src)]) == 1
     assert "neither test_derived nor explained" in capsys.readouterr().err
+    monkeypatch.setattr(M, "GROUP_B2", tables["GROUP_B2"] + [M._b("results/m0/latest_test_scores.npy", "b2", "x",
+                                                                     ["-"], True, "s", M.COPY_Q, {"command": "-"},
+                                                                     test_note="n", contains_test_events=True)])
+    assert M.main(["list", "--repo", str(src)]) == 1
+    assert "only defined for group b1" in capsys.readouterr().err
+    monkeypatch.setattr(M, "GROUP_B1", [dict(e, test_derived=True) if e["pattern"] == RAW else e
+                                        for e in tables["GROUP_B1"]])
+    monkeypatch.setattr(M, "GROUP_B2", tables["GROUP_B2"])
+    assert M.main(["list", "--repo", str(src)]) == 1
+    assert "test_derived and contains_test_events are exclusive" in capsys.readouterr().err
     monkeypatch.setattr(M, "GROUP_B2", tables["GROUP_B2"])
     monkeypatch.setattr(M, "GROUP_B1", [dict(e, test_derived=False) if e["pattern"] == TEST_CACHE else e
                                         for e in tables["GROUP_B1"]])

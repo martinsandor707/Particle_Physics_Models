@@ -464,10 +464,12 @@ Section 16 holds the transfer package and the run-book.
 > 1e-5 — is activated only after Fable has confirmed, on validation, that the outliers are 1-ULP bin-edge flips (a
 > fold point changing its grid cell through a last-bit difference in its coordinates). Without that confirmation the
 > strict clause, every event within 1e-4, applies. Gate 2c records which clause is in force before the run.
-> **Test-derived files (user decision P4).** The seven test-derived files — the test cache, `test_v3_nll.npz`,
-> `test_event_number.npy` and the four laptop test arrays — are NOT on the H200 before Gate 2c; their physical
-> absence, checked by `make_transfer_package.py verify`, proves that no test access was possible there. They are
-> copied only after Gate 2c has passed and then checked with `verify --after-gate2c`. [If the launch grid is not 1056, (c) is evaluated on the emulated reference stream,
+> **Deferred files (user decisions of 25 Nov 2026, P4 and its extension).** Eight files are NOT on the H200 before
+> Gate 2c: the seven test-derived files — the test cache, `test_v3_nll.npz`, `test_event_number.npy` and the four
+> laptop test arrays — and the Parquet raw table, which holds the raw hits of all events including the test events.
+> Their physical absence, checked by `make_transfer_package.py verify`, proves that no test access was possible
+> there: before Gate 2c the H200 holds no test-event hits or scores in any form. They are copied only after Gate 2c
+> has passed and then checked with `verify --after-gate2c`. [If the launch grid is not 1056, (c) is evaluated on the emulated reference stream,
 > and the native arrays must in addition satisfy A3 against the emulated ones.] A stop is not the final run: only
 > the two benchmarks have been evaluated, the access stays in the log, and a new start needs the cause, the user's
 > go-ahead and an unchanged `LOCK.json`. Finalists are paired against the benchmark test arrays of the same run.
@@ -497,9 +499,10 @@ Section 16 holds the transfer package and the run-book.
 > checkpoint or equation, the training machine, the H200 validation numbers and the hashes of the benchmark arrays
 > they were paired with; every selection step is traceable to H200 arrays; the scores of the geometry arm and of
 > the PySR finalists are H200 rows; the test-access log is as in point 9; the test cache on the H200 has the
-> seven test-derived files are absent from the H200 when the gate is taken (`make_transfer_package.py verify`
-> reports "test-derived files absent: yes") and are copied only after it has passed, the test cache then having the
-> recorded SHA-256 (`verify --after-gate2c`);
+> eight deferred files (seven test-derived files and the Parquet raw table) are absent from the H200 when the gate
+> is taken (`make_transfer_package.py verify` reports "deferred files absent: yes (8 checked: 7 test-derived + the
+> raw Parquet table)") and are copied only after it has passed, the test cache then having the recorded SHA-256
+> (`verify --after-gate2c`);
 > `final_test.py` refuses any machine other than the one in `LOCK.json`, refuses path overrides, and implements
 > the stop rule of point 8 with the tolerances fixed by this gate.
 > *Gate 3* also checks: the final run took place once, on the machine of record; its first step passed, with the
@@ -771,7 +774,7 @@ the machine). Where this section and those files disagree, the files hold the de
 | P1 | **Accepted with guardrails.** Fits may run side by side on the H200 only if the throughput benchmark there shows a real gain | `torch.cuda.set_per_process_memory_fraction` set per worker; strictly disjoint output and checkpoint directories; serialized, locked writes to `registry.jsonl`; an exclusive single-job lock kept for parity checks, benchmarks and `final_test.py` | §16.5; enabling change E9 |
 | P2 | **Accepted.** The 4-GPU-hour wall-clock cap is dropped; the fixed lists of `AUDIT.md` §4.1 and §4.2 run in full | the pre-registered sets of primary comparisons stay unchanged for the multiple-testing accounting | §13, A6 revised, point 6; E4 |
 | P3 | **Accepted with guardrails.** A relaxed per-event clause of the final run's stop rule is possible (≤ 3 events > 1e-4, none > 1e-3, rms ≤ 1e-5) | TF32 explicitly disabled on the H200 (`torch.backends.cuda.matmul.allow_tf32 = False`, `torch.backends.cudnn.allow_tf32 = False`); the mean-parity check stays active; if validation parity shows any event > 5e-5, Fable must confirm that the outliers are 1-ULP bin-edge flips before the relaxed clause is activated | §13, A6 revised, point 8; E8, E10 |
-| P4 | **Proposal rejected, alternative taken.** The seven test-derived files are NOT transferred now. The file list is split and they are copied to the H200 only after Gate 2c passes, so that their physical absence proves zero test access | — | §16.1, §16.2; the packaging script |
+| P4 | **Proposal rejected, alternative taken.** The seven test-derived files are NOT transferred now. The file list is split and they are copied to the H200 only after Gate 2c passes, so that their physical absence proves zero test access. **Extended on 25 Nov 2026:** the Parquet raw table, which holds the raw hits of all events including the test events, is deferred in the same way | — | §16.1, §16.2; the packaging script (done) |
 | P5 | **Accepted.** The H200 controls are `b0h_seed0`, `b0h_seed1`, `b0h_seed2`; `b0_seed0` stays untouched as the archived laptop record | — | §13, A6 revised, point 5; E6 |
 | P6 | **Modified.** Authoritative H200 results are never placed inside the git-ignored `cache/` | either the machine tag is added to the array and registry schema before anything is synced back, or results are staged under `shape-form-martin/results/h200_records/` (tracked) and promoted only with a machine tag before Gate 1 / Gate 2c | §16.6; E1 |
 
@@ -786,16 +789,16 @@ Reading of two points, to be corrected by the user if wrong:
 
 | Group | Files | Bytes | Copied | File list |
 |---|---|---|---|---|
-| (a) tracked in the pushed branch | 129 | 2,610,270 | arrives with `git clone` / `git pull` | — |
-| (b1) git-ignored inputs, to the SAME path | 20 | 2,993,885,926 (2.79 GiB) | **now** | `transfer/files_b_inputs.txt` |
+| (a) tracked in the pushed branch | 129 | 2,635,049 | arrives with `git clone` / `git pull` | — |
+| (b1) git-ignored inputs, to the SAME path | 19 | 389,052,272 (371.03 MiB) | **now** | `transfer/files_b_inputs.txt` |
 | (b2) git-ignored laptop records, into the QUARANTINE folder | 51 | 5,749,702 (5.48 MiB) | **now** | `transfer/files_b_laptop_records.txt` |
-| (b1) test-derived inputs, to the same path | 3 | 69,197,473 (65.99 MiB) | **only after Gate 2c** | `transfer/files_b_test_derived_inputs.txt` |
+| (b1) three test-derived inputs and the Parquet raw table, to the same path | 4 | 2,674,031,127 (2.49 GiB) | **only after Gate 2c** | `transfer/files_b_test_derived_inputs.txt` |
 | (b2) test-derived laptop records, into the quarantine folder | 4 | 239,808 | **only after Gate 2c** | `transfer/files_b_test_derived_records.txt` |
-| (c) regenerated on the H200 | 17 entries | — | — | table below |
+| (c) regenerated on the H200 | 18 entries | — | — | table below |
 
 Group (b) in total: 78 files, 3,069,072,909 bytes
-(b1 23 files, 3,063,083,399; b2 55 files, 5,989,510). Copied now: 71 files,
-2,999,635,628 bytes. Copied after Gate 2c: 7 files, 69,437,281 bytes.
+(b1 23 files, 3,063,083,399; b2 55 files, 5,989,510). Copied now: 70 files,
+394,801,974 bytes. Copied after Gate 2c: 8 files, 2,674,270,935 bytes.
 
 Every (a) file was confirmed with `git ls-files --error-unmatch` and every (b) file with `git check-ignore -v` (the
 ignoring rule is recorded per file in `MANIFEST.json`); no file is untracked and not ignored. Sizes and SHA-256 were
@@ -808,20 +811,22 @@ hashes the Gate 0 run recorded in the tracked `results/m0_parity/parity.json`; t
 the test cache, the earlier study's stored per-event test arrays `test_v3_nll.npz`, the test event order
 `test_event_number.npy`, and the four laptop test arrays. They are not copied with the rest. `verify` on the H200
 **fails before Gate 2c if any of them is on the machine** — at its live path, in the quarantine folder, or as a copy of
-the same name and size anywhere in the working tree — and reports "test-derived files absent: yes (7 checked)"
-otherwise. No moved step, import or test opens any of them (checked on the laptop by making all seven invisible and
+the same name and size anywhere in the working tree — and otherwise reports the deferred files as absent (wording
+in the next paragraph). No moved step, import or test opens any of them (checked on the laptop by making all seven invisible and
 exercising the imports, loaders, registry read paths, model factories, script start-ups and test collection).
 Two files that travel now mention test only as summary metadata and are needed by moved steps: `PION/test_v3.json`
 (the legacy adapter reads the formula's structure from it; it also holds the earlier study's summary test numbers,
 which are printed in this plan) and `SFM/cache/pion_s1_meta.json` (hashes and per-split summary statistics).
 
-**Limit of that proof: the Parquet file.** It is not test-derived, but it holds the raw hits of all 99,689 events,
-including the 14,956 test events; the split is made only when the cache is built. With the Parquet file on the H200,
-the absence of the seven files shows that no stored test file was used; it does not make the test events unreachable.
-No moved step reads the Parquet file while the caches are copied. Rules until the user decides otherwise:
-`scripts/build_cache.py` is never run on the H200 before Gate 2c (it would write a test cache), and any code that
-reads the Parquet file keeps to the training and validation event numbers. Open decision for the user: copy the
-Parquet file only after Gate 2c as well.
+**The Parquet raw table is deferred as well (user decision, 25 Nov 2026).** It is not test-derived, but it holds the
+raw hits of all 99,689 events, including the 14,956 test events; the split is made only when the cache is built. It is
+therefore copied only after Gate 2c, together with the seven test-derived files, and `verify` fails before Gate 2c if
+it is on the machine ("deferred files absent: yes (8 checked: 7 test-derived + the raw Parquet table)"). Before
+Gate 2c the H200 then holds no test-event hits in any form. Consequences, checked on the laptop with all eight files
+made invisible: no moved step, import or test reads the Parquet file; `scripts/build_cache.py` cannot run on the H200
+(it fails before writing anything), which is intended. The zero-training geometry arm needs the absolute shower origin
+of validation events, which is computed from the Parquet file: it has to be produced on the laptop from training and
+validation rows only and shipped as a small extra file keyed by event number (it does not exist yet; group (c)).
 
 Abbreviations: `SFM/` = `shape-form-martin/`, `PION/` = `shape-form-proton/results/particles/pion/`,
 `DATA/` = `shape-form-original/data/`.
@@ -830,13 +835,13 @@ Abbreviations: `SFM/` = `shape-form-martin/`, `PION/` = `shape-form-proton/resul
 
 | Kind | Files | Bytes |
 |---|---|---|
-| code | 48 | 849,275 |
+| code | 48 | 863,764 |
 | config | 11 | 8,642 |
-| doc | 9 | 463,184 |
+| doc | 9 | 467,352 |
 | env | 4 | 528,482 |
 | package | 6 | 0 |
 | record | 34 | 463,764 |
-| test | 17 | 296,923 |
+| test | 17 | 303,045 |
 
 Tracked files that are laptop RECORDS and that the code trusts — they arrive with `git pull` whether wanted or not:
 
@@ -855,11 +860,11 @@ Tracked files that are laptop RECORDS and that the code trusts — they arrive w
 - `SFM/results/m0_parity/checksums.json` (1 file(s)): check_protected.py verify on the H200 reports every protected file that was not copied as missing (exit 1).
 - `SFM/results/m0_parity/checksums_verify.json` (1 file(s)): Not read by code.
 
-**(b1) Inputs — copied to the same path (23 files, 3,063,083,399 bytes; 20 now, 3 after Gate 2c)**
+**(b1) Inputs — copied to the same path (23 files, 3,063,083,399 bytes; 19 now, 4 after Gate 2c)**
 
 | File | Bytes | SHA-256 | Role | Sample points | Copied |
 |---|---|---|---|---|---|
-| `DATA/pion_standalone_N100000_M0_20GeV_reg_balanced_s1_v3.parquet` | 2,604,833,654 | `92c060f0b218ffe2fed28609f9dab270c1c3458b9a7ebb482aa9efdece743eb1` | raw hit table (Parquet copy of the CSV) | none | now |
+| `DATA/pion_standalone_N100000_M0_20GeV_reg_balanced_s1_v3.parquet` | 2,604,833,654 | `92c060f0b218ffe2fed28609f9dab270c1c3458b9a7ebb482aa9efdece743eb1` | raw hit table (Parquet copy of the CSV) of ALL events, test events included | none | **after Gate 2c** |
 | `SFM/cache/pion_s1_trainval.pt` | 385,953,467 | `9984886fb90214b9c556489bfb3a913aba89509239c9b4a190797a540a6ab4b4` | train/val cache (69,783 + 14,950 events) | none | now |
 | `SFM/cache/pion_s1_test.pt` | 68,476,893 | `14955929e0a6cfad42e43aa6fa81787a072d9f26d37c3054ef627faac4c9ec88` | TEST cache (14,956 events) - OPAQUE BYTE STREAM, hash and size only | none | **after Gate 2c** |
 | `SFM/cache/pion_s1_meta.json` | 4,051 | `d73b2eb06e3f07a484d92b5391e559cea24c7fd53bf641390bfd0c541313e75e` | cache metadata (geometry, counts, per-file SHA-256 of both caches) | none | now |
@@ -883,7 +888,7 @@ Tracked files that are laptop RECORDS and that the code trusts — they arrive w
 | `SFM/results/m2b_mlp/s2_seed12/model.pt` | 317,314 | `165123ad4ed76680c1bf996b992d8487307369a3f5e2a056d063b1b93790419a` | checkpoint of the registered Track B network s2_seed12 | none | now |
 | `SFM/results/m2b_mlp/b0_seed0/model.pt` | 317,250 | `75de31f2540769f68f652979163684213f43e92066f0a6a03f926595ecf6b700` | checkpoint of the registered Track B network b0_seed0 | none | now |
 
-Expected and confirmed: the Parquet file, the pion result files the legacy adapter and the parity checks read, the
+Expected and confirmed: the Parquet file (deferred), the pion result files the legacy adapter and the parity checks read, the
 eight checkpoints. Not in the user's list but required: both cache files with their metadata file, the two front-face
 acceptance templates and the two event-number arrays — the templates and event-number arrays can only be regenerated by
 `scripts/parity.py`, whose default mode opens the test split.
@@ -973,6 +978,7 @@ against thresholds of 3 and 5. In quarantine they serve as comparison targets on
 | SFM/results/m2b_mlp/summary.json (tracked, rewritten) | uv run python -B shape-form-martin/scripts/run_m2b_report.py (no argparse; CPU only) | no | seconds (not measured) | deterministic given the arrays |
 | remaining Track B runs (AUDIT 4.2) | configs + scripts/fit.py or fit_queue.py work for B2a/b/c, B5f (field_mlp_std), B3s (field), B4f/B4s (field_acc front/stored); no command exists yet for B4x (field_acc rejects full_box), B6a/b/c (no factory), B1d/B1f (distillation), B-ceil (train_fraction) | no | estimate only: about 2 GPU-hours (PLAN 15) | machine-dependent |
 | theta track Theta-1..Theta-3 | no command exists yet (own harness forward(lnp, aux); Theta-1b needs the absolute origin in the cache; user decision of 25 Nov 2026: zero-training geometry arm only, after the geometry audit) | no | - | machine-dependent |
+| SFM/results/m2c_theta/geometry/<absolute shower origin per event> (file name not fixed; NOT YET EXISTING INPUT, made on the LAPTOP and shipped, not … | no command exists yet: a laptop script that reads ONLY the train/val rows of the Parquet file (row selection by the event numbers of cache/pion_s1_trainval.pt, as the geometry audit does) and writes, keyed by event_number, the absolute origin (x0, y0, z0) of the shower frame = energy-weighted … | no | not measured | deterministic (float64 sums over the Parquet rows); machine-independent up to summation order |
 | SFM/results/final/LOCK.json and the final test arrays | no command exists yet (final_test.py and LOCK.json missing; after Gate 2c) | no | - | machine-dependent |
 
 **Caches: copied, not rebuilt.** `scripts/build_cache.py` has no argument parser (any invocation rebuilds), always
@@ -980,13 +986,14 @@ writes both cache files and the metadata file, and rewrites a tracked file. A re
 bit-identical (float64 `cos`/`sin` and the CPU logarithm may take other vector code paths; argued, not tested), and the
 code would not notice the difference. Gate 0 and C1 certified exactly these bytes, so only a byte copy carries them
 over. The train/validation cache is copied now. **The test cache is copied only after Gate 2c, is checked by a plain
-SHA-256 of its bytes, and stays unopened until the single final evaluation.** The validation fingerprint that
+SHA-256 of its bytes, and stays unopened until the single final evaluation.** With the Parquet file deferred, a rebuild
+on the H200 is impossible before Gate 2c in any case. The validation fingerprint that
 `sfm.registry` recomputes on first use must equal `731a1997…58a7`, which is a free check of the copied
 train/validation cache.
 
 ### 16.2 The packaging script
 
-`shape-form-martin/scripts/make_transfer_package.py` (standard library only; never imports torch or numpy; 22 tests in
+`shape-form-martin/scripts/make_transfer_package.py` (standard library only; never imports torch or numpy; 26 tests in
 `tests/test_transfer_package.py`).
 - `list` (laptop): builds groups (b1) and (b2) from an explicit table in the script (each entry names the code that
   reads it; no directory walk), checks each file with git, hashes it once, and writes four file lists, `SHA256SUMS`
@@ -995,9 +1002,9 @@ train/validation cache.
 - `verify` (H200, from the repository root), **before Gate 2c**: presence, size and SHA-256 of every "now" file (inputs
   at their live paths, records under the quarantine root); presence of the (a) files and that the checkout descends
   from the manifest's commit; **fails if a stream-dependent laptop record sits at a live path** (it prints the `mv`
-  that would quarantine it and executes nothing); **fails if any of the seven test-derived files is on the machine**;
+  that would quarantine it and executes nothing); **fails if any of the eight deferred files (the seven test-derived files and the Parquet raw table) is on the machine**;
   lists the (c) entries and the tracked-record hazards. Options `--skip-large-hash`, `--json`.
-- `verify --after-gate2c`: additionally requires the seven test-derived files, present and correct.
+- `verify --after-gate2c`: additionally requires the eight deferred files, present and correct.
 - `verify --source-machine`: for the laptop, where records and test-derived files are at their live paths by definition.
 - It refuses any `*.csv` (also while searching the tree) and treats the test cache as an opaque byte stream: the only
   access is a chunked binary read for the hash, and only when a file of that name and size exists. A byte hash is not
@@ -1018,7 +1025,7 @@ rsync -a --files-from=shape-form-martin/transfer/files_b_test_derived_records.tx
 python3 -B shape-form-martin/scripts/make_transfer_package.py verify --after-gate2c
 ```
 
-State on the laptop: `list` ran at commit `fcd223a`; `verify --source-machine` passes (80 checks, 0 failures).
+State on the laptop: `list` ran at commit `83ab7bd`; `verify --source-machine` passes (80 checks, 0 failures).
 
 ### 16.3 Run-book for the H200
 
@@ -1030,7 +1037,7 @@ measurements; the H200's are unknown until the calibration of step 4.
 | 1 | Checkout | `git clone` / `git pull`, branch `shape-form-martin`, at or after the commit of this amendment | `git log -1` | — |
 | 2 | Environment | `uv sync --python 3.12` then `uv run python -B -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available(), torch.cuda.get_device_name(0), torch.cuda.device_count())"` | `2.14.0+cu130`, `13.0`, `True`, the H200's name. **If `is_available()` is false, stop:** `common.py` would fall back to the CPU without an error. `nvidia-smi` must report a driver CUDA version ≥ 13.0. `gcc` with OpenMP must exist (the stream emulator compiles on first use). One full GPU visible (`CUDA_VISIBLE_DEVICES`), not a MIG slice | not measured |
 | 3 | Paths | leave `SFM_DATA_DIR`, `SFM_RESULTS_DIR`, `SFM_CACHE_DIR` **unset**. `SFM_RESULTS_DIR` would hide the pairing arrays, the registry and the done-markers and move the test-access log; `SFM_CACHE_DIR` would move the caches away from where `verify` looks. If the repository is on a network file system, point `SFM_GPU_LOCK` at a local disk | — | — |
-| 4 | Copy and verify | the first two `rsync` lines of §16.2 (the "now" lists only), then `python3 -B shape-form-martin/scripts/make_transfer_package.py verify` | PASS, including "test-derived files absent: yes (7 checked)". This is the cache verification for the train/validation cache (SHA-256). The test cache is not on the machine. Never run `scripts/build_cache.py` on the H200 before Gate 2c (it would write a test cache from the Parquet file) | list 2 s, verify 2 s |
+| 4 | Copy and verify | the first two `rsync` lines of §16.2 (the "now" lists only), then `python3 -B shape-form-martin/scripts/make_transfer_package.py verify` | PASS, including "deferred files absent: yes (8 checked: 7 test-derived + the raw Parquet table)". This is the cache verification for the train/validation cache (SHA-256). Neither the test cache nor the Parquet file is on the machine, so `scripts/build_cache.py` cannot run there before Gate 2c (and must not be tried) | list 2 s, verify 2 s |
 | 5 | Machine identity (R0) | `uv run python -B -c "import sys; sys.path.insert(0,'shape-form-martin/src'); from sfm import refstream; print(refstream.local_grid())"` and `uv run pytest shape-form-martin/tests/test_refstream.py -q -k emulation_reproduces_torch_rand_bitwise` | launch grid recorded (expected 1056); the emulator equals `torch.rand` bit for bit. Two other tests of that file are expected to fail on any GPU but the laptop's (§16.7) | seconds |
 | 6 | Benchmark parity on validation and the H200 pairing arrays (R1, R1b, R3) | **missing** — a validation-only command; `scripts/parity.py` must not be used (both of its modes open the test split) | if the grid is 1056: float32 validation means 18.118084 (MLP) and 18.120407 (formula) within 4e-6; every event within 1e-4 of the laptop's emulated `*_val_nll_ref1056.npy` in quarantine; formula − MLP = +0.002324 ± 0.000294; a second run bit-identical. Fallbacks in §16.4 | 1.5 s + 0.9 s |
 | 7 | Guard reference arrays (R2), once, by one process, before any registration | automatic at the first guarded `registry.evaluate`; to be run deliberately as its own step | grid 1056: K = 1024 means 18.1155556 / 18.1177364, bulk means 18.0429497 / 18.0448778, within 1e-6; stratum of 14,784 events | ≈ 27 s |
@@ -1042,8 +1049,8 @@ measurements; the H200's are unknown until the calibration of step 4.
 | 13 | Track A rules, guards, Stage 2 | **missing** (`scripts/run_m2a_report.py`) | `results/m2a_dist/RESULTS.md` | ≈ 38 min, inside the 4 h |
 | 14 | Remaining Track B (`AUDIT.md` §4.2) | `scripts/fit.py <config>` / `scripts/fit_queue.py <configs>` work for B2a/b/c, B5f, B3s, B4f/B4s once their configs exist; **missing**: the configs, B4x (`full_box` template), B6 (factory), B1d/B1f (distillation), B-ceil (`train_fraction`) | comparators trained on the H200 | ≈ 2.0 h estimated |
 | 15 | PySR refits and scores (decision iii) | **missing** (`src/sfm/sr/` translate, audit, targets, refit not written) | every refit and score an H200 registry row | — |
-| 16 | θ track Θ1–Θ3 and the geometry arm's scores | **missing** (no code); after the θ-blind finalists are frozen and after the geometry audit | G-bulk headline | — |
-| 17 | `LOCK.json` → Gate 2c (takes `verify` first: the seven test-derived files must be absent) → copy the two test-derived lists → `python3 -B shape-form-martin/scripts/make_transfer_package.py verify --after-gate2c` → single final run | the copy and verify commands exist; **missing**: `scripts/final_test.py` | `verify --after-gate2c` PASS; stop rule of A6 revised, point 8 | C1 took 7 s |
+| 16 | θ track Θ1–Θ3 and the geometry arm's scores | **missing** (no code); after the θ-blind finalists are frozen and after the geometry audit. The geometry arm needs the absolute shower origin of validation events, produced on the laptop from training and validation rows and shipped as a small extra file (does not exist yet), because the Parquet file is not on the H200 | G-bulk headline | — |
+| 17 | `LOCK.json` → Gate 2c (takes `verify` first: the eight deferred files must be absent) → copy the two deferred lists → `python3 -B shape-form-martin/scripts/make_transfer_package.py verify --after-gate2c` → single final run | the copy and verify commands exist; **missing**: `scripts/final_test.py` | `verify --after-gate2c` PASS; stop rule of A6 revised, point 8 | C1 took 7 s |
 | 18 | Results back to the laptop | §16.6 | — | — |
 
 **Does the H200 reproduce the stored 18.1208 / 18.1235 directly?** These are test numbers, and by decision (i) the test
@@ -1071,8 +1078,9 @@ Targets for step 8 if the launch grid is 1056 (validation, K = 64; Δ in 10⁻�
 
 ### 16.4 What carries over and what is recomputed (Fable review)
 
-*With decision P4 the test cache and the other six test-derived files reach the H200 only after Gate 2c; the rows below
-that mention them (the test cache's hash, `test_event_number.npy`, C1) apply from that moment on.*
+*With decision P4 and its extension the test cache, the other six test-derived files and the Parquet raw table reach the
+H200 only after Gate 2c; the rows below that mention them (the test cache's hash, `test_event_number.npy`, C1) apply
+from that moment on.*
 
 **Carries over unchanged**
 
@@ -1349,5 +1357,6 @@ Tests of the campaign suite on an H200:
 - **The cache rebuild** being non-identical on another CPU is argued from the code, not observed.
 - **Absence of the test-derived files** was simulated on the laptop (the seven files made invisible to Python's `open`
   and `os.stat`); a read that bypasses those would not have been caught, and the campaign's test suite was collected
-  but not run in that state. The Parquet file still holds the test events' raw hits (§16.1).
+  but not run in that state. For the Parquet file, which is opened from C++ without a Python audit event, the
+  check was repeated under `strace` for the code paths exercised.
 - **Concurrency on the H200:** nothing measured there; the laptop result (no gain) may not transfer.

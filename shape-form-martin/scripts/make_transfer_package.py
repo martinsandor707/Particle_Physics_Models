@@ -21,13 +21,16 @@ expected count):
          the quarantine root shape-form-martin/cache/laptop_records/, repo-relative path preserved, for comparison.
     c    regenerated on the H200 (command or "no command exists yet", laptop time, reproducibility).
 
-Transfer phases (user decision P4). The seven TEST-DERIVED files (the test cache, the earlier study's per-event test
-arrays test_v3_nll.npz, the test event order test_event_number.npy, and the four laptop test arrays
-{mlp,formula}_test_nll{,_ref1056}.npy) are NOT copied now; they travel only after Gate 2c has passed, so that their
-physical absence on the H200 shows that nothing there read them. Four lists:
+Transfer phases (user decisions of 25 Nov 2026). EIGHT files are DEFERRED: they travel only after Gate 2c has passed,
+so that their physical absence on the H200 shows that nothing there read test events before the final evaluation:
+  - the seven TEST-DERIVED files (P4): the test cache, the earlier study's per-event test arrays test_v3_nll.npz, the
+    test event order test_event_number.npy, and the four laptop test arrays {mlp,formula}_test_nll{,_ref1056}.npy;
+  - the raw Parquet hit table (flag contains_test_events): not derived from test events, but it holds the raw hits
+    of all events, the test events included (the split is made only at cache build).
+Four lists:
     files_b_inputs.txt                 b1, now            -> <repo>/
     files_b_laptop_records.txt         b2, now            -> <repo>/shape-form-martin/cache/laptop_records/
-    files_b_test_derived_inputs.txt    b1, after Gate 2c  -> <repo>/
+    files_b_test_derived_inputs.txt    b1, after Gate 2c  -> <repo>/   (3 test-derived inputs + the raw Parquet table)
     files_b_test_derived_records.txt   b2, after Gate 2c  -> <repo>/shape-form-martin/cache/laptop_records/
              rsync -a --files-from=shape-form-martin/transfer/<list> <repo>/ <user>@<h200>:<destination root>
 
@@ -39,13 +42,15 @@ the final evaluation after Gate 2c.
 
 CSV. No *.csv is ever listed, stat'ed for the package or hashed: sha256_file() and the table expansion refuse any
 path ending in .csv, and the absence search skips *.csv names before any stat (the 15 GB raw CSV is not part of the
-package; the Parquet copy is).
+package; the Parquet copy is, after Gate 2c).
 
 Outputs of `list` (in shape-form-martin/transfer/): the four lists, SHA256SUMS (sha256sum -c format, one delimited
-section per list with its destination root, phase and check command in the header) and MANIFEST.json.
+section per list with its destination root, phase, contents and check command in the header) and MANIFEST.json.
 `verify` exits non-zero on any failure. Default (before Gate 2c): every "now" file present and correct, and FAIL if
-any test-derived file exists on this machine (live path, quarantine root, or the same file name and size anywhere in
-the working tree, confirmed by SHA-256). `--after-gate2c`: additionally all test-derived files present and correct.
+any deferred file exists on this machine: a test-derived file at its live path or under the quarantine root (any
+content) or with the same name and size anywhere in the working tree (confirmed by SHA-256); the raw Parquet table at
+its live path (any content) or with the same name and size elsewhere (confirmed by one SHA-256 of 2.6 GB; a Parquet
+file of another size is information only). `--after-gate2c`: additionally all eight present and correct.
 A stream-dependent laptop record found at its LIVE path always fails (the exact `mv` that would quarantine it is
 printed, never executed).
 """
@@ -77,16 +82,20 @@ CHECKSUMS_REL = f"{MARTIN}/results/m0_parity/checksums.json"
 REGISTRY_REL = f"{MARTIN}/results/registry.jsonl"
 CHUNK = 1 << 22
 
-# The four file lists: (group, test_derived) -> list file, transfer phase, destination root (repo-relative; "" = repo).
+# The four file lists: (group, deferred) -> list file, transfer phase, destination root (repo-relative; "" = repo).
+# deferred = test_derived or contains_test_events (copied only after Gate 2c).
 LISTS = (
-    {"key": "inputs", "file": "files_b_inputs.txt", "group": "b1", "test_derived": False, "phase": "now",
-     "root": ""},
-    {"key": "laptop_records", "file": "files_b_laptop_records.txt", "group": "b2", "test_derived": False,
-     "phase": "now", "root": QUARANTINE_REL},
-    {"key": "test_derived_inputs", "file": "files_b_test_derived_inputs.txt", "group": "b1", "test_derived": True,
-     "phase": "after_gate2c", "root": ""},
-    {"key": "test_derived_records", "file": "files_b_test_derived_records.txt", "group": "b2", "test_derived": True,
-     "phase": "after_gate2c", "root": QUARANTINE_REL},
+    {"key": "inputs", "file": "files_b_inputs.txt", "group": "b1", "deferred": False, "phase": "now",
+     "root": "", "holds": "group b1 inputs needed now (no test-event content)"},
+    {"key": "laptop_records", "file": "files_b_laptop_records.txt", "group": "b2", "deferred": False,
+     "phase": "now", "root": QUARANTINE_REL, "holds": "group b2 laptop records on validation (comparison only)"},
+    {"key": "test_derived_inputs", "file": "files_b_test_derived_inputs.txt", "group": "b1", "deferred": True,
+     "phase": "after_gate2c", "root": "",
+     "holds": "the three test-derived inputs (test cache, test_v3_nll.npz, test_event_number.npy) plus the raw "
+              "Parquet table (contains_test_events; not test-derived)"},
+    {"key": "test_derived_records", "file": "files_b_test_derived_records.txt", "group": "b2", "deferred": True,
+     "phase": "after_gate2c", "root": QUARANTINE_REL,
+     "holds": "the four test-derived laptop records ({mlp,formula}_test_nll{,_ref1056}.npy)"},
 )
 PHASES = ("now", "after_gate2c")
 PHASE_LABEL = {"now": "now", "after_gate2c": "after Gate 2c"}
@@ -114,7 +123,21 @@ TEST_DERIVED_POLICY = (
     "record shows that nothing there read them before the final evaluation, without having to trust the test-access "
     "log (it has no host field, and load_sets writes its line before it opens the file, data.py:286-287) or a "
     "reading of the code. No moved step, import or campaign test reads the three test-derived inputs (static reading "
-    "plus a run with the seven made invisible by an audit hook; see absence_before_gate2c).")
+    "plus a run with them made invisible by an audit hook; see absence_before_gate2c). The raw Parquet table is "
+    "deferred with them (same list files_b_test_derived_inputs.txt) but is not test-derived; see policies.raw_table.")
+RAW_TABLE_POLICY = (
+    "The raw Parquet hit table shape-form-original/data/pion_standalone_N100000_M0_20GeV_reg_balanced_s1_v3.parquet "
+    "is NOT test-derived - it is the source data, computed from no score and no split - but it CONTAINS the raw hits of "
+    "all 99,689 events, the 14,956 test events included, because the train/val/test split is made only when the cache "
+    "is built (sfm/data.py:150-160, seeded per momentum bin) and sfm.data.build_cache writes a test cache from it "
+    "(data.py:227). The manifest therefore marks it contains_test_events = true and test_derived = false. User "
+    "decision of 25 Nov 2026: it is deferred like the seven test-derived files - it travels in "
+    "files_b_test_derived_inputs.txt and is copied to the H200 only after Gate 2c has passed - so that before Gate 2c "
+    "no file holding test-event hits exists on the H200. Until then `verify` FAILS if it is at its live path (any "
+    "content) or anywhere else in the working tree with the same name and size (confirmed by one SHA-256 of the "
+    "2.6 GB file); a Parquet file of another size (for example a train/val-only extract) is reported as information. "
+    "`verify --after-gate2c` requires it present with its size and SHA-256 (and warns if its mtime differs from "
+    "checksums.json). No moved step, import or campaign test reads it while the caches are copied.")
 TEST_SUMMARY_NOW = [
     {"path": f"{PION}/test_v3.json",
      "why_now": "read by every legacy formula load (shapelab.final_round / final_kwargs, shape-form-proton/"
@@ -133,21 +156,29 @@ TEST_SUMMARY_NOW = [
                      "identities, no per-event or per-hit arrays, no scores."},
 ]
 TEST_EVENTS_IN_PARQUET = (
-    "The Parquet raw table (group b1, copied now) holds the hits of ALL 99,689 events, including the 14,956 test "
-    "events: the split is made only when the cache is built (sfm/data.py:150-160 split_indices, seeded per momentum "
-    "bin), and sfm.data.build_cache writes a test cache as well (data.py:227). It is not test-derived and travels "
-    "now (zero-training geometry arm; cross-check rebuild only after Gate 2c). Consequently the absence of the seven "
-    "files shows that none of the stored test-derived files was used; it does not make the test events unreachable "
-    "on the H200. Before Gate 2c: never run build_cache.py there (not even into scratch directories), and any code "
-    "that reads the Parquet file must restrict itself to the train/val event numbers of the copied cache. A rebuilt "
-    "test cache at its live path fails verify; under another directory it is reported when name and size match.")
+    "State after the user decision of 25 Nov 2026: the Parquet raw table, which holds the hits of ALL 99,689 events "
+    "including the 14,956 test events, is DEFERRED to after Gate 2c (list files_b_test_derived_inputs.txt; "
+    "policies.raw_table). Before Gate 2c, therefore, no file holding test-event hits or per-event test information is "
+    "on the H200: neither the seven test-derived files nor the raw table, and verify checks both. build_cache.py "
+    "cannot run there (its only source is absent: sfm/data.py:55 raises FileNotFoundError before anything is "
+    "written), so no test cache can be rebuilt either. The 15 GB CSV is never copied. What this costs: the "
+    "zero-training geometry arm needs the absolute shower origin of the validation events, which only the Parquet "
+    "file holds (the cache stores zb, theta and phi, not the origin); it must be computed on the laptop from "
+    "train/val rows only and shipped as a small file keyed by event number (group c entry 'absolute shower origin', "
+    "not yet existing). After Gate 2c, any code that reads the Parquet file must still keep to the event numbers it "
+    "is entitled to.")
 CSV_POLICY = ("No *.csv is listed, stat'ed for the package or hashed (the 15 GB raw CSV is not part of the package; "
-              "only the Parquet copy is). sha256_file() and the table expansion refuse any .csv path; the absence "
-              "search of verify skips *.csv names before any stat.")
+              "only the Parquet copy is, after Gate 2c). sha256_file() and the table expansion refuse any .csv path; "
+              "the absence search of verify skips *.csv names before any stat.")
 
 
-def list_for(group: str, test_derived: bool) -> dict:
-    return next(l for l in LISTS if l["group"] == group and l["test_derived"] == bool(test_derived))
+def is_deferred(e: dict) -> bool:
+    """Copied only after Gate 2c: test-derived files and files that contain test events (the raw Parquet table)."""
+    return bool(e.get("test_derived")) or bool(e.get("contains_test_events"))
+
+
+def list_for(group: str, deferred: bool) -> dict:
+    return next(l for l in LISTS if l["group"] == group and l["deferred"] == bool(deferred))
 
 
 def _dest_root(l: dict) -> str:
@@ -292,37 +323,44 @@ GROUP_A = [
 # Group b: git-ignored, copied by hand. b1 -> live path; b2 -> quarantine root (comparison only).
 # Every entry names the code that reads it. `count` = expected number of files of a glob pattern.
 # `test_derived`: per-event or per-hit information about test events -> copied only after Gate 2c (P4).
-# `test_note`: why a file whose name or content mentions the test split is NOT test-derived (travels now).
+# `contains_test_events`: not derived from test events but holds their raw hits (the Parquet table) -> also deferred.
+# `test_note`: why a file whose name or content mentions the test split travels now / is not test-derived.
 # ======================================================================================================================
 def _b(pattern, group, role, readers, stream_dependent, stream, decision, regeneration, count=1, hazard=None,
-       cross_check=None, opaque=False, test_derived=False, test_note=None):
+       cross_check=None, opaque=False, test_derived=False, test_note=None, contains_test_events=False):
     return {"pattern": pattern, "count": count, "group": group, "role": role, "readers": readers,
             "stream_dependent": stream_dependent, "stream": stream, "decision": decision,
             "regeneration": regeneration, "hazard": hazard, "cross_check": cross_check, "opaque": opaque,
-            "test_derived": test_derived, "test_note": test_note}
+            "test_derived": test_derived, "test_note": test_note, "contains_test_events": contains_test_events}
 
 
 COPY_LIVE = "copy to the same repo-relative path (rsync -a, keeps mtime); verify size + SHA-256"
 COPY_Q = (f"copy ONLY into {QUARANTINE_REL}/<same path> (comparison partner); never to the live path; verify there")
 AFTER_G2C = ("TEST-DERIVED: not copied now; copied ONLY AFTER Gate 2c has passed (files_b_test_derived_*.txt); "
              "before that, verify fails if it exists on the H200")
+AFTER_G2C_RAW = ("DEFERRED (contains test events; not test-derived): not copied now; copied ONLY AFTER Gate 2c has "
+                 "passed (files_b_test_derived_inputs.txt); before that, verify fails if it exists on the H200")
 RUNS8 = ("s1_seed11", "s1_seed12", "s1_seed13", "s1_seed14", "s1_seed15", "s2_seed11", "s2_seed12", "b0_seed0")
 GUARDED3 = ("b0_seed0", "s2_seed11", "s2_seed12")
 NATIVE144 = "laptop native stream (RTX 4060 Laptop, launch grid 144), CUDA generator seed 12345"
 
 GROUP_B1 = [
     _b("shape-form-original/data/pion_standalone_N100000_M0_20GeV_reg_balanced_s1_v3.parquet", "b1",
-       "raw hit table (Parquet copy of the CSV). No moved step reads it while both caches are copied",
+       "raw hit table (Parquet copy of the CSV) of ALL events, test events included. No moved step reads it while "
+       "both caches are copied",
        ["sfm/paths.py:41-43 parquet_path", "sfm/data.py:51-55 parquet_getter <- build_cache (data.py:214-217)",
-        "scripts/build_cache.py:32 (rebuild)", "scripts/parity.py:471-472 (raw-file check, default mode only)",
-        "scripts/check_protected.py (size + mtime against checksums.json stat_only)"],
-       False, "none (data)", COPY_LIVE + "; needed only for the zero-training geometry arm (absolute shower origin, "
-       "AUDIT section 4.3; user decision: no trained arm) and for a cross-check rebuild into scratch directories, "
-       "which must wait until after Gate 2c on the H200 (build_cache writes a test cache too, data.py:227)",
+        "sfm/data.py:327, :367 exactness checks (build_cache.py only)", "scripts/build_cache.py:32 (rebuild)",
+        "scripts/parity.py:471-472 (raw-file check, default mode only)",
+        "scripts/check_protected.py:84-86 (size + mtime against checksums.json stat_only)",
+        "Gate 0 record scripts results/gates/gate0_checks/c05, c06, c11a, c12, c15 and the laptop geometry audit "
+        "results/m2c_theta/geometry/explore/e1-e3 (not moved)"],
+       False, "none (data)", AFTER_G2C_RAW + ". Then: " + COPY_LIVE + ". On the H200 it is needed by no moved step; "
+       "the zero-training geometry arm gets the absolute shower origin as a small laptop-made file instead (group c)",
        {"command": "not regenerated (source data)", "laptop_time": None, "reproducibility": "n/a"},
-       cross_check={"kind": "checksums_stat"},
+       cross_check={"kind": "checksums_stat"}, contains_test_events=True,
        test_note="NOT test-derived, but it CONTAINS the raw hits of all events including the 14,956 test events "
-                 "(the split is made at cache build, data.py:150-160); see policies.test_events_in_raw_parquet"),
+                 "(the split is made at cache build, data.py:150-160): deferred to after Gate 2c (user decision of "
+                 "25 Nov 2026); see policies.raw_table"),
     _b(f"{MARTIN}/cache/pion_s1_trainval.pt", "b1", "train/val cache (69,783 + 14,950 events)",
        ["sfm/data.py:292 load_sets (every step)", "sfm/registry.py:153 validation fingerprint, :344 _default_bench_models",
         "scripts/run_m2a_lib.py:111 data_cpu", "scripts/run_m2b_fit.py:46", "scripts/fit.py:50"],
@@ -579,6 +617,20 @@ GROUP_C = [
        "estimate only: about 2 GPU-hours (PLAN 15)", "machine-dependent"),
     _c("theta track Theta-1..Theta-3", NOCMD + " (own harness forward(lnp, aux); Theta-1b needs the absolute origin "
        "in the cache; user decision of 25 Nov 2026: zero-training geometry arm only, after the geometry audit)", "-", "machine-dependent"),
+    _c(f"{MARTIN}/results/m2c_theta/geometry/<absolute shower origin per event> (file name not fixed; NOT YET "
+       "EXISTING INPUT, made on the LAPTOP and shipped, not regenerated on the H200)",
+       NOCMD + ": a laptop script that reads ONLY the train/val rows of the Parquet file (row selection by the event "
+       "numbers of cache/pion_s1_trainval.pt, as the geometry audit does) and writes, keyed by event_number, the "
+       "absolute origin (x0, y0, z0) of the shower frame = energy-weighted centroid of the lowest-z hit layer over "
+       "ALL rows of the event, late hits included (results/m2c_theta/geometry/STATUS.md section 1.1); no test row",
+       "not measured", "deterministic (float64 sums over the Parquet rows); machine-independent up to summation order",
+       "Needed by the zero-training geometry arm (absolute origin of the VALIDATION events; AUDIT section 4.3 Theta1b: "
+       "'needs the absolute origin in the cache'). The cache stores zb, theta and phi but not the origin "
+       "(sfm/data.py:132-135 computes z0 only to derive zb), and the Parquet file is absent on the H200 until after "
+       "Gate 2c (policies.raw_table), so the origin must travel as a small file (about 15,000 validation events x "
+       "3 float64 + int64 event numbers, well under 1 MB): commit it, or add it to files_b_inputs.txt with a reader "
+       "in code (none exists yet). The instrumented-volume constants of the geometry audit (layers, lattice, stepped "
+       "octagon outline; STATUS.md section 1.3) are numbers that travel as text or code."),
     _c(f"{MARTIN}/results/final/LOCK.json and the final test arrays", NOCMD + " (final_test.py and LOCK.json "
        "missing; after Gate 2c)", "-", "machine-dependent"),
 ]
@@ -708,11 +760,13 @@ TESTS_ON_H200 = [
      "why": "they read the copied cache, meta and event numbers"},
     {"test": "tests/test_dist_factory.py template test", "expected": "SKIP until run_m2a.py templates", "why":
      "HAVE_TEMPLATES"},
-    {"test": "all campaign tests, before Gate 2c (test-derived files absent)", "expected": "unaffected",
-     "why": "no test reads test_v3_nll.npz, test_event_number.npy or the test cache; "
+    {"test": "all campaign tests, before Gate 2c (the eight deferred files absent)", "expected": "unaffected",
+     "why": "no test reads test_v3_nll.npz, test_event_number.npy, the test cache or the Parquet file; "
             "tests/test_data.py::test_test_split_is_locked raises PermissionError / ValueError before any log write "
-            "or open (data.py:283, :285). Laptop check with the seven made invisible by an audit hook: collection of "
-            "all 445 tests and tests/test_data.py (5 passed) opened or stat'ed none of them"},
+            "or open (data.py:283, :285); tests/test_data.py::test_paths_layout only checks the suffix of "
+            "paths.parquet_path() (:17, no stat). Laptop check with the eight made invisible (audit hook on open, "
+            "stat wrapper) and under strace: collection of all 458 tests and tests/test_data.py (5 passed) touched "
+            "none of them; no test imports pyarrow.parquet"},
 ]
 
 # ======================================================================================================================
@@ -739,9 +793,31 @@ ABSENCE = [
        "H200 before Gate 2c in any case"),
     _x(f"{S}/check_protected.py", 152, "fail = bool(a or r or c", "verify compares shape-form-proton/ and "
        "shape-form-original/ with checksums.json (1997 hashed files; 185 tracked, 1812 git-ignored, 7 of them in the "
-       "package)", "already FAILS on the H200 (1805 ignored protected files are never copied, and the CSV in "
-       "stat_only is missing); before Gate 2c test_v3_nll.npz is one more 'removed' entry (1806). Exit code 1 either "
-       "way; it also rewrites the tracked results/m0_parity/checksums_verify.json (:155)"),
+       "package; stat_only: the CSV and the Parquet file, size + mtime, :84-86)", "already FAILS on the H200 (1805 "
+       "ignored protected files are never copied, and the CSV in stat_only is missing); before Gate 2c "
+       "test_v3_nll.npz is one more 'removed' hashed entry (1806) and the Parquet file a second 'removed' stat_only "
+       "entry. Exit code 1 either way; it also rewrites the tracked results/m0_parity/checksums_verify.json (:155)"),
+    _x(f"{SRC}/data.py", 55, "pf = pq.ParquetFile(str(path or paths.parquet_path()))", "parquet_getter, the first "
+       "I/O of build_cache (data.py:216-217; also the exactness checks :327, :367), i.e. of scripts/build_cache.py:32",
+       "FileNotFoundError ('Failed to open local file', shown on the laptop with a missing scratch path) before "
+       "anything is written (the cache files at :226-227, the meta file at :246, cache_build.json at "
+       "build_cache.py:64-66 all come later): the caches cannot be rebuilt on the H200 before Gate 2c - intended, "
+       "since a rebuild would also write a test cache"),
+    _x(f"{S}/parity.py", 472, "pq.ParquetFile(str(paths.parquet_path()))", "raw-file check of the Gate 0 default "
+       "mode", "not reached before Gate 2c: the default mode stops earlier at :368 (test cache absent) and is refused "
+       "without --overwrite at :342"),
+    _x(f"{SRC}/data.py", 132, 'z0 = first["z"] - first["z_trans"]', "the cache build computes the global z of the "
+       "shower origin only to derive zb (:135); the cache stores zb, theta and phi but no absolute origin",
+       "the zero-training geometry arm (absolute shower origin of the validation events) cannot get the origin on the "
+       "H200 before Gate 2c: it must be computed on the laptop from train/val rows and shipped as a small file keyed "
+       "by event number (group c, not yet existing)"),
+    _x(f"{G0}/c06_cache_fidelity.py", 28, "pq.ParquetFile(str(paths.parquet_path()))", "Gate 0 record scripts and "
+       "the laptop geometry audit that read the Parquet file (also gate0_checks/c05_split_integrity.py:19, "
+       "c11a_hits_1001.py:14, c12_units_lowp.py:55, c15_geometry_train_only.py:11; "
+       "results/m2c_theta/geometry/explore/e1.py:15, e2.py:11, e3.py:12)", "FileNotFoundError on the H200 before "
+       "Gate 2c (not moved steps)"),
+    _x(f"{T}/test_data.py", 17, 'paths.parquet_path().suffix == ".parquet"', "test_paths_layout",
+       "passes: a path computation only (paths.py:41-43), no stat or open; run with the eight hidden: 5 passed"),
     _x(f"{G0}/c08_parity_stats.py", 117, "test_v3_nll.npz", "Gate 0 record scripts that read the test-derived files "
        "(also c05_split_integrity.py:102, c08_parity_stats.py:110/118, c08b_pair_tail.py:15-16, "
        "c14_stats_review.py:119-121, c16_test_order_fingerprint.py:15/19)", "FileNotFoundError on the H200 (not moved "
@@ -751,12 +827,15 @@ ABSENCE = [
        "files.test from the copied meta file"),
     _x(f"{T}/test_data.py", 34, 'data.load_sets(("test",), device="cpu")', "test_test_split_is_locked",
        "passes: PermissionError at data.py:283 (and ValueError at :285) before any log write or open; run on the "
-       "laptop with the seven hidden: 5 passed"),
+       "laptop with the eight hidden: 5 passed"),
 ]
 ABSENCE_UNAFFECTED = (
-    "Unaffected (read-only run on the laptop CPU, 25 Nov 2026, with the seven test-derived files made invisible: an "
-    "audit hook raised FileNotFoundError on any open and a stat wrapper on any stat of them; writes under the repo and "
-    "*.csv opens were refused): imports of all sfm modules; data.load_sets(('train','val')) and load_meta; "
+    "Unaffected (read-only run on the laptop CPU, 25 Nov 2026, with the eight deferred files - the seven test-derived "
+    "files and the raw Parquet table - made invisible: an audit hook raised FileNotFoundError on any open and a stat "
+    "wrapper on any stat of them; writes under the repo and *.csv opens were refused; the whole run was also traced "
+    "with strace, which sees C-level opens such as pyarrow's: no file syscall named any of the eight or a .csv, and "
+    "pyarrow.parquet was never imported by the code under test): imports of all sfm modules; "
+    "data.load_sets(('train','val')) from the copied cache and load_meta; "
     "legacy.load_mlp_std, load_component_formula (shapelab.build_final, reads test_v3.json, which travels now), "
     "load_abar, families.load_legacy_core; registry.validation_reference, check_validation, read_registry, "
     "select_1se, the benchmark arrays and _bench_guard_arrays (reuse path); acceptance templates stored/front/"
@@ -764,7 +843,7 @@ ABSENCE_UNAFFECTED = (
     "field_mlp_std, from_run, ensemble, field_acc, residual_table, field; load_run of the 8 networks; fit.py "
     "--dry-run (s2_seed13, b0_seed1); fit_queue.py --dry-run; run_m2b_fit.py config start-up; import and --help of "
     "run_m2a.py, run_m2b_fit.py, run_m2b_ensembles.py, run_m2b_stage1.py, import of run_m2b_report.py; collection "
-    "of all 445 campaign tests and a run of tests/test_data.py. Result: zero opens or stats of any of the seven.")
+    "of all 458 campaign tests and a run of tests/test_data.py. Result: zero opens or stats of any of the eight.")
 
 
 # ======================================================================================================================
@@ -967,6 +1046,11 @@ def build_manifest(repo: Path, log=print) -> dict:
             continue
         if e.get("test_derived") and e.get("test_note"):
             problems.append(f"{e['pattern']}: test_derived and test_note are exclusive")
+        if e.get("test_derived") and e.get("contains_test_events"):
+            problems.append(f"{e['pattern']}: test_derived and contains_test_events are exclusive (a test-derived "
+                            "file is deferred by that flag alone)")
+        if e.get("contains_test_events") and e["group"] != "b1":
+            problems.append(f"{e['pattern']}: contains_test_events is only defined for group b1 inputs")
         for rel in paths_:
             name = rel.split("/")[-1]
             if rel == TEST_CACHE_REL and not e.get("test_derived"):
@@ -985,11 +1069,12 @@ def build_manifest(repo: Path, log=print) -> dict:
             log(f"  hashing {rel} ({size} B){' [opaque byte stream]' if e['opaque'] else ''}")
             sha = sha256_file(p)
             td = bool(e.get("test_derived"))
-            lst = list_for(e["group"], td)
+            lst = list_for(e["group"], is_deferred(e))
             item = {"path": rel, "group": e["group"], "bytes": size, "sha256": sha, "role": e["role"],
                     "readers": e["readers"], "git": {"tracked": tracked, "ignored": rule is not None, "rule": rule},
                     "stream_dependent": e["stream_dependent"], "stream": e["stream"], "decision": e["decision"],
-                    "test_derived": td, "transfer_phase": lst["phase"], "list": lst["file"],
+                    "test_derived": td, "contains_test_events": bool(e.get("contains_test_events")),
+                    "transfer_phase": lst["phase"], "list": lst["file"],
                     "destination": rel if e["group"] == "b1" else f"{QUARANTINE_REL}/{rel}",
                     "regeneration": e["regeneration"], "hazard": e["hazard"],
                     "opaque_byte_stream": bool(e["opaque"]) or rel == TEST_CACHE_REL,
@@ -1041,13 +1126,20 @@ def build_manifest(repo: Path, log=print) -> dict:
     all_b = b["b1"] + b["b2"]
     lists = {}
     for l in LISTS:
-        items = [x for x in b[l["group"]] if x["test_derived"] == l["test_derived"]]
+        items = [x for x in b[l["group"]] if (x["transfer_phase"] == "after_gate2c") == l["deferred"]]
         lists[l["key"]] = {"file": f"{TRANSFER_REL}/{l['file']}", "group": l["group"],
-                           "test_derived": l["test_derived"], "transfer_phase": l["phase"],
+                           "deferred": l["deferred"], "transfer_phase": l["phase"], "holds": l["holds"],
                            "destination_root": _dest_root(l), "totals": tot(items),
+                           "test_derived_files": sum(1 for x in items if x["test_derived"]),
+                           "contains_test_events_files": sum(1 for x in items if x["contains_test_events"]),
                            "rsync": rsync_command(l), "check_on_h200": check_command(l)}
-    test_derived = [{"path": x["path"], "group": x["group"], "list": x["list"], "destination": x["destination"],
-                     "bytes": x["bytes"]} for x in all_b if x["test_derived"]]
+
+    def brief(x):
+        return {"path": x["path"], "group": x["group"], "list": x["list"], "destination": x["destination"],
+                "bytes": x["bytes"], "test_derived": x["test_derived"],
+                "contains_test_events": x["contains_test_events"]}
+    test_derived = [brief(x) for x in all_b if x["test_derived"]]
+    deferred = [brief(x) for x in all_b if x["transfer_phase"] == "after_gate2c"]
 
     return {
         "schema": SCHEMA,
@@ -1058,7 +1150,9 @@ def build_manifest(repo: Path, log=print) -> dict:
                 "note": "verify requires this commit to be an ancestor of (or equal to) the H200 checkout's HEAD"},
         "policies": {
             "test_derived": TEST_DERIVED_POLICY,
+            "raw_table": RAW_TABLE_POLICY,
             "test_derived_files": test_derived,
+            "deferred_files": deferred,
             "test_summary_metadata_now": TEST_SUMMARY_NOW,
             "test_events_in_raw_parquet": TEST_EVENTS_IN_PARQUET,
             "test_cache": TEST_CACHE_POLICY, "csv": CSV_POLICY, "quarantine_root": QUARANTINE_REL,
@@ -1067,7 +1161,8 @@ def build_manifest(repo: Path, log=print) -> dict:
             "cache_decision": {
                 "decision": "COPY, do NOT rebuild: the train/val cache and pion_s1_meta.json now, the test cache only "
                             "after Gate 2c (test-derived); verify each by SHA-256 against the meta file (and this "
-                            "manifest)",
+                            "manifest). Before Gate 2c a rebuild on the H200 is impossible anyway: the Parquet source "
+                            "is deferred too (policies.raw_table)",
                 "facts": [
                     "scripts/build_cache.py has no argument parser: any invocation (even --help) rebuilds",
                     "sfm.data.build_cache always writes BOTH pion_s1_trainval.pt and pion_s1_test.pt (data.py:226-227) "
@@ -1082,8 +1177,8 @@ def build_manifest(repo: Path, log=print) -> dict:
                     "Gate 0 (train/val bit-identical to the reference loader) and C1 (exact per-event test parity) "
                     "validated exactly the laptop bytes; only a byte copy carries both over; the test file stays "
                     "unopened, so a byte hash is the right check",
-                    "optional cross-check without touching the live files - on the H200 ONLY AFTER Gate 2c, because "
-                    "build_cache also writes a test cache (data.py:227), whose absence verify checks before Gate 2c: "
+                    "optional cross-check without touching the live files - on the H200 ONLY AFTER Gate 2c, when the "
+                    "Parquet file has been copied, because build_cache also writes a test cache (data.py:227): "
                     "SFM_CACHE_DIR=<scratch>/c SFM_RESULTS_DIR=<scratch>/r uv run python -B "
                     "shape-form-martin/scripts/build_cache.py, then compare the scratch SHA-256 values (equal = "
                     "bit-identical rebuild); delete the scratch test file"]},
@@ -1093,9 +1188,10 @@ def build_manifest(repo: Path, log=print) -> dict:
             "phases": {ph: [l["key"] for l in LISTS if l["phase"] == ph] for ph in PHASES},
             "tar_alternative": f"tar -C <repo> -cf inputs.tar -T {TRANSFER_REL}/files_b_inputs.txt",
             "verify_on_h200_before_gate2c": f"python3 -B {MARTIN}/scripts/make_transfer_package.py verify   "
-                                            "(from <repo>; fails if any test-derived file is on the machine)",
+                                            "(from <repo>; fails if any of the eight deferred files - seven "
+                                            "test-derived + the raw Parquet table - is on the machine)",
             "verify_on_h200_after_gate2c": f"python3 -B {MARTIN}/scripts/make_transfer_package.py verify "
-                                           "--after-gate2c   (from <repo>, after the two test-derived lists were "
+                                           "--after-gate2c   (from <repo>, after the two after-Gate-2c lists were "
                                            "copied)",
             "verify_on_laptop": f"python3 -B {MARTIN}/scripts/make_transfer_package.py verify --source-machine",
         },
@@ -1106,8 +1202,8 @@ def build_manifest(repo: Path, log=print) -> dict:
                                  "generation time; verify checks presence and tracking only)",
                   "files": a_files, "totals": tot(a_files),
                   "laptop_record_hazards": _hazard_list()},
-            "b1": {"description": "git-ignored inputs; copy to the same repo-relative path (test-derived ones only "
-                                  "after Gate 2c)", "files": b["b1"], "totals": tot(b["b1"]),
+            "b1": {"description": "git-ignored inputs; copy to the same repo-relative path (the test-derived ones and "
+                                  "the raw Parquet table only after Gate 2c)", "files": b["b1"], "totals": tot(b["b1"]),
                    "totals_by_phase": by_phase(b["b1"])},
             "b2": {"description": f"git-ignored laptop records; copy ONLY under {QUARANTINE_REL}/ for comparison "
                                   "(test-derived ones only after Gate 2c)", "files": b["b2"], "totals": tot(b["b2"]),
@@ -1123,7 +1219,7 @@ def build_manifest(repo: Path, log=print) -> dict:
 
 
 def _list_items(man: dict, l: dict) -> list:
-    return [x for x in man["groups"][l["group"]]["files"] if bool(x.get("test_derived")) == l["test_derived"]]
+    return [x for x in man["groups"][l["group"]]["files"] if (x["transfer_phase"] == "after_gate2c") == l["deferred"]]
 
 
 def write_outputs(repo: Path, out_dir: Path, man: dict) -> None:
@@ -1134,9 +1230,10 @@ def write_outputs(repo: Path, out_dir: Path, man: dict) -> None:
         f"# SHA-256 of the H200 transfer package (group b), generated at commit {man['git']['commit']} "
         f"({man['generated_utc']}) by make_transfer_package.py list.",
         "# Paths are repo-relative. Four sections; each is checked relative to its own DESTINATION ROOT on the H200,",
-        "# and each header gives its list, phase and the one-liner to run from <repo>/ on the H200.",
-        "# Phase 'now': copy and check now. Phase 'AFTER GATE 2c': TEST-DERIVED files, copied to the H200 only after",
-        "# Gate 2c has passed; before that, their absence is required (make_transfer_package.py verify).",
+        "# and each header gives its list, phase, contents and the one-liner to run from <repo>/ on the H200.",
+        "# Phase 'now': copy and check now. Phase 'AFTER GATE 2c': the DEFERRED files (the seven test-derived files and",
+        "# the raw Parquet table, which contains the test events), copied to the H200 only after Gate 2c has passed;",
+        "# before that, their absence is required (make_transfer_package.py verify).",
         f"# On the laptop (all four lists at their live source paths), from <repo>/: sha256sum -c {TRANSFER_REL}/SHA256SUMS",
         f"# {TEST_CACHE_REL} is hashed as an opaque byte stream; it stays unopened until the final evaluation "
         "after Gate 2c.",
@@ -1144,12 +1241,13 @@ def write_outputs(repo: Path, out_dir: Path, man: dict) -> None:
     ]
     for i, l in enumerate(LISTS, 1):
         items = _list_items(man, l)
-        phase = "now" if l["phase"] == "now" else "AFTER GATE 2c (test-derived; do not copy before)"
+        phase = "now" if l["phase"] == "now" else "AFTER GATE 2c (deferred; do not copy before)"
         body += [
             "#",
             f"# ---- section {i}/{len(LISTS)}: {l['key']}  ({len(items)} files, {sum(x['bytes'] for x in items)} bytes, "
             f"{l['file']})",
             f"#   phase: {phase}",
+            f"#   holds: {l['holds']}",
             f"#   destination root: {_dest_root(l)}",
             f"#   copy:  {rsync_command(l)}",
             f"#   check: {check_command(l)}",
@@ -1189,6 +1287,9 @@ def cmd_list(args) -> int:
     for p in PHASES:
         t = man["totals_by_phase"][p]
         print(f"phase {PHASE_LABEL[p]:13}: {t['files']:3d} files, {t['bytes']:>12d} bytes")
+    d = man["policies"]["deferred_files"]
+    n_td, n_raw = sum(x["test_derived"] for x in d), sum(x["contains_test_events"] for x in d)
+    print(f"deferred to after Gate 2c: {len(d)} files = {n_td} test-derived + {n_raw} raw table(s) with test events")
     print(f"wrote {', '.join(str(out_dir / n) for n in OUTPUT_NAMES)}")
     print(TEST_CACHE_POLICY)
     return 0
@@ -1234,14 +1335,15 @@ def _check_file(rep: Report, tag: str, p: Path, rel: str, exp_bytes: int, exp_sh
     if got != exp_sha:
         rep.fail(tag, f"SHA-256 mismatch {got[:16]}... != {exp_sha[:16]}...: {rel}")
     else:
-        rep.ok(tag, f"{size:>11d} B  sha256 {got[:16]}...  {rel}" + ("  [opaque byte hash]" if opaque else ""))
+        rep.ok(tag, f"{size:>11d} B  sha256 {got[:16]}...  {rel}" + ("  [opaque byte hash]" if opaque else "")
+               + (f"  [SHA-256 of {size} B computed once]" if size > LARGE_HASH_NOTE else ""))
 
 
-def find_by_name(repo: Path, names) -> list:
-    """Every file under the working tree whose name is in `names`: [(Path, size)]. A cheap walk by name: directories
-    named .git are skipped, symlinked directories are not followed, and any *.csv name is skipped before anything
-    else (never stat'ed). Only name matches are stat'ed; nothing is opened."""
-    names, out, stack = set(names), [], [str(repo)]
+def find_by_name(repo: Path, names, suffixes=()) -> list:
+    """Every file under the working tree whose name is in `names` or ends with one of `suffixes`: [(Path, size)].
+    A cheap walk by name: directories named .git are skipped, symlinked directories are not followed, and any *.csv
+    name is skipped before anything else (never stat'ed). Only matches are stat'ed; nothing is opened."""
+    names, suffixes, out, stack = set(names), tuple(s.lower() for s in suffixes), [], [str(repo)]
     while stack:
         d = stack.pop()
         try:
@@ -1256,73 +1358,112 @@ def find_by_name(repo: Path, names) -> list:
                     if e.is_dir(follow_symlinks=False):
                         if e.name != ".git":
                             stack.append(e.path)
-                    elif e.name in names and e.is_file():
+                    elif (e.name in names or (suffixes and e.name.lower().endswith(suffixes))) and e.is_file():
                         out.append((Path(e.path), e.stat().st_size))
                 except OSError:
                     continue
     return sorted(out)
 
 
-def _identity(p: Path, exp_bytes: int, exp_sha: str, skip_large):
+LARGE_HASH_NOTE = 1 << 27            # files above 128 MiB: say in the output that their SHA-256 was computed once
+
+
+def _sha_once(p: Path, hashes: dict) -> str:
+    """SHA-256 of a file, computed at most once per verify run (the raw table is 2.6 GB)."""
+    key = os.path.realpath(p)
+    if key not in hashes:
+        hashes[key] = sha256_file(p)
+    return hashes[key]
+
+
+def _identity(p: Path, exp_bytes: int, exp_sha: str, skip_large, hashes=None):
     """Compare a present file with the manifest entry: size first; the SHA-256 (plain byte hash, also for the test
-    cache) only if the size matches. Returns (size_equal, sha_equal or None when not hashed)."""
+    cache) only if the size matches, and at most once per file. Returns (size_equal, sha_equal or None)."""
     _refuse_csv(p)
     size = p.stat().st_size
     if size != exp_bytes:
         return False, None
     if skip_large is not None and size > skip_large:
         return True, None
-    return True, sha256_file(p) == exp_sha
+    return True, _sha_once(p, {} if hashes is None else hashes) == exp_sha
 
 
-def _identity_text(size_eq, sha_eq) -> str:
+def _identity_text(size_eq, sha_eq, size=None) -> str:
     if not size_eq:
         return "different size from the laptop file"
     if sha_eq is None:
         return "same size as the laptop file, SHA-256 not checked (--skip-large-hash)"
-    return "identical to the laptop file (size + SHA-256)" if sha_eq else "same size, different SHA-256"
+    once = f"; SHA-256 of {size} B computed once" if size and size > LARGE_HASH_NOTE else ""
+    return ("identical to the laptop file (size + SHA-256" + once + ")") if sha_eq else \
+        ("same size, different SHA-256" + once)
 
 
-def check_test_derived_absent(rep: Report, repo: Path, quarantine_rel: str, td: list, skip_large) -> list:
-    """Before Gate 2c: FAIL for every test-derived file found on this machine - at its live path, under the
-    quarantine root (any content), or elsewhere in the working tree with the same name and size (confirmed by
-    SHA-256; a same-name, same-size file with another hash is a warning). Returns the offending paths."""
+def check_deferred_absent(rep: Report, repo: Path, quarantine_rel: str, deferred: list, skip_large,
+                          hashes: dict) -> list:
+    """Before Gate 2c: FAIL for every deferred file found on this machine. Returns the offending paths.
+    - test-derived: at its live path or under the quarantine root (any content), or elsewhere in the working tree
+      with the same name and size, confirmed by SHA-256 (same name and size, another hash: warning);
+    - contains_test_events (the raw Parquet table): at its live path (any content), or elsewhere with the same name
+      and size, confirmed by one SHA-256 (another hash: warning); any other file with its suffix (.parquet) - same
+      name with another size, or another name - is information only (for example a train/val-only extract)."""
     offending = []
-    found = find_by_name(repo, {Path(x["path"]).name for x in td})
+    raw_suffixes = {Path(x["path"]).suffix for x in deferred if x.get("contains_test_events") and Path(x["path"]).suffix}
+    found = find_by_name(repo, {Path(x["path"]).name for x in deferred}, raw_suffixes)
+    claimed = set()                                  # paths reported against a deferred entry (no duplicate info)
     qroot = repo / quarantine_rel
-    for x in td:
+    for x in deferred:
         rel, name = x["path"], Path(x["path"]).name
         _refuse_csv(rel)
-        fixed = {repo / rel: "live path", qroot / rel: "quarantine root"}
+        raw = bool(x.get("contains_test_events")) and not x.get("test_derived")
+        label = "RAW TABLE (contains test events)" if raw else "TEST-DERIVED FILE"
+        fixed = {repo / rel: "live path"} if raw else {repo / rel: "live path", qroot / rel: "quarantine root"}
         hits = []
         for p, where in fixed.items():
             if p.is_file():
-                size_eq, sha_eq = _identity(p, x["bytes"], x["sha256"], skip_large)
+                size_eq, sha_eq = _identity(p, x["bytes"], x["sha256"], skip_large, hashes)
                 hits.append(p)
-                rep.fail("test-absent", f"TEST-DERIVED FILE PRESENT BEFORE GATE 2c at its {where}: "
-                                        f"{p.relative_to(repo).as_posix()} ({_identity_text(size_eq, sha_eq)})")
+                claimed.add(p)
+                rep.fail("deferred-absent", f"{label} PRESENT BEFORE GATE 2c at its {where}: "
+                                            f"{p.relative_to(repo).as_posix()} "
+                                            f"({_identity_text(size_eq, sha_eq, x['bytes'])})")
         for p, size in found:
             if p.name != name or p in fixed:
                 continue
+            claimed.add(p)
             prel = p.relative_to(repo).as_posix()
             if size != x["bytes"]:
-                rep.info("test-absent", f"same name as {rel} but different size (not that file): {prel}")
+                what = ("a Parquet file of another size (for example a train/val-only extract; not the raw table)"
+                        if raw else "not that file")
+                rep.info("deferred-absent", f"same name as {rel} but different size, {size} B ({what}): {prel}")
                 continue
-            _, sha_eq = _identity(p, x["bytes"], x["sha256"], skip_large)
+            _, sha_eq = _identity(p, x["bytes"], x["sha256"], skip_large, hashes)
+            once = f"; SHA-256 of {size} B computed once" if size > LARGE_HASH_NOTE and sha_eq is not None else ""
             if sha_eq is False:
-                rep.warn("test-absent", f"same name and size as {rel} but a different SHA-256 (not the laptop file; "
-                                        f"inspect it - a rebuilt test cache or a test array made here is test data "
-                                        f"too): {prel}")
+                rep.warn("deferred-absent", f"same name and size as {rel} but a different SHA-256{once} (not the "
+                                            f"laptop file; inspect it - a rebuilt test cache, a test array made here "
+                                            f"or another copy of raw data with test events is test data too): {prel}")
                 continue
             hits.append(p)
-            rep.fail("test-absent", f"TEST-DERIVED FILE PRESENT BEFORE GATE 2c elsewhere in the tree (same name and "
-                                    f"size, {'same SHA-256' if sha_eq else 'SHA-256 not checked: treated as present'}"
-                                    f"; copy of {rel}): {prel}")
+            rep.fail("deferred-absent", f"{label} PRESENT BEFORE GATE 2c elsewhere in the tree (same name and size, "
+                                        f"{'same SHA-256' + once if sha_eq else 'SHA-256 not checked: treated as present'}"
+                                        f"; copy of {rel}): {prel}")
         if hits:
             offending += [p.relative_to(repo).as_posix() for p in hits]
         else:
-            rep.ok("test-absent", f"absent (live path, quarantine root, same name and size elsewhere): {rel}")
+            where = "live path, same name and size elsewhere" if raw else \
+                "live path, quarantine root, same name and size elsewhere"
+            rep.ok("deferred-absent", f"absent ({where}): {rel}")
+    for p, size in found:                             # other files with the raw table's suffix: information only
+        if p not in claimed and p.suffix in raw_suffixes and p.relative_to(repo).parts[0] != ".venv":
+            # (.venv holds the test fixtures of pyarrow; same-name copies there are still checked above)
+            rep.info("deferred-absent", f"other {p.suffix} file, {size} B (not the raw table by name; information "
+                                        f"only): {p.relative_to(repo).as_posix()}")
     return offending
+
+
+def _deferred_count_text(n_td: int, n_raw: int) -> str:
+    raw = "" if not n_raw else (" + the raw Parquet table" if n_raw == 1 else f" + {n_raw} raw tables")
+    return f"{n_td + n_raw} checked: {n_td} test-derived{raw}"
 
 
 def verify(repo: Path, manifest_path: Path, quarantine_rel: str, source_machine: bool, skip_large,
@@ -1332,8 +1473,14 @@ def verify(repo: Path, manifest_path: Path, quarantine_rel: str, source_machine:
     b_all = man["groups"]["b1"]["files"] + man["groups"]["b2"]["files"]
     for x in b_all:
         _refuse_csv(x["path"])
-    td = [x for x in b_all if x.get("test_derived")]
-    check_td_here = source_machine or after_gate2c       # test-derived files are expected on this machine
+
+    def deferred_entry(x):
+        return x.get("transfer_phase") == "after_gate2c" or bool(x.get("test_derived"))
+    deferred = [x for x in b_all if deferred_entry(x)]
+    n_td = sum(1 for x in deferred if x.get("test_derived"))
+    n_raw = len(deferred) - n_td
+    hashes = {}
+    check_td_here = source_machine or after_gate2c       # deferred files are expected on this machine
     commit = man["git"]["commit"]
     head = _git(repo, "rev-parse", "HEAD").stdout.strip()
     if _git(repo, "cat-file", "-e", f"{commit}^{{commit}}").returncode != 0:
@@ -1359,9 +1506,9 @@ def verify(repo: Path, manifest_path: Path, quarantine_rel: str, source_machine:
         rep.ok("a", f"{len(a)} group-a files present ({len(a) - len(untracked)} tracked)")
 
     for x in man["groups"]["b1"]["files"]:
-        if x.get("test_derived") and not check_td_here:
+        if deferred_entry(x) and not check_td_here:
             continue                                      # before Gate 2c: absence is checked below
-        _check_file(rep, "b1-test" if x.get("test_derived") else "b1", repo / x["path"], x["path"], x["bytes"],
+        _check_file(rep, "b1-deferred" if deferred_entry(x) else "b1", repo / x["path"], x["path"], x["bytes"],
                     x["sha256"], skip_large, x.get("opaque_byte_stream", False))
         exp_mtime = ((x.get("cross_check") or {}).get("expected") or {}).get("mtime_ns")
         if exp_mtime is not None and (repo / x["path"]).is_file() and (repo / x["path"]).stat().st_mtime_ns != exp_mtime:
@@ -1378,8 +1525,8 @@ def verify(repo: Path, manifest_path: Path, quarantine_rel: str, source_machine:
     for x in man["groups"]["b2"]["files"]:
         rel = x["path"]
         live = repo / rel
-        tag = "b2-test" if x.get("test_derived") else "b2"
-        if x.get("test_derived") and not check_td_here:
+        tag = "b2-deferred" if deferred_entry(x) else "b2"
+        if deferred_entry(x) and not check_td_here:
             continue                                      # before Gate 2c: absence is checked below
         if source_machine:
             _check_file(rep, tag, live, rel, x["bytes"], x["sha256"], skip_large, False)
@@ -1398,27 +1545,41 @@ def verify(repo: Path, manifest_path: Path, quarantine_rel: str, source_machine:
                 rep.info("b2-live", f"live path holds a different file (not the laptop record; e.g. produced on this "
                                     f"machine): {rel}")
 
-    # ---- test-derived files (P4) ----
+    # ---- deferred files: seven test-derived (P4) + the raw Parquet table (contains test events) ----
     offending = []
-    if td and not check_td_here:
-        offending = check_test_derived_absent(rep, repo, quarantine_rel, td, skip_large)
-    td_paths = {x["path"] for x in td}
-    td_fail = [f for f in rep.failures if any(p in f for p in td_paths)]
+    if deferred and not check_td_here:
+        offending = check_deferred_absent(rep, repo, quarantine_rel, deferred, skip_large, hashes)
+    d_paths = {x["path"] for x in deferred}
+    d_fail = [f for f in rep.failures if any(p in f for p in d_paths)]
+    count = _deferred_count_text(n_td, n_raw)
     if source_machine:
-        td_res = {"mode": "source machine: checked at their live source paths (present by definition; not a failure)",
-                  "absent": None, "verified": not td_fail,
-                  "summary": f"test-derived files: present at their source paths on the source machine (not a "
-                             f"failure); correct: {'yes' if not td_fail else 'no'} ({len(td)} checked)"}
+        d_res = {"mode": "source machine: checked at their live source paths (present by definition; not a failure)",
+                 "absent": None, "verified": not d_fail,
+                 "summary": f"deferred files: present at their source paths on the source machine (not a failure); "
+                            f"correct: {'yes' if not d_fail else 'no'} ({count})"}
     elif after_gate2c:
-        td_res = {"mode": "after Gate 2c: required present at their destinations", "absent": None,
-                  "verified": not td_fail,
-                  "summary": f"test-derived files present and verified (after Gate 2c): "
-                             f"{'yes' if not td_fail else 'no'} ({len(td)} checked)"}
+        d_res = {"mode": "after Gate 2c: required present at their destinations", "absent": None,
+                 "verified": not d_fail,
+                 "summary": f"deferred files present and verified (after Gate 2c): "
+                            f"{'yes' if not d_fail else 'no'} ({count})"}
     else:
-        td_res = {"mode": "before Gate 2c: required ABSENT from this machine", "absent": not offending,
-                  "verified": None, "offending_paths": offending,
-                  "summary": f"test-derived files absent: {'yes' if not offending else 'no'} ({len(td)} checked)"}
-    td_res.update({"checked": len(td), "files": sorted(td_paths)})
+        d_res = {"mode": "before Gate 2c: required ABSENT from this machine", "absent": not offending,
+                 "verified": None, "offending_paths": offending,
+                 "summary": f"deferred files absent: {'yes' if not offending else 'no'} ({count})"}
+    d_res.update({"checked": len(deferred), "test_derived": n_td, "contains_test_events": n_raw,
+                  "files": sorted(d_paths)})
+    raw_entries = [x for x in deferred if x.get("contains_test_events") and not x.get("test_derived")]
+    if not raw_entries:
+        raw_text = None
+    elif check_td_here:
+        raw_text = "; ".join(f"{x['path']}: raw hit table with the test events (contains_test_events, not "
+                             f"test-derived); checked by size and one SHA-256 of {x['bytes']} B" for x in raw_entries)
+    else:
+        raw_text = "; ".join(f"{x['path']}: raw hit table with the test events (contains_test_events, not "
+                             "test-derived), deferred to after Gate 2c; this verify required it to be ABSENT (live path, "
+                             "any content; the same name and size elsewhere, confirmed by one SHA-256 of "
+                             f"{x['bytes']} B); Parquet files of another size or name are information only"
+                             for x in raw_entries)
 
     for x in man["groups"]["c"]["files"]:
         p = x["path"]
@@ -1443,7 +1604,7 @@ def verify(repo: Path, manifest_path: Path, quarantine_rel: str, source_machine:
             "repo": str(repo), "manifest": str(manifest_path), "manifest_commit": commit, "head": head,
             "quarantine_root": quarantine_rel, "checks": rep.checks, "failures": rep.failures,
             "warnings": rep.warnings, "lines": [list(l) for l in rep.lines],
-            "test_derived": td_res, "test_cache": tc_text,
+            "deferred": d_res, "test_cache": tc_text, "raw_table": raw_text,
             "tracked_laptop_record_hazards": hazards,
             "totals": {k: man["groups"][k]["totals"] for k in ("a", "b1", "b2", "c")},
             "totals_by_phase": man.get("totals_by_phase")}
@@ -1468,11 +1629,13 @@ def cmd_verify(args) -> int:
     print(f"manifest {res['manifest']} (commit {res['manifest_commit'][:12]})")
     if not args.source_machine:
         print(f"laptop records expected under {res['quarantine_root']}/")
-        print("test-derived files: " + res["test_derived"]["mode"])
+        print("deferred files (test-derived + raw table): " + res["deferred"]["mode"])
     for status, tag, msg in res["lines"]:
         print(f"{status:4} [{tag}] {msg}")
     print()
     print("TEST CACHE: " + res["test_cache"])
+    if res["raw_table"]:
+        print("RAW TABLE: " + res["raw_table"])
     print()
     print("Tracked laptop records that arrived with git (hazards on this machine):")
     for h in res["tracked_laptop_record_hazards"]:
@@ -1480,9 +1643,9 @@ def cmd_verify(args) -> int:
     print()
     print(f"SUMMARY: {res['checks']} checks, {len(res['failures'])} failure(s), {len(res['warnings'])} warning(s) -> "
           f"{'PASS' if res['ok'] else 'FAIL'}")
-    print(f"SUMMARY: {res['test_derived']['summary']}")
-    for p in res["test_derived"].get("offending_paths") or []:
-        print(f"  TEST-DERIVED FILE ON THIS MACHINE: {p}")
+    print(f"SUMMARY: {res['deferred']['summary']}")
+    for p in res["deferred"].get("offending_paths") or []:
+        print(f"  DEFERRED FILE ON THIS MACHINE: {p}")
     for f in res["failures"]:
         print(f"  FAIL {f}")
     return 0 if res["ok"] else 1
@@ -1506,19 +1669,22 @@ def main(argv=None) -> int:
                         description="Checks the 'now' b1 files at their live paths and the 'now' b2 files under the "
                                     "quarantine root (size + SHA-256), group-a presence and the manifest commit, and "
                                     "FAILS if a stream-dependent laptop record sits at its live path (prints the mv, "
-                                    "never runs it). Before Gate 2c (default) it FAILS if any test-derived file exists "
-                                    "on this machine (live path, quarantine root, or the same name and size anywhere "
-                                    "in the working tree, confirmed by SHA-256); with --after-gate2c it requires them "
-                                    "present and correct instead. The test cache is only ever compared by size and a "
-                                    "byte hash and never opened as data.")
+                                    "never runs it). Before Gate 2c (default) it FAILS if any of the eight deferred "
+                                    "files exists on this machine: a test-derived file at its live path, under the "
+                                    "quarantine root, or with the same name and size anywhere in the working tree "
+                                    "(confirmed by SHA-256); the raw Parquet table at its live path or with the same "
+                                    "name and size elsewhere (one SHA-256; other Parquet files are information only). "
+                                    "With --after-gate2c it requires all eight present and correct instead. The test "
+                                    "cache is only ever compared by size and a byte hash and never opened as data.")
     pv.add_argument("--repo", default=str(default_repo), help="repository root (default: this script's repo)")
     pv.add_argument("--manifest", default=None, help=f"default: <repo>/{TRANSFER_REL}/MANIFEST.json")
     pv.add_argument("--quarantine-root", default=QUARANTINE_REL, help=f"repo-relative (default {QUARANTINE_REL})")
     pv.add_argument("--after-gate2c", action="store_true",
-                    help="after Gate 2c, once files_b_test_derived_*.txt were copied: require the test-derived files "
-                         "present with correct size and SHA-256 (test cache: byte hash only) instead of absent")
+                    help="after Gate 2c, once files_b_test_derived_*.txt were copied: require the eight deferred files "
+                         "(seven test-derived + the raw Parquet table) present with correct size and SHA-256 (test "
+                         "cache: byte hash only) instead of absent")
     pv.add_argument("--source-machine", action="store_true",
-                    help="on the machine where the package was made: every b1/b2 file, test-derived ones included, "
+                    help="on the machine where the package was made: every b1/b2 file, deferred ones included, "
                          "is checked at its live (source) path and the quarantine / live-path / absence checks are "
                          "skipped")
     pv.add_argument("--skip-large-hash", type=int, default=None, metavar="BYTES",
