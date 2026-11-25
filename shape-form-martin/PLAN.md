@@ -1560,3 +1560,58 @@ argument before the pilot; Gate 2-pilot reviews them in any case):
 | 6 | "refit: all constants trainable" (§7) | baseline and equation are trained together | this is what makes control C1 (refit only) meaningful; the equation's constants and the whole model's are counted separately |
 | 7 | C2 "smooth tensor polynomial with the same number of constants" (§7) | polynomial in (ζ, √ϱ, x) without the monomials the softmax cannot see | — |
 | 8 | operator complexities (§7) | `sqa` and `linv` cost 2, not 1 | the plan fixes only "transcendental 2, `erf`/`erfc` 3" |
+
+### 17.2 Enabling code for the H200, first batch — written, review in progress (commit `b3cbd6d`)
+
+E1, E2, E3, E5, E10 and the `b0h_*` part of E6 are written (`transfer/ENABLING_STATUS.md`: what exists per item, the
+H200 command lines for run-book steps 5–11, what each step writes and what is copied back). New modules
+`sfm.machine` (start-up checks, caps), `sfm.provenance` (machine and points tags, the one delta function),
+`sfm.guard` (file-access guard); new commands `scripts/val_parity.py`, `scripts/rescore_registered.py`,
+`scripts/launch.sh`. Every output of a machine goes to `results/machines/<machine id>/` below an output root, which
+on the H200 lies outside the clone.
+
+- **Worker's dry runs on the laptop** (scratch output root): the validation-parity command passes, its emulated
+  grid-1056 arrays are bit-identical to the laptop's stored emulation (float32 means 18.118083953857422 and
+  18.120407104492188); the re-scoring command reproduces all eight registered arrays and the guard arrays bit for
+  bit; a mixed-tag delta, the untagged laptop rows and a laptop array at a live path are refused.
+- **Not done:** nothing has run on the H200; steps 9–11 were not run (they train); the whole test suite was not seen
+  to finish (cause open); `run_m2a*.py` still need E4; the test-access log still lives in the clone (E8); no archive
+  copy of the laptop records was made (spec point 7; they are no longer at risk).
+- **Review:** an independent Fable review of the commit is running (`transfer/ENABLING_REVIEW.md`). Nothing of this
+  batch runs on the H200 before its required fixes are in and the user has approved the batch (§16.10, rule 5).
+
+### 17.3 Detector-geometry audit — complete (commit `4876760`)
+
+Report: `results/m2c_theta/geometry/GEOMETRY.md`; library code `src/sfm/geometry.py` with 19 tests. All likelihood
+numbers below are **audit numbers**: validation, the laptop's fold points (launch grid 144, K = 64), with the
+benchmark MLP and the component formula standing in for the finalists; unit 10⁻⁴ nat, paired SE. Their inputs are
+(p, θ, φ, entry position): they are never put beside a θ-blind delta.
+
+- **Question (a), the 1.35 %.** Reproduced on training hits: 951 of 69,783 events (1.363 %) have a hit centre outside
+  the simple box when the origin is the straight-line point; with the true frame origin (the energy-weighted
+  centroid of the first hit layer) none has. The cause is the origin, not the outline, the beam hole or a coordinate
+  edge. The box is wrong in the other direction: 19.2 % of its area holds no cell (four cut corners, off-centre hole).
+- **Question (b), persistence.** Front + side acceptance, ratio form: −993.3 ± 21.8 (MLP), −989.9 ± 21.6 (formula)
+  on the report metric (n = 14,950). Back-face share, paired: −0.4 ± 2.3 and −0.2 ± 2.3 — the flat `z_b` cut does not
+  inflate the gain. Bulk-restricted (own table; stratum of amendment A4, n = 14,784): −947.7 ± 21.6 and −942.8 ± 21.4;
+  persistence margins −455.3 ± 10.7 and −452.1 ± 10.5 (pass, resolved). Negative controls: another event's acceptance
+  +2803 ± 85; permuted inside θ quintiles +889 ± 57. About 93 % of the gain comes from the 36 % of events whose axis
+  leaves through a side face or the hole.
+- **Recommendation of the audit:** run the arm; primary row front + side faces, secondary row all faces with the
+  mass-beyond-`z_b` monitor; stepped volume with hole (the box is 481 ± 16 worse).
+- **For the transfer package (to do):** `cache/pion_s1_geometry_trainval.pt` and its JSON (origins of training and
+  validation events only, SHA-256 `a82a3118…4220a`), `results/m2c_theta/geometry/explore/train_columns.npz`, and the
+  acceptance template or its recomputation. Test origins exist nowhere; they can only be made from the Parquet table
+  after Gate 2c. A registry entry point for per-event maps does not exist yet (part of E7).
+
+**Awaiting the user's decision**
+
+| # | Question | Measured | Audit's suggestion |
+|---|---|---|---|
+| G1 | Form of the arm. The user asked for the "parameter-free version". The literal form is `log P + ln A_e` (naive). The ratio form `log P + ln max(A_e, f) − ln max(Ā, f)` divides out the mean acceptance that a θ-blind map already contains; `Ā` is the mean acceptance over training events (geometry only, nothing fitted to hits), the floor f = 10⁻³ and the form were fixed on a training subsample | ratio −993.3 ± 21.8; naive −893.1 ± 22.1 (margin −403.6 ± 10.8, also passes); ratio − naive = −100.3 ± 6.0 | ratio form as the arm, if the user accepts it as parameter-free |
+| G2 | Entry position. The frame origin used by the arm is computed from the event's own hits (centroid of the first hit layer), as the shower frame itself is. A straight-line origin uses kinematics and `z_b` only | straight-line origin, ratio form: −897.0 ± 23.9 (96.3 ± 13.7 worse) | true frame origin; the straight-line variant can be shown as a labelled row |
+| G3 | θ track. Θ1 as specified (logits + ln of the front-face acceptance) is a loss on the stand-in MLP (+42.6 ± 4.3), its ratio form a null (−2.1 ± 1.3). A zero-training acceptance with inputs (p, θ) only — the training-mean front + side acceptance of the event's θ bin — gives −634.2 ± 16.8 (bulk-restricted, own column: −598.3 ± 16.6). The plan's expectation for the θ track (0.006–0.012 nat, arms built around the entrance region) does not describe this | see left | decide before the θ track starts whether its arms are redefined |
+
+### 17.4 Live PySR runner tests — running
+
+Smoke tests a–f on synthetic targets (`results/m3_sr/smoke/STATUS.md`), at most 8 threads, not the campaign pilot.
