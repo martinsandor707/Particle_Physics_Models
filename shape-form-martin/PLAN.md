@@ -1498,3 +1498,12 @@ for the clone, which is all the campaign code reaches through its repository-rel
 user: move these files off the H200 until Gate 2c, or restate the guarantee as "absent from the clone, and no campaign
 process opens a path outside the clone and its output root" and enforce that technically. No GPU step is run on the
 H200 before this is settled.
+
+**Update, 25 Nov 2026, 15:30.** The user deleted the copy of the raw table (a version from an earlier trial, not
+needed); the folder listing confirms it is gone. The archive's table of contents (names and sizes only, nothing
+extracted) shows the earlier study's `shape-form-proton` tree, 2,081 files. It contains
+`results/particles/pion/test_v3_nll.npz` with 600,804 bytes — the size of the deferred file of that name — and two
+earlier per-event test arrays of the same size (`test_nll.npz`, `test_v2_nll.npz`). It contains no hit data (largest
+entry 12 MB). So per-event test scores of the earlier study's models are still on the H200, inside that archive. The
+second pion hit table (5.7 GB, dated 8 Nov, "…with_model_outputs") is not identified: whether it holds the campaign's
+events is not known and it was not opened. Both remain with the user to decide.
