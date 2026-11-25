@@ -374,3 +374,29 @@ outliers; the 10 GB cap and `InsufficientGPUMemory` on the shared device; `Ungua
 H200's real machine id and a really clean clone; the guard with the real layout (venv inside the clone, area = the
 user's folder); `setsid` / `/proc` behaviour of the launcher and stop helper on that system; `flock` on its file
 system; whether every job fits under 10 GB; steps 9-11 (training) - only their pre-checks ran on the laptop.
+
+## 10. Step 5a on the H200: five test-fixture failures (tests changed only)
+
+5a on the H200 (commit 4dbd0ac): 5 failed, 102 passed, all five in `tests/test_provenance.py`. Cause (confirmed from the
+code, each case): the "other machine" of the tests was built as `machine_tag().with_(gpu_name="NVIDIA H200",
+launch_grid=1056, ...)`, i.e. from literal H200 values; on the H200 those ARE the live values, so the "other" tag equals
+the live one and the refusals correctly do not fire:
+- `test_machine_tag_fields_and_id`: `with_(launch_grid=1056)` (and python 3.13.12, gpu "NVIDIA H200") is a no-op there;
+- `test_the_delta_function_refuses_mixed_tags`: the "other arithmetic" array carried the live tag -> a legal pairing;
+- `test_reference_set_of_another_machine_is_not_used`: the "other machine's" reference set was the live one;
+- `test_mixed_streams_untagged_rows_and_live_paths`: the "other stream" row was on the live stream;
+- `test_fit_refuses_checkpoints_and_done_markers_of_another_machine`: the stored tag equalled the live one.
+None indicates a defect of the safeguard: `check_pairable`, `reference_set` and `train._check_machine` compare full
+tags, and with a really different tag each refusal fires (shown below with the H200's identity as the live one).
+
+Fix (tests only, no production code changed): `foreign_tag()` derives the other machine from the LIVE tag and changes
+GPU name, launch grid (+8) and SM count (+1) relative to their live values, asserting that the result differs; the id
+test changes every identity field relative to its live value; the LOCK.json refusal test uses `foreign_tag().id`
+instead of a literal. New `test_scenarios_are_machine_independent[h200|laptop]` runs all five scenarios with the live
+tag replaced by the H200's identity (it reproduces the reported id `h200-g1056-97b197a7` exactly) and by the laptop's
+(`rtx-4060-laptop-gpu-g144-76c0f59a`). The other files of the batch (`test_registry`, `test_review_fixes`,
+`test_guard`, `test_train`, `test_refstream`, `test_metric`, `test_data`) and the scripts' self-checks were searched
+for the same pattern and for 144 / RTX 4060 used as "this machine": none found (the remaining 144 / 1056 literals are
+synthetic points on both sides of a comparison, function arguments naming the grid of a run, or the records' grid
+constants `LAPTOP_GRID` / `REFERENCE_GRID`). Laptop result: the 5a file list plus `test_review_fixes.py`:
+109 passed.

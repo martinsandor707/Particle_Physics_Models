@@ -16,7 +16,7 @@ import pytest
 import torch
 
 import common as C
-from sfm import data, machine, metric, paths, provenance, registry, stats, train
+from sfm import data, machine, metric, paths, policy, provenance, registry, stats, train
 from sfm.registry import RegistryEnv, ValidationReference, ValidationSet
 from test_train import Tiny, interrupt_at, Interrupt, make_showers
 
@@ -48,13 +48,37 @@ def tiny(seed, scale=0.5):
 
 
 def fake_tag(**kw):
+    """The live tag with some fields replaced (settings only in the tests below; identity changes use foreign_tag)."""
     return machine.machine_tag().with_(**kw)
+
+
+def foreign_tag(deterministic: bool = True, **extra):
+    """A machine tag guaranteed to differ from the LIVE machine on any machine (H200, laptop, CPU): derived from the
+    live tag, with the GPU name, launch grid and SM count changed relative to their live values - never a literal
+    that a real machine could have (the H200 run of 5a showed why)."""
+    t = machine.machine_tag(deterministic=deterministic)
+    f = t.fields
+    changed = {"gpu_name": f"{f['gpu_name']} [foreign test machine]",
+               "launch_grid": (f.get("launch_grid") or 0) + 8, "sm_count": (f.get("sm_count") or 0) + 1, **extra}
+    u = t.with_(**changed)
+    assert u.id != t.id and u.fields["launch_grid"] != f.get("launch_grid") and u.fields != t.fields
+    return u
+
+
+# The identities of the two machines of this campaign (reported by the user / read on the laptop), used only to show
+# that the scenarios below do not depend on which machine runs them (test_scenarios_are_machine_independent).
+H200_IDENTITY = {"gpu_name": "NVIDIA H200", "sm_count": 132, "max_threads_per_sm": 2048, "launch_grid": 1056,
+                 "torch": "2.14.0+cu130", "cuda": "13.0", "cudnn": 92400, "python": "3.13.12", "tf32_matmul": False,
+                 "tf32_cudnn": False}
+LAPTOP_IDENTITY = {"gpu_name": "NVIDIA GeForce RTX 4060 Laptop GPU", "sm_count": 24, "max_threads_per_sm": 1536,
+                   "launch_grid": 144, "torch": "2.14.0+cu130", "cuda": "13.0", "cudnn": 92400, "python": "3.12.13",
+                   "tf32_matmul": False, "tf32_cudnn": False}
 
 
 # ----------------------------------------------------------------------------------------------------------------------
 # sfm.machine
 # ----------------------------------------------------------------------------------------------------------------------
-def test_machine_tag_fields_and_id():
+def _scenario_tag_id():
     t = machine.machine_tag()
     f = t.fields
     for k in ("gpu_name", "launch_grid", "torch", "cuda", "python", "tf32_matmul", "tf32_cudnn", "deterministic",
@@ -62,13 +86,21 @@ def test_machine_tag_fields_and_id():
         assert k in f
     assert f["tf32_matmul"] is False and f["tf32_cudnn"] is False          # switched off at import (E10)
     assert t.id == machine.machine_tag().id                                 # stable
-    for change in ({"launch_grid": 1056}, {"python": "3.13.12"}, {"tf32_cudnn": True}, {"gpu_name": "NVIDIA H200"}):
+    # every identity field changes the id - each change derived from the LIVE value, so it is a change on any machine
+    for change in ({"launch_grid": (f.get("launch_grid") or 0) + 8}, {"python": f"{f['python']}.9"},
+                   {"tf32_cudnn": not f["tf32_cudnn"]}, {"gpu_name": f"{f['gpu_name']} [other]"},
+                   {"sm_count": (f.get("sm_count") or 0) + 1}, {"torch": f"{f['torch']}+other"},
+                   {"cudnn": (f.get("cudnn") or 0) + 1}):
         assert t.with_(**change).id != t.id, change
     # review B1: per-computation settings stay in the tag (pairing) but do not change the machine id
     for change in ({"deterministic": False}, {"draw": "emulated"}, {"cublas_workspace_config": ":4096:8"}):
         assert t.with_(**change).id == t.id and t.with_(**change).fields != t.fields, change
     assert machine.machine_tag(deterministic=False).id == t.id
     assert "/" not in t.id and " " not in t.id
+
+
+def test_machine_tag_fields_and_id():
+    _scenario_tag_id()
 
 
 def test_host_id_is_not_the_host_name():
@@ -166,7 +198,7 @@ def test_tagged_arrays_save_load_and_never_overwrite(tmp_path):
         provenance.load_tagged(p)
 
 
-def test_the_delta_function_refuses_mixed_tags():
+def _scenario_delta_refuses():
     t = machine.machine_tag()
     rng = np.random.default_rng(0)
     x, y = rng.normal(size=100).astype(np.float32), rng.normal(size=100).astype(np.float32)
@@ -175,17 +207,22 @@ def test_the_delta_function_refuses_mixed_tags():
     p = provenance.paired_delta(A, B)
     q = stats.paired(x, y)
     assert (p.mean, p.se, p.n) == (q.mean, q.se, q.n)
-    for other in (provenance.TaggedArray.make(y, _pts(grid=144), t),               # other fold points
-                  provenance.TaggedArray.make(y, _pts(K=1024), t),                 # other K
+    for other in (provenance.TaggedArray.make(y, _pts(grid=144), t),               # other fold points (synthetic
+                  provenance.TaggedArray.make(y, _pts(K=1024), t),                 #  points, both sides non-live)
                   provenance.TaggedArray.make(y, _pts(fp="e" * 64), t),            # other split
-                  provenance.TaggedArray.make(y, _pts(), fake_tag(gpu_name="NVIDIA H200")),   # other arithmetic
-                  provenance.TaggedArray.make(y, _pts(), fake_tag(draw="emulated"))):
+                  provenance.TaggedArray.make(y, _pts(), foreign_tag()),           # another machine
+                  provenance.TaggedArray.make(y, _pts(), fake_tag(draw="emulated")),          # other draw
+                  provenance.TaggedArray.make(y, _pts(), fake_tag(deterministic=False))):     # other setting
         with pytest.raises(provenance.MixedTags):
             provenance.paired_delta(A, other)
         with pytest.raises(provenance.MixedTags):
             provenance.paired_difference(A, other)
     with pytest.raises(provenance.MixedTags):
         provenance.check_pairable(A, y)                                         # a bare array is never paired
+
+
+def test_the_delta_function_refuses_mixed_tags():
+    _scenario_delta_refuses()
 
 
 def test_tolerance_check_reports_and_flags():
@@ -249,9 +286,8 @@ def test_no_reference_set_no_fallback(reg):
     assert not env.registry_path.exists()
 
 
-@cuda
-def test_reference_set_of_another_machine_is_not_used(reg):
-    other = fake_tag(gpu_name="NVIDIA H200", launch_grid=1056, sm_count=132, max_threads_per_sm=2048)
+def _scenario_refset_of_another_machine(reg):
+    other = foreign_tag()
     env_o = RegistryEnv(results_dir=reg["tmp"] / "results", machine=other)
     res = registry.create_reference_set(ValidationSet(reg["val"], reg["en"]), env=env_o, reference=reg["ref"],
                                         bench_models=lambda: reg["bench"], guards=False, log=lambda *a: None, parity={"verdict": "PASS", "source": "unit test"})
@@ -270,7 +306,11 @@ def test_reference_set_of_another_machine_is_not_used(reg):
 
 
 @cuda
-def test_mixed_streams_untagged_rows_and_live_paths(reg):
+def test_reference_set_of_another_machine_is_not_used(reg):
+    _scenario_refset_of_another_machine(reg)
+
+
+def _scenario_mixed_streams(reg):
     vs = ValidationSet(reg["val"], reg["en"])
     root = reg["tmp"] / "results"
     env = RegistryEnv(results_dir=root)
@@ -281,7 +321,7 @@ def test_mixed_streams_untagged_rows_and_live_paths(reg):
     assert registry.registered_row("s", "c3", stream_id=live, path=env.registry_path)["val_nll_sha256"] == \
         rows[0]["val_nll_sha256"]
     # a row on another machine's stream, written into the same file
-    other = fake_tag(gpu_name="NVIDIA H200", launch_grid=1056)
+    other = foreign_tag()
     env_o = RegistryEnv(results_dir=root, machine=other, registry_path=env.registry_path)
     registry.create_reference_set(vs, env=env_o, reference=reg["ref"], bench_models=lambda: reg["bench"],
                                   guards=False, log=lambda *a: None, parity={"verdict": "PASS", "source": "unit test"})
@@ -317,6 +357,11 @@ def test_mixed_streams_untagged_rows_and_live_paths(reg):
 
 
 @cuda
+def test_mixed_streams_untagged_rows_and_live_paths(reg):
+    _scenario_mixed_streams(reg)
+
+
+@cuda
 def test_evaluate_refuses_replace_and_the_legacy_registry(reg):
     vs = ValidationSet(reg["val"], reg["en"])
     env = RegistryEnv(results_dir=reg["tmp"] / "results")
@@ -334,8 +379,7 @@ def test_evaluate_refuses_replace_and_the_legacy_registry(reg):
 # ----------------------------------------------------------------------------------------------------------------------
 # train: no fit continued or returned across machines
 # ----------------------------------------------------------------------------------------------------------------------
-@cuda
-def test_fit_refuses_checkpoints_and_done_markers_of_another_machine(tmp_path):
+def _scenario_fit_refuses(tmp_path):
     tr, va = make_showers(120, 1, C.DEVICE), make_showers(40, 2, C.DEVICE)
     cfg = train.FitConfig(steps=20, lr=0.05, lr_end=0.005, batch=32, eval_every=10, ckpt_every=10, k_val=16,
                           name="x", out_dir=str(tmp_path / "x"))
@@ -344,7 +388,7 @@ def test_fit_refuses_checkpoints_and_done_markers_of_another_machine(tmp_path):
     ck = tmp_path / "x" / "checkpoint.pt"
     obj = torch.load(ck, weights_only=False)
     assert obj["machine_tag"]["id"] == machine.machine_tag(deterministic=False).id
-    obj["machine_tag"] = fake_tag(gpu_name="NVIDIA H200", deterministic=False).to_dict()
+    obj["machine_tag"] = foreign_tag(deterministic=False).to_dict()            # another machine, same settings
     torch.save(obj, ck)
     with pytest.raises(train.MachineMismatch):
         train.fit(Tiny().to(C.DEVICE), tr, va, cfg, log=None)
@@ -361,6 +405,40 @@ def test_fit_refuses_checkpoints_and_done_markers_of_another_machine(tmp_path):
     (tmp_path / "y" / "fit_done.json").write_text(json.dumps(done))
     with pytest.raises(train.MachineMismatch):                                 # a finished run of unknown origin
         train.fit(Tiny().to(C.DEVICE), tr, va, cfg2, log=None)
+
+
+@cuda
+def test_fit_refuses_checkpoints_and_done_markers_of_another_machine(tmp_path):
+    _scenario_fit_refuses(tmp_path)
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# the five scenarios above, run as if the live machine were the H200 and as if it were the laptop
+# ----------------------------------------------------------------------------------------------------------------------
+@cuda
+@pytest.mark.parametrize("who", ["h200", "laptop"])
+def test_scenarios_are_machine_independent(who, monkeypatch, reg, tmp_path):
+    """The live tag is replaced by the H200's (id h200-g1056-97b197a7, reported from step 5a) or the laptop's identity
+    (settings and the computation itself stay those of this process); every scenario must still refuse what it
+    refuses. Shows on the laptop that the suite does not depend on the machine it runs on."""
+    identity = H200_IDENTITY if who == "h200" else LAPTOP_IDENTITY
+    real = machine.machine_tag
+
+    def live(deterministic=True, draw="native", device=0):
+        return real(deterministic=deterministic, draw=draw, device=device).with_(**identity)
+
+    monkeypatch.setattr(machine, "machine_tag", live)
+    monkeypatch.setattr(policy, "LAPTOP_MACHINE_IDS", (live().id,))          # the A5 start check is not the subject
+    assert live().identity == identity
+    assert live().id == ("h200-g1056-97b197a7" if who == "h200" else "rtx-4060-laptop-gpu-g144-76c0f59a")
+    assert foreign_tag().id != live().id
+    _scenario_tag_id()
+    _scenario_delta_refuses()
+    sub = dict(reg, tmp=tmp_path / "refset_case")
+    _scenario_refset_of_another_machine(sub)
+    sub = dict(reg, tmp=tmp_path / "mixed_case")
+    _scenario_mixed_streams(sub)
+    _scenario_fit_refuses(tmp_path / "fit_case")
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -381,7 +459,7 @@ def test_test_access_refused_without_lock_and_with_overrides(monkeypatch, tmp_pa
         data.check_test_access_allowed()
     monkeypatch.delenv("SFM_CACHE_DIR")
     lock = tmp_path / "LOCK.json"
-    lock.write_text(json.dumps({"machine_of_record": {"machine_id": "nvidia-h200-g1056-00000000"}}))
+    lock.write_text(json.dumps({"machine_of_record": {"machine_id": foreign_tag().id}}))   # never the live id
     if torch.cuda.is_available():
         with pytest.raises(PermissionError, match="names machine"):
             data.check_test_access_allowed(lock)
