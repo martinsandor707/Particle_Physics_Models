@@ -10,6 +10,8 @@ Units below: 1e-4 nat per event, mean ± paired SE, unless a unit is written. `<
 directory (reproducers and logs; not part of the repository).
 
 **STATUS OF THIS FILE: complete (25 Nov 2026). All tests of section 4 have finished.**
+**Addendum: section 7, re-check of commit `ee462fc` (the fixes for B1-B5 and C2) - GO for starting the real run at
+`ee462fc`.** Sections 0 to 6 are as written for `c4f39fd` and were not changed by the addendum.
 
 ## 0. Files reviewed (SHA-256 of the content in commit `c4f39fd`)
 
@@ -461,3 +463,108 @@ None of the five changes alters what the driver fits, registers or decides.
 5. *Launcher liveness, `stop_job.sh`.* The stop helper sends SIGTERM; the driver has no handler, so a stop is a
    kill at an arbitrary point, which is the case tested in section 4. `verify_sources`, the resume logic and the
    use of the reference set are unchanged; the three test files pass on this base (82 passed, 0 skipped).
+
+## 7. Re-check of commit `ee462fc` (fixes for B1-B5 and C2)
+
+25 Nov 2026, same reviewer, same rules as the review above (read-only; scratch output roots with a reference set
+made by the two-step `val_parity.py`; smoke mode only; no test split; no real Track A fit).
+
+Subject: commit `ee462fc`. Against the reviewed commit `c4f39fd` three files of Track A differ:
+
+| File | SHA-256 in `ee462fc` |
+|---|---|
+| `scripts/run_m2a.py` | `d04e6cb95dc91c60f9508443ea06c647d0085f06a48473268cdaada11aa2b411` |
+| `scripts/run_m2a_report.py` | `8a1149981bb3eab04756250934bd9f0c768e5303f45ab7d59d922f72749ebc99` |
+| `tests/test_run_m2a.py` | `91554e26d4c4dcc60cbf2abbaa11f9159e4b489fa5116e20860e2c6b8c597be2` |
+
+`scripts/run_m2a_lib.py`, `src/sfm/models/paramnet.py`, `src/sfm/models/dist_factory.py`, `tests/test_dist_factory.py`
+and `tests/test_models.py` have the SHA-256 of section 0. In the whole repository, between the base of the review
+(`0c38b32`) and `ee462fc`, only these files changed: the two scripts, `tests/test_run_m2a.py`,
+`tests/test_provenance.py` and four documents. No base module, no family, no configuration; `common.py`,
+`results/registry.jsonl` and `results/test_access.log` have the hashes of section 0 before and after this re-check.
+
+### 7.1 Starting the real run at `ee462fc`: **GO**
+
+Nothing that a phase up to and including `guards` fits, registers or decides differs from the reviewed commit.
+(Commit `247017d`, where the five Track A files equal `c4f39fd`, stays GO as well; it would produce the same fits
+and rows.)
+
+| Check | Result |
+|---|---|
+| diff of `run_m2a.py`, read line by line | three hunks and no other line: `phase_report` passes one argument (`with_guards`; the default is the full report as before); the new `stage2_approval`, used by `phase_stage2`; `main()` gets the option `--without-guards`, refused unless the phase list is exactly `report` |
+| the same, function by function (syntax trees of both versions) | 59 top-level items identical, among them every spec builder (`plr_specs`, `stage0_specs`, `primary_kwargs`, `primary_specs`, `exploratory_spec`, `rerun_specs`), every rule (`keep_rule`, `equal_rule_one`, `converged`, `_plr_decide`), `phase_templates`, `phase_parity`, `phase_plr`, `phase_stage0`, `phase_stage1p`, `phase_stage1x`, `guard_targets`, `phase_guards` with its helpers, `stage2_specs`, `listing`, all thresholds and `DEFAULT_PHASES`; changed: `main`, `phase_report`, `phase_stage2`; new: `stage2_approval` and three constants |
+| default invocation | without `--without-guards` the new lines of `main()` are not entered; phase list and order unchanged; `stage2` still refused in any list but its own; `--without-guards` without a phase list is refused, so the default run cannot be started with it |
+| the report module | imported only inside `phase_report`; it writes `results*.json` and `RESULTS*.md` and nothing else (registry of the scratch root byte-identical before and after a report) |
+| `run_m2a.py --list` | byte-identical to the listing of `c4f39fd` (SHA-256 `8762ba00...`, as the worker states) |
+| tests | `tests/test_dist_factory.py tests/test_run_m2a.py tests/test_models.py`: 88 passed, 0 skipped |
+| execution: a fresh smoke run with the code of `ee462fc` (second scratch root, own reference set) against the smoke run of the reviewed code (section 4) | 58 registry rows without guards on both sides, same names (the two rows of the forced rerun of section 4 set aside): SHA-256 of the validation array, SHA-256 of the weight tensors, constant count, configuration hash, seed and comparator identical in all 58. The K = 1024, bulk and mass-monitor arrays of the six guard targets: identical. `plr.json`: identical (lr_poly 0.003, lr_net 0.01). The decisions `parity`, `A0_drift`, `convergence_primaries`, `exploratory_seed1`, `dropped`, `budget_rule`, `guard_targets`: identical. The default command (no phase list) at `ee462fc` ran `templates ... guards report` in that order and ended with 55 finished runs and 64 rows, no duplicates, as the reviewed code did |
+
+Why the execution check is decisive: smoke training is bit-reproducible on this laptop - the worker's dry run and
+the first smoke run of this review, two independent sessions, agree in all 60 common rows in the SHA-256 of the
+validation array and of the weight tensors. Any change in what the new code fits or registers before the report
+would show as a different hash.
+
+What is new at the end of the default run: the report executes more code than the reviewed one (it rebuilds the
+target model of every net warm start on the CPU, reads the template files, prints more tables). All fits, guard
+evaluations and registry rows are complete before it starts; if it failed, `run_m2a.py report` can be repeated at
+any time and nothing is lost. The warm-start recomputation catches its own errors per run.
+
+### 7.2 The findings of section 2
+
+| Finding | State | How it was checked |
+|---|---|---|
+| B1 reruns | **closed** | On the smoke state with a forced rerun of A7_s0 the new report uses the pair `A7_s0_x2` vs `A2s_s0_x2` for seed 0 and the original for seed 1 (column "pairs used by the rules": "rerun / original"), prints the original as "A7 s0 original - not converged, NOT used by the rules", and records `replication.pairs`. The two-seed mean of the mixed pairs (+0.42 ± 0.18), every other Stage-1 number and the keep / equal / replication flags were recomputed with numpy only from the arrays named in `results.json`: identical (37 comparisons, 5 guard blocks). |
+| B2 initialisation | **closed** | Table of 57 rows on the smoke state: `kl_map` and its reference for every run; "exactly A2s: yes" for A7, A7s, A8, A8c, A78, A12 and the A7 rerun (\|kl_map\| <= 3.4e-8); all 14 smoke net runs flagged (their shortened warm start gives 0.008-0.09 nat, as expected). Variation: a target model with one momentum-dependent row flattened to a relative spread of 1.0e-4 is listed as nearly constant; flattened to exactly constant it is listed as constant. |
+| B3 alternatives | **closed, with remarks R1 and R2 on the labels** | Both alternatives are printed and decide nothing in Stage 1; the two constructed cases of 7.3 show what a reader can misread. |
+| B4 template limitations | **closed** | Printed below the exploratory table; the Q2 numbers are computed from the machine's own template files and equal section 3 (79 cells from 1379 mm, maximum 1.81, denominator 0.186; 906 above 1, 56 above 1.1). The Q1 sizes are the laptop diagnostics of section 3, quoted and labelled as such. |
+| B5 Stage-2 gate | **closed for the interlock; Stage 2 itself still needs its review** (`stage2_specs`, the missing A11p) | Gate function called directly on the smoke state (no Stage-2 fit started): refused without an approval file; with a stale hash; with A7 added to the approved list; with an unknown reading; without `approved_by`; after `results.json` was changed by one byte; after `results.json` was hand-edited. Accepted: the valid approval (also under the reading `two_se` with the list of that reading). The command `run_m2a.py --smoke stage2` refused without and with a stale file and created no A11 directory. Two limits: remarks R6 and R7. |
+| C2 table without guards | **closed as an operator option, not as an automatic step** | `run_m2a.py report --without-guards` writes `RESULTS_without_guards.md` / `results_without_guards.json` with the banner and leaves `results.json` byte-identical; refused with any other phase list. The default phase list is unchanged, so after a guards failure in the unattended run a table exists only once someone issues that command (or the full `report`, which now lists the pairs whose guard data is missing). |
+| also: C12, B6 (i) | done | multiplicity sentence, kept line split into primaries and exploratory, footnote on the seed order, convergence movement of A2s_s0 / A2s_s1 beside the primaries table |
+| not implemented, awaiting the user (unchanged) | open | the control A2c (B6 ii); a scale floor in `fit_to`; record-and-continue for a non-finite evaluation (C1: the run stops there and waits) |
+
+### 7.3 Remarks on the new report (for whoever reads the Stage-1 table; none blocks the start)
+
+- **R1. The column "alternative - decides nothing: two-seed mean <= -2 SE" shows that one condition, not the verdict
+  of the alternative reading.** Constructed case: both seeds at -2.0 ± 0.1 - not kept, not replicated - give
+  "replicated: no" and "alternative: **yes**", while the alternative reading (literal conditions *and* 2 SE) says
+  no. The verdict of the alternative reading is only in the last section ("kept and replicated ... alternative").
+  Read the column as "the mean is 2 SE away from zero", never as "replicated under the alternative". Fix: print
+  `replicated_alternative_2se` in the column, or head it "also <= -2 SE (in addition to the literal conditions)".
+  The words "decides nothing" hold for this report; in the Stage-2 approval the user may choose that reading.
+- **R2. The G-region alternative "would pass" does not require a gain.** It tests the hit term alone
+  (`run_m2a_report.py:235-236`). Constructed case: total +1.0 (no gain), hit term -1.0 with the flagged cells at
+  -0.2, normalisation +2.0: literal "passed no", alternative "would pass **yes**". Fix: require the total gain to
+  be negative there as well, or print "share condition only".
+- **R3. A full report made before the guards phase has run says "No run passed the keep or the equal-NLL rule: no
+  guard columns".** Seen by execution: in the second scratch root, after `stage1x` and before any `guards`, `run_m2a.py report` printed that sentence although rungs pass the equal-NLL rule there (A7, A9, A9r and five net versions). In the default sequence the guards phase always precedes the report, so this needs a
+  report issued by hand while fits are running or after a stop; then the sentence is wrong. Use
+  `report --without-guards` for an interim look. Fix: when `decisions.json` has no `guard_targets`, print "the
+  guards phase has not run".
+- **R4. Guard blocks of an original that the rules do not use are not labelled.** With a rerun, both
+  `A7_s0 vs A2s_s0` and `A7_s0_x2 vs A2s_s0_x2` get a block; only the second belongs to the pair the rules use
+  (the secondary columns do carry the label).
+- **R5. `rms_max` in the Initialisation table is absolute, in raw units of the worst column.** For the healthy
+  warm start of A1 it is 0.36 (column `zs`, spread 32.5, i.e. 1.1 %); the number alone looks alarming. The flag
+  and `kl_map` are what to read. The row marks "(template note Q1/Q2)" stand on A3x too, although Q2 concerns
+  A3c only.
+- **R6. (before Stage 2) The gate binds the approval to the file, not the file to the arrays.** A `results.json`
+  that was hand-edited (A7 set to kept) together with a new approval naming its hash is accepted. Since the full
+  report is byte-stable (two runs on the same state gave the same SHA-256), `phase_stage2` can recompute the
+  report in memory and require equality with the file on disk; then only a table that follows from the registered
+  arrays can be approved. Corollary: STATUS says any re-run of the full report makes a new approval necessary;
+  that is so only when the table changes.
+- **R7. (before Stage 2) An approval without the key `kept_and_replicated` is accepted when nothing is kept.**
+  The missing key counts as the empty list. Require the key.
+- **R8.** `results.json` does not record the commit of the report code; with fits and report meant to be one
+  commit, add `machine.git_state()` to it.
+
+None of R1 to R8 changes a number. R1 to R5 are labels; if they are fixed after the start, the report code is a
+later commit than the fits (the report is a deterministic function of the registered arrays and can be re-run).
+If fits and report shall be one commit, this section is the reading note that goes with the table of `ee462fc`.
+
+### 7.4 What this re-check did not do
+
+Nothing ran on the H200 and no real-length fit exists; the lists "by reading only" and "only on the H200" of
+section 4 stand. Stage 2 was not started (the gate function was called; no A11 fit). The new report was exercised
+on smoke rows only: its real-run inputs (converged fits, real warm starts, the H200's templates) are first seen on
+the H200.
