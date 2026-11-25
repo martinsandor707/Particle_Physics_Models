@@ -1789,3 +1789,62 @@ on the laptop (mean difference to the stored template 7.6·10⁻⁴, maximum 0.1
 (A0 − formula array = +9.9·10⁻⁹ ± 1.1·10⁻⁸, largest event 1.1·10⁻⁵); polynomial learning rate fixed at 0.003 by the
 pilot. Measured speed 0.015 s per step, so the 54 unconditional fits need roughly an hour and the conditional ones up
 to another hour, plus guards. The run stops after the Stage-1 report; Stage 2 needs the user's approval file.
+
+### 17.11 User decisions of 25 Nov 2026 (late evening): geometry arm, θ track, PySR, Track A
+
+**Geometry arm (closes G1 and G2 of §17.3).**
+- *Form.* The **ratio form** `log P + ln max(A_e, f) − ln max(Ā, f)`, f = 10⁻³ (fixed on a training subsample), is the
+  primary zero-training arm: it removes the double counting of the mean acceptance that a θ-blind map already
+  contains. The naive form `log P + ln A_e` is a secondary row of the same table.
+- *Entry position.* The **true frame origin** (centroid of the first hit layer, the repository's shower-frame
+  definition) is the primary row. The **straight-line origin** (kinematics only, no hit information) is an explicitly
+  labelled secondary row of the same table; the table states the distinction between a hit-seeded coordinate frame
+  and a hit-free fast simulation.
+
+**θ track, redefined before M2C starts (closes G3; replaces Θ1–Θ3 of §6).** Inputs strictly (p, θ). Headline G-bulk,
+with the report metric and the mass beyond `z_b` beside it.
+
+| Arm | Definition | Role |
+|---|---|---|
+| Θ0 | the frozen θ-blind finalists (MLP and best closed form) times the training-mean front + side **ratio** acceptance of the event's θ bin (smooth or finely binned; from training geometry only) | zero-training baseline |
+| Θ1-diag | front-face-only ratio acceptance, zero training | null reference; the naive Θ1 of §6 is not trained |
+| Θ2 | the entrance-gated network in `u = 1/cos θ − 1.1` with gate `σ((300 mm − z′)/50 mm)`, trained **on top of Θ0** | trained physical entrance arm: separates the `1/cos θ` path length in the front plate from θ-dependent side leakage |
+| Θ3 | unrestricted trained (p, θ) MLP | diagnostic only, never a finalist: bounds residual θ-dependence in the bulk and monitors the back-face `z_b(θ)` exploit |
+
+The expectation of §6 for this track (0.006–0.012 nat) is withdrawn; the audit's stand-in number for a Θ0-type arm is
+−634 ± 17 (10⁻⁴, report metric) and −598 ± 17 (bulk-restricted, own column). Code for the track and for the geometry
+arm (E7) is not written yet.
+
+**PySR (closes S1–S5 of §17.7).**
+- S1: **`tanh(polynomial)` is the registered C2 control** used for Δ(SR) − Δ(C2), so that C2 and SR are compared inside
+  the same bounded feasible set on the extended box. The plain polynomial may be recorded as a non-governing
+  diagnostic row with its audit verdict beside it.
+- S2: the 16 nat raw limit and the 10⁻⁶ nat rounding tolerance are accepted, with float64 evaluation.
+- S3: constants of stripped pure-x terms are neither trained nor counted in k; every stripped term is logged in the
+  audit record.
+- S4: the depth slope ≤ 0 beyond z_90 is accepted. The radial log-log slope ≤ −2 refers to the 3-D density ρ, not
+  to the ring mass 2πrρ. Before it is applied, it is verified on the H200 that the unmodified refitted baseline
+  (δ = 0) itself satisfies ≤ −2 for r from 200 to 1500 mm (the legacy formula has a `1/(r + 1 cm)` far halo). If it
+  does, ≤ −2 stays. If the baseline itself is flatter than −2, the criterion becomes `∂_r ln ρ < 0` together with no
+  radial flattening relative to the baseline (`∂_r δ ≤ 0` for r > 200 mm), so that a valid correction is not rejected
+  for inheriting the baseline's halo.
+- S5: `sqa′(0) = 0` is accepted (the forward value stays bit-exact with Julia); persistent gradient-clip counts are
+  logged during a refit so that a run stalled on a cusp is flagged.
+
+**Track A (from its review).**
+- **A2c control added:** the refitted formula trained for the matched longer step budget, two seeds; a control,
+  exploratory, outside the six primary comparisons. Because Stage 1 is already running on the H200, A2c runs right
+  after the current job ends and before Stage 2 / the content of A11 is decided.
+- **Scale floor in the `ParamNet` warm start:** added (of the kind `max(std_j, 10⁻²)` in unconstrained parameter
+  space), so that a nearly constant column cannot dominate the warm-start fit; the step-0 NLL parity between each
+  warm-started network and its source polynomial run is logged. The network runs already executed in the current
+  job are checked, and only affected ones are re-run before Stage 2. **Rule for "affected", fixed here before any
+  network result of the job has been read:** a network run is re-run if and only if (a) one of its varying target
+  columns lies below the floor, so that the fix changes its warm start, or (b) its recorded `kl_map` at
+  initialisation exceeds 10⁻⁴ nat. Both are properties of the initialisation, not of the outcome. A re-run gets a new
+  run name; the original is kept and labelled as superseded.
+- **Diverging fits:** for exploratory rungs a divergence (non-finite value or blow-up) is caught, recorded with full
+  diagnostics (status "diverged", step, last finite loss and parameters, gradient norm) in `decisions.json` and in
+  the Stage-1 table, GPU memory is freed and the job continues; such a rung is never silently omitted. For primary
+  comparisons and controls the independent rungs of the job still finish, but a primary rung is marked as failed only
+  after a Fable diagnosis.
