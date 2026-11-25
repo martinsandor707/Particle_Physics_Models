@@ -1,0 +1,53 @@
+
+===== 16:01:06 sr_run  =====
+[smoke/a_resume/seed0] chunk 0: 20 s (elapsed 0 / 120 s)
+[smoke/a_resume/seed0] chunk 0 done in 28 s | <=8:0.03003 <=15:0.01046 <=25:0.002545 | plateau=None | 4.79e+05 evals/s
+[smoke/a_resume/seed0] chunk 1: 20 s (elapsed 28 / 120 s)
+[smoke/a_resume/seed0] chunk 1 done in 21 s | <=8:0.03003 <=15:0.01046 <=25:0.002545 | plateau=None | 5.58e+05 evals/s
+[smoke/a_resume/seed0] chunk 2: 20 s (elapsed 48 / 120 s)
+
+===== 16:02:05 sr_run  =====
+Attempting to load model from <repo>/shape-form-martin/results/m3_sr/smoke/runs/smoke/a_resume/seed0/pysr/checkpoint.pkl...
+[smoke/a_resume/seed0] chunk 2 was aborted in flight (~8 s lost); resuming from the end of chunk 1
+[smoke/a_resume/seed0] restored checkpoint after chunk 1 (warm start) in 0.1 s; populations and hall of fame identical to that chunk's end: True
+[smoke/a_resume/seed0] chunk 2: 20 s (elapsed 48 / 120 s)
+[smoke/a_resume/seed0] chunk 2 done in 34 s | <=8:0.03003 <=15:0.01046 <=25:0.002545 | plateau=None | 4.8e+05 evals/s
+[smoke/a_resume/seed0] chunk 3: 20 s (elapsed 82 / 120 s)
+[sr_run] seed 0 stopped before its budget was used; not starting later seeds
+[smoke/a_resume/seed0] chunk 3 done in 5 s | <=8:0.03003 <=15:0.01046 <=25:0.002545 | plateau=True
+[smoke/a_resume/seed0] stopped (sigint) after chunk 3; resumable
+
+===== 16:02:49 sr_run  =====
+Attempting to load model from <repo>/shape-form-martin/results/m3_sr/smoke/runs/smoke/a_resume/seed0/pysr/checkpoint.pkl...
+[smoke/a_resume/seed0] restored checkpoint after chunk 3 (warm start) in 0.1 s; populations and hall of fame identical to that chunk's end: True
+[smoke/a_resume/seed0] chunk 4: 20 s (elapsed 87 / 120 s)
+[smoke/a_resume/seed0] chunk 4 done in 29 s | <=8:0.03003 <=15:0.01046 <=25:0.002545 | plateau=True | 4.39e+05 evals/s
+[smoke/a_resume/seed0] DONE: 5 chunks, 116 s of 120 s
+smoke/a_resume  (budget 2.0 min per seed, chunk 0.3 min, tiers [8, 15, 25])
+  seed0: done DONE | chunks 5 | 116/120 s | <=8: 0.03003 <=15: 0.01046 <=25: 0.002545 | plateau(loss) yes, val-NLL n/a, combined n/a | fallback no | aborted 1 | 4.39e+05 evals/s
+  extension rule (PLAN §7): 0 of 1 seeds not plateaued -> no extension (needs >= 2)
+
+===== 16:03:22 sr_run --budget-min 2.5 =====
+Attempting to load model from <repo>/shape-form-martin/results/m3_sr/smoke/runs/smoke/a_resume/seed0/pysr/checkpoint.pkl...
+[smoke/a_resume/seed0] budget extended to 150 s; continuing the same seed
+[smoke/a_resume/seed0] restored checkpoint after chunk 4 (warm start) in 0.1 s; populations and hall of fame identical to that chunk's end: True
+[smoke/a_resume/seed0] chunk 5: 20 s (elapsed 116 / 150 s)
+[smoke/a_resume/seed0] chunk 5 done in 29 s | <=8:0.03003 <=15:0.008596 <=25:0.001995 | plateau=False | 5.58e+05 evals/s
+[smoke/a_resume/seed0] DONE: 6 chunks, 146 s of 150 s
+smoke/a_resume  (budget 2.5 min per seed, chunk 0.3 min, tiers [8, 15, 25])
+  seed0: done DONE | chunks 6 | 146/150 s | <=8: 0.03003 <=15: 0.008596 <=25: 0.001995 | plateau(loss) no, val-NLL n/a, combined n/a | fallback no | aborted 1 | 5.58e+05 evals/s
+  extension rule (PLAN §7): 1 of 1 seeds not plateaued -> no extension (needs >= 2)
+
+===== 16:04:00 sr_run --budget-min 2.9 =====
+Attempting to load model from <repo>/shape-form-martin/results/m3_sr/smoke/runs/smoke/a_resume/seed0/pysr/checkpoint.pkl...
+[smoke/a_resume/seed0] budget extended to 174 s; continuing the same seed
+[smoke/a_resume/seed0] FALLBACK restart seeded with the saved hall of fame (24 guesses): restore failed: UnpicklingError: pickle data was truncated
+[smoke/a_resume/seed0] chunk 6: 20 s (elapsed 146 / 174 s)
+[smoke/a_resume/seed0] chunk 6 done in 37 s | <=8:0.03003 <=15:0.008596 <=25:0.001986 | plateau=False | 4.24e+05 evals/s
+[smoke/a_resume/seed0] DONE: 7 chunks, 183 s of 174 s
+smoke/a_resume  (budget 2.9 min per seed, chunk 0.3 min, tiers [8, 15, 25])
+  seed0: done DONE | chunks 7 | 183/174 s | <=8: 0.03003 <=15: 0.008596 <=25: 0.001986 | plateau(loss) no, val-NLL n/a, combined n/a | fallback yes | aborted 1 | 4.24e+05 evals/s
+  extension rule (PLAN §7): 1 of 1 seeds not plateaued -> no extension (needs >= 2)
+[sr_post] seed0 output 0: 25 members, 0 violating (dropped), 0 gauge duplicates, front after scan+dedup 25; round trip max |torch - Julia| = 5.551115123125783e-16 (all <= 1e-05: True); loss max rel diff 7.224704756884661e-16; complexity ok False
+[sr_post] plateau (after scan + gauge dedup): False ()
+[sr_post] FAIL: output 0 C=2: translated complexity 3; output 0 C=3: translated complexity 5; output 0 C=4: translated complexity 5; output 0 C=5: translated complexity 7; output 0 C=6: translated complexity 9

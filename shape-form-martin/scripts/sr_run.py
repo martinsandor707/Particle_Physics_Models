@@ -10,10 +10,13 @@
 * Stopping: Ctrl-C / SIGINT stops the running chunk early (PySR returns partial results and checkpoints); SIGTERM or
   `touch <seed_dir>/STOP` stops after the current chunk.  SIGKILL loses only the chunk in flight.
 
-The operator vocabulary comes from the spec's [operators] table: either explicit PySR settings, or
-`module = "sfm.sr.operators"` with `attr = "<name>"` (a dict, an object with `pysr_kwargs()`, or a callable taking
-`kwargs`), optionally followed by explicit keys that override the module's.  This process must never import torch: the
-module import is checked, and Julia refuses to start after torch.
+Recommended: a [search_config] table, `kwargs = {stage = "stage1", ndim = 3, loss = "gauge"}` (and `template = ...`),
+which takes operators, constraints, loss, maxsize, precision and print_precision from
+`sfm.sr.operators.search_config(**kwargs)` (search.resolve_search_config; unknown keys are refused).
+Alternatively the [operators] table: explicit PySR settings, or `module = "sfm.sr.operators"` with `attr = "<name>"`
+(a dict, an object with `pysr_kwargs()`, or a callable taking `kwargs`) returning operator settings only, optionally
+followed by explicit keys that override the module's.  This process must never import torch: the module import is
+checked, progress.json records `torch_in_process` per chunk, and Julia refuses to start after torch.
 """
 from __future__ import annotations
 
@@ -51,8 +54,10 @@ def load_vocabulary(source: Mapping) -> dict:
     vocab = dict(vocab)
     ignored = sorted(set(vocab) - set(search.OPERATOR_KEYS) - {"binary", "unary"})
     if ignored:
-        print(f"[sr_run] note: ignoring non-operator keys from {mod_name}.{attr}: {ignored}", file=sys.stderr)
-    vocab = {k: v for k, v in vocab.items() if k not in ignored}
+        # e.g. operators.search_config also returns the loss, maxsize, precision: dropping them would silently
+        # change the search, so refuse and point to the table that routes every key
+        raise search.SpecError(f"{mod_name}.{attr} returned non-operator keys {ignored}; use a [search_config] "
+                               f"table for a full search configuration")
     vocab.update(source.get("overrides") or {})
     if "torch" in sys.modules:
         raise RuntimeError("torch got imported while building the vocabulary")
@@ -73,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
 
     raw = search.apply_overrides(search.load_spec_file(a.spec), threads=a.threads, budget_min=a.budget_min,
                                  chunk_min=a.chunk_min, seeds=a.seeds)
-    spec = search.parse_spec(raw)
+    spec = search.parse_spec(search.resolve_search_config(raw))
     if a.status:
         print(search.format_status(spec, spec.seeds))
         return 0

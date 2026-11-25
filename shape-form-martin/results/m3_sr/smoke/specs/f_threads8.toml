@@ -1,0 +1,15 @@
+description = "smoke f: thread scaling, 8 Julia threads, otherwise identical to smoke b (no guesses), one 60 s chunk"
+step = "smoke"
+target = "f_threads8"
+data = "../data/residual3d.npz"
+output_root = "../runs"
+seeds = [0]
+threads = 8
+populations = 24
+budget_minutes = 1.0
+chunk_minutes = 1.0
+min_chunk_seconds = 10
+tiers = [12, 20, 30]
+
+[search_config]
+kwargs = { stage = "stage1", ndim = 3, loss = "gauge" }

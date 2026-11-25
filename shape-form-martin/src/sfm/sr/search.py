@@ -17,9 +17,21 @@ One seed = one ``PySRRegressor`` with a fixed ``output_directory``/``run_id``, d
                                      per complexity tier, per-chunk history, loss-plateau flag)
     hall_of_fame.json                full hall of fame (complexity, loss, equation strings exactly as PySR writes
                                      them; per-sub-expression strings for template expressions)
+    predictions/chunkNNN_<UTC>.npz   the search's OWN predictions of every hall-of-fame member on the target rows
+                                     (Julia's eval_tree_array on the member trees of the end-of-chunk state, full
+                                     constant precision), for the translator round trip done by scripts/sr_post.py
     DONE.json                        done marker once the budget is used up
-    search.log                       Julia's own console output (one file per seed, appended)
+    search.log                       Julia's own console output (one file per seed, appended; redirected inside
+                                     Julia, because Julia writes to its own duplicate of fd 1 / 2)
     events.jsonl                     one line per start / chunk / resume / fallback / stop / done
+
+Each chunk record in progress.json also holds ``state_summary`` (number of populations and members, SHA-256 of all
+population member strings and of the hall of fame); a restore records the same summary of the deserialised
+checkpoint, so "the resumed search continues the same populations" is checked exactly (``same_as_chunk_end``).
+
+The vocabulary, loss, maxsize, precision and template can come from ``[search_config]`` (default
+``sfm.sr.operators.search_config(**kwargs)``), see ``resolve_search_config``: every key it returns is routed to the
+right place or the spec is refused, so an interface change on the mathematics side cannot be dropped silently.
 
 Resume: started again with the same spec, the runner restores ``pysr/checkpoint.pkl`` with
 ``PySRRegressor.from_file(run_directory=...)`` and continues with ``warm_start=True``.  If that fails, the broken
@@ -41,6 +53,7 @@ import csv
 import datetime as _dt
 import fcntl
 import hashlib
+import importlib
 import io
 import json
 import math
@@ -74,6 +87,10 @@ LOG_FILE = "search.log"
 STOP_FILE = "STOP"                     # touch <seed_dir>/STOP to stop after the current chunk
 LOCK_FILE = ".lock"
 VAL_NLL_FILE = "plateau_val_nll.json"  # written by the refit side (record_val_nll_check)
+PRED_DIR = "predictions"
+POST_DIR = "post"                      # written by scripts/sr_post.py (separate, torch-side process)
+POST_PLATEAU_FILE = "plateau_gauge.json"
+DEFAULT_PREDICTION_MAX_ROWS = 20000
 
 DEFAULT_TIERS = (12, 20, 30)
 DEFAULT_CHUNK_MIN = 5.0
@@ -93,15 +110,21 @@ RUNNER_OWNED_KW = frozenset({
 PYSR_DEFAULTS: dict[str, Any] = {
     "parallelism": "multithreading",
     "precision": 64,
-    "print_precision": 15,     # PySR's default (5) makes the exported equation strings lossy
     "batching": False,         # a row-order dependent custom loss needs the full, ordered data set
     "verbosity": 1,            # Julia prints its search state (and evaluation rate) to search.log
     "progress": False,
     "model_selection": "best",
 }
+# print_precision, unless given: PySR's default (5) makes the exported equation strings lossy.  17 significant
+# digits round-trip a Float64 exactly (the same rule as operators.search_config); 9 for Float32.
+PRINT_PRECISION_FOR = {64: 17, 32: 9, 16: 5}
+# keys of operators.search_config() that are PySRRegressor keywords the runner passes through [pysr]
+SEARCH_CONFIG_PYSR_KEYS = frozenset({"precision", "print_precision", "batching", "complexity_of_constants",
+                                     "complexity_of_variables"})
 # Spec keys that may change between runs of the same seed without breaking resume (bookkeeping only).
 SOFT_KEYS = frozenset({"seeds", "threads", "budget_minutes", "chunk_minutes", "min_chunk_seconds", "tiers",
-                       "plateau", "salvage_aborted", "output_root", "description", "log_julia_output"})
+                       "plateau", "salvage_aborted", "output_root", "description", "log_julia_output",
+                       "export_predictions", "prediction_max_rows"})
 SOFT_PYSR_KEYS = frozenset({"verbosity", "progress", "print_precision", "update_verbosity", "model_selection"})
 OPERATOR_KEYS = ("binary_operators", "unary_operators", "operators", "constraints", "nested_constraints",
                  "complexity_of_operators", "extra_sympy_mappings", "sympy_mappings")
@@ -394,6 +417,8 @@ class RunSpec:
     output_root: Path
     salvage_aborted: bool = True
     log_julia_output: bool = True
+    export_predictions: bool = True
+    prediction_max_rows: int = DEFAULT_PREDICTION_MAX_ROWS
     spec_path: Path | None = None
     raw: dict = field(default_factory=dict)
 
@@ -562,6 +587,8 @@ def parse_spec(raw: Mapping, base_dir: str | os.PathLike | None = None) -> RunSp
         raise SpecError(f"[pysr] may not set runner-owned keywords {owned}")
     merged = dict(PYSR_DEFAULTS)
     merged.update(pysr)
+    if "print_precision" not in merged:
+        merged["print_precision"] = PRINT_PRECISION_FOR.get(int(merged.get("precision", 32)), 17)
     if merged.get("batching") and any(k in loss for k in ("loss_function", "loss_function_expression")):
         warnings.warn("batching with a full-objective loss: the loss sees a random row subset (row order lost) "
                       "unless it defines the 4-argument (tree, dataset, options, idx) method", stacklevel=2)
@@ -579,8 +606,82 @@ def parse_spec(raw: Mapping, base_dir: str | os.PathLike | None = None) -> RunSp
         operators_source=operators_source, loss=loss, template=template, guesses=guesses, pysr=merged,
         output_root=rel(raw["output_root"]) if raw.get("output_root") else _default_output_root(),
         salvage_aborted=bool(raw.get("salvage_aborted", True)), log_julia_output=bool(raw.get("log_julia_output", True)),
+        export_predictions=bool(raw.get("export_predictions", True)),
+        prediction_max_rows=int(raw.get("prediction_max_rows", DEFAULT_PREDICTION_MAX_ROWS)),
         spec_path=spec_path, raw={k: v for k, v in raw.items() if not k.startswith("_")},
     )
+
+
+def resolve_search_config(raw: Mapping) -> dict:
+    """Fill a raw spec from its ``[search_config]`` table (no Julia, no torch).
+
+    ``[search_config]`` = ``module`` (default ``sfm.sr.operators``), ``function`` (default ``search_config``) and
+    ``kwargs`` (e.g. ``{stage = "stage1", ndim = 3, loss = "gauge"}``).  The function's result is routed key by key:
+    operator settings -> ``operators``; ``elementwise_loss`` / ``loss_function`` / ``loss_function_expression`` ->
+    ``loss``; ``template`` (TemplateExpressionSpec keyword arguments) -> ``template`` (plus ``name`` = the template
+    key, which the post-processing uses to translate); ``maxsize`` -> ``maxsize``; ``precision``,
+    ``print_precision``, ``batching``, ``complexity_of_constants``, ``complexity_of_variables`` -> ``pysr``.
+    A key the runner does not know raises (an interface change must not be dropped silently).  The spec may not
+    give operators, a loss or a template besides; a spec ``maxsize`` must agree; explicit ``[pysr]`` values win
+    over the function's and are listed in ``search_config_resolved.pysr_overridden_by_spec``."""
+    raw = dict(raw)
+    sc = raw.get("search_config")
+    if sc is None:
+        return raw
+    sc = dict(sc)
+    mod_name = str(sc.get("module", "sfm.sr.operators"))
+    fn_name = str(sc.get("function", "search_config"))
+    kwargs = dict(sc.get("kwargs") or {})
+    torch_before = "torch" in sys.modules
+    fn = getattr(importlib.import_module(mod_name), fn_name)
+    cfg = dict(fn(**kwargs))
+    if "torch" in sys.modules and not torch_before:
+        raise RuntimeError(f"{mod_name}.{fn_name} imported torch; the search process must stay torch-free")
+    ops: dict[str, Any] = {}
+    loss: dict[str, Any] = {}
+    pysr_kw: dict[str, Any] = {}
+    template = None
+    maxsize = None
+    unknown = []
+    for k, v in cfg.items():
+        if k in OPERATOR_KEYS:
+            ops[k] = v
+        elif k in LOSS_KEYS:
+            loss[k] = v
+        elif k in SEARCH_CONFIG_PYSR_KEYS:
+            pysr_kw[k] = v
+        elif k == "maxsize":
+            maxsize = int(v)
+        elif k == "template":
+            template = dict(v)
+        else:
+            unknown.append(k)
+    if unknown:
+        raise SpecError(f"{mod_name}.{fn_name}() returned keys the runner does not route: {sorted(unknown)} "
+                        f"(interface change? extend search.resolve_search_config)")
+    if raw.get("operators"):
+        raise SpecError("give the operators either through [search_config] or through [operators], not both")
+    if raw.get("loss"):
+        raise SpecError("give the loss either through [search_config] or through [loss], not both")
+    if template is not None and raw.get("template"):
+        raise SpecError("give the template either through [search_config] or through [template], not both")
+    if maxsize is not None and raw.get("maxsize") is not None and int(raw["maxsize"]) != maxsize:
+        raise SpecError(f"spec maxsize {raw['maxsize']} differs from {mod_name}.{fn_name}()'s {maxsize}")
+    raw["operators"] = ops
+    if loss:
+        raw["loss"] = loss
+    if template is not None:
+        if kwargs.get("template") is not None:
+            template.setdefault("name", str(kwargs["template"]))
+        raw["template"] = template
+    if maxsize is not None:
+        raw["maxsize"] = maxsize
+    pysr = dict(raw.get("pysr") or {})
+    raw["pysr"] = {**pysr_kw, **pysr}
+    raw["search_config_resolved"] = {
+        "module": mod_name, "function": fn_name, "kwargs": kwargs, "keys": sorted(cfg),
+        "pysr_overridden_by_spec": sorted(k for k in pysr_kw if k in pysr and pysr[k] != pysr_kw[k])}
+    return raw
 
 
 def apply_overrides(raw: Mapping, *, threads: int | None = None, budget_min: float | None = None,
@@ -721,19 +822,24 @@ def _sympy_callables(mappings: Mapping[str, str]) -> dict:
     return out
 
 
+# All indexing of the search state happens in Julia (1-based): state = (pops[out][pop], hof or [hof per output]).
 _JULIA_HELPERS = r"""
-function sfm_template_parts(hof, options, cs)
+sfm_hof_of(state, o::Integer) = o == 0 ? state[2] : state[2][o]
+
+function sfm_template_parts(state, o::Integer, options, cs)
+    hof = sfm_hof_of(state, o)
     res = Vector{Vector{String}}()
     for c in cs
         parts = String[]
         if 1 <= c <= length(hof.members) && hof.exists[c]
             ex = hof.members[c].tree
-            contents = SymbolicRegression.DynamicExpressions.get_contents(ex)
+            contents = SymbolicRegression.get_contents(ex)
             for (k, v) in pairs(contents)
                 push!(parts, String(k))
-                push!(parts, SymbolicRegression.string_tree(v, options; pretty=false))
+                push!(parts, SymbolicRegression.string_tree(v, options; pretty=false,
+                                                            variable_names=["#$i" for i in 1:64]))
             end
-            md = SymbolicRegression.DynamicExpressions.get_metadata(ex)
+            md = SymbolicRegression.get_metadata(ex)
             if hasproperty(md, :_data) && hasproperty(md._data, :parameters)
                 for (k, v) in pairs(md._data.parameters)
                     push!(parts, "param:" * String(k))
@@ -745,12 +851,70 @@ function sfm_template_parts(hof, options, cs)
     end
     return res
 end
+
+# the search's own prediction of each hall-of-fame member (complexities cs) on X (nfeatures x N)
+function sfm_hof_eval(state, o::Integer, options, cs, X::AbstractMatrix)
+    hof = sfm_hof_of(state, o)
+    T = eltype(X)
+    pred = fill(T(NaN), length(cs), size(X, 2))
+    ok = fill(false, length(cs))
+    loss = fill(NaN, length(cs))
+    for (k, c) in enumerate(cs)
+        if 1 <= c <= length(hof.members) && hof.exists[c]
+            m = hof.members[c]
+            p, flag = eval_tree_array(m.tree, X, options)
+            pred[k, :] .= p
+            ok[k] = flag
+            loss[k] = Float64(m.loss)
+        end
+    end
+    return (pred = pred, ok = ok, loss = loss)
+end
+
+# every population member and every hall-of-fame entry as text (hashed on the Python side)
+function sfm_state_text(state, options)
+    pops = state[1]
+    lines = String[]
+    npops = 0
+    for popsj in pops, pop in popsj
+        npops += 1
+        for m in pop.members
+            push!(lines, SymbolicRegression.string_tree(m.tree, options; pretty=false))
+        end
+    end
+    hofs = hasproperty(state[2], :members) ? [state[2]] : collect(state[2])
+    hl = String[]
+    for (j, h) in enumerate(hofs), c in eachindex(h.members)
+        h.exists[c] || continue
+        push!(hl, string(j, ":", c, ":", SymbolicRegression.string_tree(h.members[c].tree, options; pretty=false)))
+    end
+    return (npops = npops, nmembers = length(lines), pops = join(lines, "\n"), nhof = length(hl), hof = join(hl, "\n"))
+end
+
+function sfm_redirect_begin(path::AbstractString)
+    io = open(path, "a")
+    old = (stdout, stderr, Base.CoreLogging.global_logger())
+    redirect_stdout(io)
+    redirect_stderr(io)
+    Base.CoreLogging.global_logger(Base.CoreLogging.SimpleLogger(io))
+    return (io, old)
+end
+
+function sfm_redirect_end(h)
+    io, old = h
+    flush(io)
+    redirect_stdout(old[1])
+    redirect_stderr(old[2])
+    Base.CoreLogging.global_logger(old[3])
+    close(io)
+    return nothing
+end
 """
 
 
 def _ensure_julia_helpers() -> None:
     jl = _pysr().jl
-    if not bool(jl.seval("isdefined(Main, :sfm_template_parts)")):
+    if not bool(jl.seval("isdefined(Main, :sfm_redirect_end)")):
         jl.seval(_JULIA_HELPERS)
 
 
@@ -791,32 +955,26 @@ def lock_is_held(seed_dir: Path) -> bool:
 
 
 @contextlib.contextmanager
-def redirect_fds_to(log_path: Path | None):
-    """Send fd 1 and 2 (Julia writes there directly) to `log_path` for the duration; no-op if None."""
+def julia_output_to(log_path: Path | None):
+    """Send Julia's stdout, stderr and log messages to `log_path` for the duration (no-op if None).
+
+    Julia (started by juliacall) writes to its *own duplicate* of fd 1 / 2, so a dup2 on the Python side does not
+    reach it (measured: nothing arrived).  Julia's ``redirect_stdout``/``redirect_stderr`` swap its streams and also
+    dup2 the process's fd 1 / 2, so Python prints made during the fit land in the same file."""
     if log_path is None:
         yield
         return
+    _ensure_julia_helpers()
+    jl = _pysr().jl
     sys.stdout.flush()
     sys.stderr.flush()
-    saved = (os.dup(1), os.dup(2))
-    fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
-    try:
-        os.dup2(fd, 1)
-        os.dup2(fd, 2)
-    finally:
-        os.close(fd)
+    h = jl.sfm_redirect_begin(str(Path(log_path).resolve()))
     try:
         yield
     finally:
-        with contextlib.suppress(Exception):
-            if "pysr" in sys.modules:
-                sys.modules["pysr"].jl.seval("flush(stdout); flush(stderr)")
         sys.stdout.flush()
         sys.stderr.flush()
-        os.dup2(saved[0], 1)
-        os.dup2(saved[1], 2)
-        os.close(saved[0])
-        os.close(saved[1])
+        jl.sfm_redirect_end(h)
 
 
 def parse_eval_rates(text: str) -> list[float]:
@@ -863,6 +1021,7 @@ class SeedRun:
         self.seed_dir = spec.seed_dir(seed)
         self.run_dir = self.seed_dir / RUN_ID
         self.snap_dir = self.seed_dir / SNAPSHOT_DIR
+        self.pred_dir = self.seed_dir / PRED_DIR
         self.target: Target | None = None
         self.model = None
         self.populations: int | None = None
@@ -995,20 +1154,84 @@ class SeedRun:
             out.append(str(dst.relative_to(self.seed_dir)))
         return out
 
-    def _template_parts(self, rows_per_output: list[list[dict]]) -> list[list[dict | None]] | None:
-        if self.spec.template is None or self.model is None:
+    def _out_index(self, o: int) -> int:
+        """Julia-side output index for the helpers: 0 = the single hall of fame, k = output k (1-based)."""
+        return 0 if self.target.nout == 1 else o + 1
+
+    def _state_summary(self, state) -> dict | None:
+        """Counts and SHA-256 hashes of the population members and hall-of-fame entries of a search state."""
+        if state is None or self.model is None:
+            return None
+        try:
+            _ensure_julia_helpers()
+            r = _pysr().jl.sfm_state_text(state, self.model.julia_options_)
+            return {"n_populations": int(r.npops), "n_members": int(r.nmembers), "n_hof_entries": int(r.nhof),
+                    "populations_sha256": hashlib.sha256(str(r.pops).encode()).hexdigest(),
+                    "hof_sha256": hashlib.sha256(str(r.hof).encode()).hexdigest()}
+        except Exception as e:  # noqa: BLE001  bookkeeping must not kill the search
+            self._say(f"WARNING: state summary failed: {e!r}")
+            return {"error": repr(e)}
+
+    def _prediction_rows(self) -> np.ndarray:
+        n = len(self.target.X)
+        m = int(self.spec.prediction_max_rows)
+        if m <= 0 or n <= m:
+            return np.arange(n)
+        return np.unique(np.linspace(0, n - 1, m).round().astype(np.int64))
+
+    def _export_predictions(self, label: str, rows_per_output: list[list[dict]], state) -> dict | None:
+        """The search's own predictions of every listed hall-of-fame member (Julia eval_tree_array on the member
+        trees of `state`, full constant precision) on the target rows -> predictions/<label>_<UTC>.npz."""
+        if not self.spec.export_predictions or state is None:
+            return None
+        try:
+            _ensure_julia_helpers()
+            pysr = _pysr()
+            jl = pysr.jl
+            from pysr.julia_helpers import jl_array
+            prec = int(self.spec.pysr.get("precision", 32))
+            dtype = {16: np.float16, 32: np.float32, 64: np.float64}[prec]
+            rows_idx = self._prediction_rows()
+            Xt = jl_array(np.ascontiguousarray(self.target.X[rows_idx].T.astype(dtype)))
+            options = self.model.julia_options_
+            arrays: dict[str, np.ndarray] = {"rows": rows_idx}
+            info = {"n_rows": int(len(rows_idx)), "outputs": []}
+            for o, rows in enumerate(rows_per_output):
+                cs = [int(r["complexity"]) for r in rows]
+                res = jl.sfm_hof_eval(state, self._out_index(o), options, jl.seval("Vector{Int}")(cs), Xt)
+                pred = np.array(res.pred, dtype=np.float64).reshape(len(cs), len(rows_idx))
+                ok = np.array(res.ok, dtype=bool).reshape(-1)
+                loss_state = np.array(res.loss, dtype=np.float64).reshape(-1)
+                loss_csv = np.array([r["loss"] for r in rows], dtype=np.float64)
+                arrays.update({f"pred_o{o}": pred, f"ok_o{o}": ok, f"complexity_o{o}": np.array(cs, dtype=np.int64),
+                               f"loss_state_o{o}": loss_state, f"loss_csv_o{o}": loss_csv,
+                               f"equation_o{o}": np.array([r["equation"] for r in rows], dtype=str)})
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    rel = np.abs(loss_state - loss_csv) / np.maximum(np.abs(loss_csv), 1e-300)
+                info["outputs"].append({"n_members": len(cs), "all_eval_ok": bool(ok.all()),
+                                        "max_rel_loss_state_vs_csv": float(np.nanmax(rel)) if len(rel) else None})
+            self.pred_dir.mkdir(parents=True, exist_ok=True)
+            dst = self.pred_dir / f"{label}_{utc_stamp()}.npz"
+            tmp = dst.with_name("." + dst.name + ".tmp.npz")
+            np.savez(tmp, **arrays)
+            os.replace(tmp, dst)
+            info["file"] = str(dst.relative_to(self.seed_dir))
+            return info
+        except Exception as e:  # noqa: BLE001  export must not kill the search
+            self._say(f"WARNING: prediction export failed: {e!r}")
+            return {"error": repr(e)}
+
+    def _template_parts(self, rows_per_output: list[list[dict]], state) -> list[list[dict | None]] | None:
+        if self.spec.template is None or self.model is None or state is None:
             return None
         try:
             _ensure_julia_helpers()
             jl = _pysr().jl
-            state = self.model.julia_state_
             options = self.model.julia_options_
-            hofs = state[1]
             res = []
             for o, rows in enumerate(rows_per_output):
-                hof = hofs[o] if self.target.nout > 1 else hofs
                 cs = jl.seval("Vector{Int}")([int(r["complexity"]) for r in rows])
-                parts = jl.sfm_template_parts(hof, options, cs)
+                parts = jl.sfm_template_parts(state, self._out_index(o), options, cs)
                 per = []
                 for p in parts:
                     lst = [str(s) for s in p]
@@ -1028,8 +1251,9 @@ class SeedRun:
             self._say(f"WARNING: template sub-expression export failed: {e!r}")
             return None
 
-    def _export_hof(self, rows_per_output: list[list[dict]], done: bool) -> None:
-        parts = self._template_parts(rows_per_output)
+    def _export_hof(self, rows_per_output: list[list[dict]], done: bool, state=None,
+                    predictions: dict | None = None) -> None:
+        parts = self._template_parts(rows_per_output, state)
         outputs = []
         for o, rows in enumerate(rows_per_output):
             eqs = []
@@ -1045,7 +1269,18 @@ class SeedRun:
                "elapsed_search_s": self.progress["elapsed_search_s"], "variable_names": self.target.variable_names,
                "nout": self.target.nout, "maxsize": self.spec.maxsize, "template": self.spec.template,
                "print_precision": self.spec.pysr.get("print_precision"), "precision": self.spec.pysr.get("precision"),
-               "loss": self.spec.loss or "PySR default (weighted) L2", "outputs": outputs}
+               "loss": self.spec.loss or "PySR default (weighted) L2",
+               "predictions": (predictions or {}).get("file"), "outputs": outputs}
+        atomic_write_json(self.seed_dir / HOF_JSON, doc)
+
+    def _mark_hof_done(self) -> None:
+        doc = read_json(self.seed_dir / HOF_JSON)
+        if doc is None:
+            rows = read_run_hofs(self.run_dir, self.target.nout)
+            if rows is not None:
+                self._export_hof(rows, done=True)
+            return
+        doc.update(done=True, done_at=utc_now())
         atomic_write_json(self.seed_dir / HOF_JSON, doc)
 
     def _guesses_from_export(self) -> list | None:
@@ -1058,15 +1293,20 @@ class SeedRun:
                 g = []
                 for e in out["equations"]:
                     if self.spec.template is not None:
-                        if e.get("subexpressions"):
-                            g.append(dict(e["subexpressions"]))
+                        # the Julia export, else PySR's own "u = ...; v = ..." string
+                        d = (dict(e["subexpressions"]) if e.get("subexpressions")
+                             else parse_template_equation(e["equation"], self.spec.template["expressions"]))
+                        if d is not None:
+                            g.append(d)
                     else:
                         g.append(e["equation"])
                 per_output.append(g)
         else:
             rows = read_run_hofs(self.run_dir, self.target.nout) or self._latest_snapshot_rows()
-            if rows is None or self.spec.template is not None:
+            if rows is None:
                 return None
+            if self.spec.template is not None:
+                return self._salvage_guesses(rows)
             per_output = [[r["equation"] for r in rs] for rs in rows]
         if not any(per_output):
             return None
@@ -1187,7 +1427,11 @@ class SeedRun:
             self._write_progress()
 
             # Julia
+            t_j = time.monotonic()
             _pysr()
+            p.setdefault("startups", []).append({"at": utc_now(), "julia_import_s": time.monotonic() - t_j,
+                                                 "torch_in_process": "torch" in sys.modules})
+            p["torch_in_process"] = "torch" in sys.modules
             p["julia"] = julia_thread_info()
             if p["julia"]["nthreads"] != self.spec.threads:
                 self._say(f"WARNING: Julia runs {p['julia']['nthreads']} threads, spec asks for {self.spec.threads} "
@@ -1198,18 +1442,32 @@ class SeedRun:
             restored_ok = None
             if p["chunks_completed"] > 0:
                 try:
+                    t_r = time.monotonic()
                     self.model = self._restore_from_checkpoint()
+                    restore_s = time.monotonic() - t_r
                     restored_ok = False   # confirmed after the first warm-start fit
-                    rec = {"at": utc_now(), "method": "from_file", "after_chunk": p["chunks_completed"] - 1}
+                    summ = self._state_summary(self.model.julia_state_)
+                    last = (p["history"][-1].get("state_summary") if p["history"] else None) or {}
+                    same = None
+                    if summ and "populations_sha256" in summ and "populations_sha256" in last:
+                        same = (summ["populations_sha256"] == last["populations_sha256"]
+                                and summ["hof_sha256"] == last["hof_sha256"])
+                    rec = {"at": utc_now(), "method": "from_file", "after_chunk": p["chunks_completed"] - 1,
+                           "restore_s": restore_s, "state_summary": summ, "same_as_chunk_end": same}
                     p["restores"].append(rec)
                     append_event(self.seed_dir, "restored", **rec)
-                    self._say(f"restored checkpoint after chunk {p['chunks_completed'] - 1} (warm start)")
+                    self._say(f"restored checkpoint after chunk {p['chunks_completed'] - 1} (warm start) in "
+                              f"{restore_s:.1f} s; populations and hall of fame identical to that chunk's end: "
+                              f"{same}")
                     pending_guesses = self._salvage_guesses(salvage_rows)
                     if pending_guesses:
                         rec["salvaged_guesses"] = (sum(map(len, pending_guesses)) if self.target.nout > 1
                                                    else len(pending_guesses))
                 except Exception as e:  # noqa: BLE001
                     self.model = self._fallback_model(f"restore failed: {type(e).__name__}: {e}")
+                    # _run_chunk sets `guesses` explicitly: carry the fallback's (and a killed chunk's) forward
+                    pending_guesses = merge_guesses(self.model.guesses, self._salvage_guesses(salvage_rows),
+                                                    self.target.nout)
             else:
                 if (self.run_dir / "checkpoint.pkl").exists():
                     stale = self.run_dir.with_name(f"{RUN_ID}.stale-{utc_stamp()}")
@@ -1280,9 +1538,7 @@ class SeedRun:
         if reason == "budget":
             p["status"] = "done"
             p["done"] = True
-            rows = read_run_hofs(self.run_dir, self.target.nout)
-            if rows is not None and self.model is not None:
-                self._export_hof(rows, done=True)
+            self._mark_hof_done()
             hof_sha = sha256_file(self.seed_dir / HOF_JSON) if (self.seed_dir / HOF_JSON).exists() else None
             atomic_write_json(self.seed_dir / DONE_FILE, {
                 "done_at": utc_now(), "elapsed_search_s": p["elapsed_search_s"], "budget_s": p["budget_s"],
@@ -1315,7 +1571,7 @@ class SeedRun:
             with open(log_path, "a", encoding="utf-8") as f:
                 f.write(f"\n===== {utc_now()} chunk {idx} timeout {chunk_s:.1f} s =====\n")
         t0 = time.monotonic()
-        with redirect_fds_to(log_path), warnings.catch_warnings():
+        with julia_output_to(log_path), warnings.catch_warnings():
             warnings.filterwarnings("ignore", message=".*random_state.*")
             warnings.filterwarnings("ignore", message=".*maxsize.*")
             self.model.fit(t.X, t.y, weights=t.weights, variable_names=list(t.variable_names))
@@ -1333,9 +1589,16 @@ class SeedRun:
         regress = None
         if prev_rows is not None:
             regress = [hof_regressions(a, b) for a, b in zip(prev_rows, rows)]
+        t1 = time.monotonic()
+        state = self.model.julia_state_            # deserialised once per chunk
+        summ = self._state_summary(state)
+        preds = self._export_predictions(f"chunk{idx:03d}", rows, state)
+        export_s = time.monotonic() - t1
         rec = {"index": idx, "started_at": p["in_flight"]["started_at"], "finished_at": utc_now(),
-               "timeout_s": chunk_s, "fit_wall_s": dt, "elapsed_after_s": p["elapsed_search_s"] + dt,
+               "timeout_s": chunk_s, "fit_wall_s": dt, "fit_overhead_s": dt - chunk_s,
+               "elapsed_after_s": p["elapsed_search_s"] + dt, "export_s": export_s,
                "interrupted": interrupted, "with_guesses": guesses is not None,
+               "torch_in_process": "torch" in sys.modules, "state_summary": summ, "predictions": preds,
                "tier_best": [tier_bests(r, self.spec.tiers) for r in rows],
                "n_front": [len(r) for r in rows], "snapshots": snaps,
                "hof_not_worse_than_prev_chunk": (None if regress is None else all(len(x) == 0 for x in regress)),
@@ -1350,7 +1613,10 @@ class SeedRun:
         p["plateau"] = plateau_check(p["history"], self.spec.tiers, self.spec.plateau_window,
                                      self.spec.plateau_rel_tol)
         p["in_flight"] = None
-        self._export_hof(rows, done=False)
+        p["torch_in_process"] = bool(p.get("torch_in_process")) or ("torch" in sys.modules)
+        t2 = time.monotonic()
+        self._export_hof(rows, done=False, state=state, predictions=preds)
+        rec["export_s"] += time.monotonic() - t2
         self._write_progress()
         append_event(self.seed_dir, "chunk", index=idx, fit_wall_s=dt, tier_best=rec["tier_best"],
                      interrupted=interrupted, evals_per_s=rec["evals_per_s_last"])
@@ -1405,14 +1671,23 @@ def plateau_status(seed_dir: str | os.PathLike) -> dict:
     ``plateau`` is True/False when both parts are known, None otherwise (``loss_rule`` alone is still reported)."""
     seed_dir = Path(seed_dir)
     prog = read_json(seed_dir / PROGRESS_FILE) or {}
-    loss_rule = (prog.get("plateau") or {}).get("plateau")
+    raw_rule = (prog.get("plateau") or {}).get("plateau")
+    loss_rule, source = raw_rule, "runner (raw front)"
+    post = read_json(seed_dir / POST_DIR / POST_PLATEAU_FILE)
+    if post is not None:
+        if post.get("chunks_completed") == prog.get("chunks_completed"):
+            loss_rule = (post.get("plateau") or {}).get("plateau")
+            source = "sr_post (front after the scan and gauge de-duplication)"
+        else:
+            source = "runner (raw front; sr_post result is stale)"
     val = read_json(seed_dir / VAL_NLL_FILE)
     val_ok = None if val is None else (not val["front_improves_by_more_than_1se"])
     if loss_rule is None or val_ok is None:
         combined = None
     else:
         combined = bool(loss_rule and val_ok)
-    return {"loss_rule": loss_rule, "val_nll_rule": val_ok, "plateau": combined}
+    return {"loss_rule": loss_rule, "val_nll_rule": val_ok, "plateau": combined, "loss_rule_source": source,
+            "loss_rule_raw": raw_rule}
 
 
 def seed_status(spec: RunSpec, seed: int) -> dict:

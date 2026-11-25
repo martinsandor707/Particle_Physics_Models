@@ -1,0 +1,24 @@
+
+===== 16:06:57 <repo>/shape-form-martin/scripts/sr_run.py <repo>/shape-form-martin/results/m3_sr/smoke/specs/e_multiout.toml =====
+[smoke/e_multiout/seed0] chunk 0: 24 s (elapsed 0 / 45 s)
+[smoke/e_multiout/seed0] chunk 0 done in 50 s | <=6:0.004398 <=12:2.193e-06 <=18:2.181e-06; <=6:0.000773 <=12:3.785e-06 <=18:3.637e-06; <=6:4.199e-06 <=12:4.065e-06 <=18:3.854e-06 | plateau=None | 1.2e+06 evals/s
+[smoke/e_multiout/seed0] DONE: 1 chunks, 50 s of 45 s
+smoke/e_multiout  (budget 0.8 min per seed, chunk 0.4 min, tiers [6, 12, 18])
+  seed0: done DONE | chunks 1 | 50/45 s | <=6: 0.004398 <=12: 2.193e-06 <=18: 2.181e-06 | <=6: 0.000773 <=12: 3.785e-06 <=18: 3.637e-06 | <=6: 4.199e-06 <=12: 4.065e-06 <=18: 3.854e-06 | plateau(loss) n/a, val-NLL n/a, combined n/a | fallback no | aborted 0 | 1.2e+06 evals/s
+
+===== 16:07:50 <repo>/shape-form-martin/scripts/sr_run.py <repo>/shape-form-martin/results/m3_sr/smoke/specs/e_multiout.toml --budget-min 1.2 =====
+Attempting to load model from <repo>/shape-form-martin/results/m3_sr/smoke/runs/smoke/e_multiout/seed0/pysr/checkpoint.pkl...
+[smoke/e_multiout/seed0] budget extended to 72 s; continuing the same seed
+[smoke/e_multiout/seed0] restored checkpoint after chunk 0 (warm start) in 0.1 s; populations and hall of fame identical to that chunk's end: True
+[smoke/e_multiout/seed0] chunk 1: 22 s (elapsed 50 / 72 s)
+[smoke/e_multiout/seed0] chunk 1 done in 38 s | <=6:0.004398 <=12:2.193e-06 <=18:2.041e-06; <=6:0.000773 <=12:3.785e-06 <=18:3.637e-06; <=6:4.199e-06 <=12:4.065e-06 <=18:3.825e-06 | plateau=None | 1.64e+06 evals/s
+[smoke/e_multiout/seed0] DONE: 2 chunks, 88 s of 72 s
+smoke/e_multiout  (budget 1.2 min per seed, chunk 0.4 min, tiers [6, 12, 18])
+  seed0: done DONE | chunks 2 | 88/72 s | <=6: 0.004398 <=12: 2.193e-06 <=18: 2.041e-06 | <=6: 0.000773 <=12: 3.785e-06 <=18: 3.637e-06 | <=6: 4.199e-06 <=12: 4.065e-06 <=18: 3.825e-06 | plateau(loss) n/a, val-NLL n/a, combined n/a | fallback no | aborted 0 | 1.64e+06 evals/s
+
+===== 16:08:34 <repo>/shape-form-martin/scripts/sr_post.py <repo>/shape-form-martin/results/m3_sr/smoke/specs/e_multiout.toml --float32 =====
+[sr_post] seed0 output 0: 14 members, 0 violating (dropped), 0 gauge duplicates, front after scan+dedup 14; round trip max |torch - Julia| = 2.220446049250313e-16 (all <= 1e-05: True); loss max rel diff 9.753583116244548e-15; complexity ok True
+[sr_post] seed0 output 1: 12 members, 0 violating (dropped), 0 gauge duplicates, front after scan+dedup 12; round trip max |torch - Julia| = 2.220446049250313e-16 (all <= 1e-05: True); loss max rel diff 1.2343964790035015e-14; complexity ok True
+[sr_post] seed0 output 2: 13 members, 4 violating (dropped), 0 gauge duplicates, front after scan+dedup 9; round trip max |torch - Julia| = 4.440892098500626e-16 (all <= 1e-05: True); loss max rel diff 6.113400290945409e-16; complexity ok True
+[sr_post] plateau (after scan + gauge dedup): None (needs 4 completed chunks, have 2)
+[sr_post] PASS

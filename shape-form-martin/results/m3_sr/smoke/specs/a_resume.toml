@@ -1,0 +1,16 @@
+description = "smoke a: kill / resume / SIGINT / extension / fallback on a toy 2-D target (synthetic)"
+step = "smoke"
+target = "a_resume"
+data = "../data/toy2d.npz"
+output_root = "../runs"
+seeds = [0]
+threads = 8
+budget_minutes = 2.0
+chunk_minutes = 0.3333333333
+min_chunk_seconds = 8
+maxsize = 25
+tiers = [8, 15, 25]
+
+[operators]
+binary_operators = ["+", "-", "*"]
+unary_operators = ["tanh", "exp", "square"]

@@ -1,0 +1,14 @@
+description = "smoke d: template tanh(u(zt,x) + v(rh,x) + w(zt,rh)) from operators.search_config, gauge loss as loss_function_expression"
+step = "smoke"
+target = "d_template"
+data = "../data/residual3d.npz"
+output_root = "../runs"
+seeds = [0]
+threads = 8
+budget_minutes = 0.75
+chunk_minutes = 0.75
+min_chunk_seconds = 10
+tiers = [12, 20, 30]
+
+[search_config]
+kwargs = { stage = "stage1", ndim = 3, loss = "gauge", template = "s1_tanh_sum" }

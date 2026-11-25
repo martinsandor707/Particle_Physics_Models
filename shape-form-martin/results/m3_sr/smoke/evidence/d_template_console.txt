@@ -1,0 +1,36 @@
+
+===== 16:04:50 <repo>/shape-form-martin/scripts/sr_run.py <repo>/shape-form-martin/results/m3_sr/smoke/specs/d_template.toml =====
+[smoke/d_template/seed0] chunk 0: 45 s (elapsed 0 / 45 s)
+[smoke/d_template/seed0] WARNING: template sub-expression export failed: JuliaError(<jl UndefVarError(:DynamicExpressions, 0x0000000000009a3f, SymbolicRegression)>, <jl Union{Ptr{Nothing}, Base.InterpreterIP}[Ptr{Nothing}(0x00007ff08a8cc5ca), Ptr{Nothing}(0x00007fefd02150b3), Ptr{Nothing}(0x00007fefd0215408), Ptr{Nothing}(0x00007ff08a8590cf), Ptr{Nothing}(0x00007fefd0213046), Ptr{Nothing}(0x00007ff00e84cd27), Ptr{Nothing}(0x00007ff00e8a7a43), Ptr{Nothing}(0x00007ff00e8b1440), Ptr{Nothing}(0x0000000001627ddc), Ptr{Nothing}(0x0000000001615204), Ptr{Nothing}(0x00000000016c6a1f), Ptr{Nothing}(0x00000000016c6959), Ptr{Nothing}(0x0000000001615204), Ptr{Nothing}(0x000000000169035f), Ptr{Nothing}(0x00000000016ac708), Ptr{Nothing}(0x0000000001829244), Ptr{Nothing}(0x0000000001829005), Ptr{Nothing}(0x0000000001828d89), Ptr{Nothing}(0x0000000001828d0f), Ptr{Nothing}(0x0000000001828c1c), Ptr{Nothing}(0x00000000018e0062), Ptr{Nothing}(0x0000000001789bd7), Ptr{Nothing}(0x00000000017899eb), Ptr{Nothing}(0x00007ff109827780), Ptr{Nothing}(0x00007ff1098278b8), Ptr{Nothing}(0x00000000017af1a8)]>)
+[smoke/d_template/seed0] chunk 0 done in 68 s | <=12:0.005751 <=20:0.002973 <=30:0.002973 | plateau=None | 8.37e+03 evals/s
+[smoke/d_template/seed0] DONE: 1 chunks, 68 s of 45 s
+smoke/d_template  (budget 0.8 min per seed, chunk 0.8 min, tiers [12, 20, 30])
+  seed0: done DONE | chunks 1 | 68/45 s | <=12: 0.005751 <=20: 0.002973 <=30: 0.002973 | plateau(loss) n/a, val-NLL n/a, combined n/a | fallback no | aborted 0 | 8.37e+03 evals/s
+
+===== 16:06:04 <repo>/shape-form-martin/scripts/sr_run.py <repo>/shape-form-martin/results/m3_sr/smoke/specs/d_template.toml --budget-min 1.6 =====
+Attempting to load model from <repo>/shape-form-martin/results/m3_sr/smoke/runs/smoke/d_template/seed0/pysr/checkpoint.pkl...
+[smoke/d_template/seed0] budget extended to 96 s; continuing the same seed
+[smoke/d_template/seed0] restored checkpoint after chunk 0 (warm start) in 1.2 s; populations and hall of fame identical to that chunk's end: True
+[smoke/d_template/seed0] chunk 1: 28 s (elapsed 68 / 96 s)
+[smoke/d_template/seed0] WARNING: template sub-expression export failed: JuliaError(<jl UndefVarError(:DynamicExpressions, 0x0000000000009a45, SymbolicRegression)>, <jl Union{Ptr{Nothing}, Base.InterpreterIP}[Ptr{Nothing}(0x00007f740e0cc5ca), Ptr{Nothing}(0x00007f737833ae43), Ptr{Nothing}(0x00007f737833b188), Ptr{Nothing}(0x00007f740e0590cf), Ptr{Nothing}(0x00007f7378338db6), Ptr{Nothing}(0x00007f7391e4cd27), Ptr{Nothing}(0x00007f7391ea7a43), Ptr{Nothing}(0x00007f7391eb1440), Ptr{Nothing}(0x0000000001627ddc), Ptr{Nothing}(0x0000000001615204), Ptr{Nothing}(0x00000000016c6a1f), Ptr{Nothing}(0x00000000016c6959), Ptr{Nothing}(0x0000000001615204), Ptr{Nothing}(0x000000000169035f), Ptr{Nothing}(0x00000000016ac708), Ptr{Nothing}(0x0000000001829244), Ptr{Nothing}(0x0000000001829005), Ptr{Nothing}(0x0000000001828d89), Ptr{Nothing}(0x0000000001828d0f), Ptr{Nothing}(0x0000000001828c1c), Ptr{Nothing}(0x00000000018e0062), Ptr{Nothing}(0x0000000001789bd7), Ptr{Nothing}(0x00000000017899eb), Ptr{Nothing}(0x00007f748d027780), Ptr{Nothing}(0x00007f748d0278b8), Ptr{Nothing}(0x00000000017af1a8)]>)
+[smoke/d_template/seed0] chunk 1 done in 46 s | <=12:0.005742 <=20:0.002591 <=30:0.002591 | plateau=None | 8.46e+03 evals/s
+[smoke/d_template/seed0] DONE: 2 chunks, 114 s of 96 s
+smoke/d_template  (budget 1.6 min per seed, chunk 0.8 min, tiers [12, 20, 30])
+  seed0: done DONE | chunks 2 | 114/96 s | <=12: 0.005742 <=20: 0.002591 <=30: 0.002591 | plateau(loss) n/a, val-NLL n/a, combined n/a | fallback no | aborted 0 | 8.46e+03 evals/s
+
+===== 16:06:55 <repo>/shape-form-martin/scripts/sr_post.py <repo>/shape-form-martin/results/m3_sr/smoke/specs/d_template.toml --float32 =====
+[sr_post] seed0 output 0: 11 members, 0 violating (dropped), 0 gauge duplicates, front after scan+dedup 11; round trip max |torch - Julia| = 2.220446049250313e-16 (all <= 1e-05: True); loss max rel diff 6.269293246396097e-15; complexity ok True
+[sr_post] plateau (after scan + gauge dedup): None (needs 4 completed chunks, have 2)
+[sr_post] PASS
+===== template fallback: checkpoint truncated, --budget-min 2.1 =====
+Attempting to load model from <repo>/shape-form-martin/results/m3_sr/smoke/runs/smoke/d_template/seed0/pysr/checkpoint.pkl...
+[smoke/d_template/seed0] budget extended to 126 s; continuing the same seed
+[smoke/d_template/seed0] FALLBACK restart seeded with the saved hall of fame (11 guesses): restore failed: UnpicklingError: pickle data was truncated
+[smoke/d_template/seed0] chunk 2: 12 s (elapsed 114 / 126 s)
+[smoke/d_template/seed0] chunk 2 done in 40 s | <=12:0.005443 <=20:0.00259 <=30:0.00259 | plateau=None | 1.11e+04 evals/s
+[smoke/d_template/seed0] DONE: 3 chunks, 154 s of 126 s
+smoke/d_template  (budget 2.1 min per seed, chunk 0.8 min, tiers [12, 20, 30])
+  seed0: done DONE | chunks 3 | 154/126 s | <=12: 0.005443 <=20: 0.00259 <=30: 0.00259 | plateau(loss) n/a, val-NLL n/a, combined n/a | fallback yes | aborted 0 | 1.11e+04 evals/s
+[sr_post] seed0 output 0: 12 members, 0 violating (dropped), 0 gauge duplicates, front after scan+dedup 12; round trip max |torch - Julia| = 2.2898349882893854e-16 (all <= 1e-05: True); loss max rel diff 6.269293246396097e-15; complexity ok True
+[sr_post] plateau (after scan + gauge dedup): None (needs 4 completed chunks, have 3)
+[sr_post] PASS

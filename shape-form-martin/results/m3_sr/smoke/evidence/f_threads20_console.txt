@@ -1,0 +1,12 @@
+
+===== 16:09:57 <repo>/shape-form-martin/scripts/sr_run.py <repo>/shape-form-martin/results/m3_sr/smoke/specs/f_threads20.toml =====
+[smoke/f_threads20/seed0] chunk 0: 60 s (elapsed 0 / 60 s)
+[smoke/f_threads20/seed0] chunk 0 done in 74 s | <=12:0.004786 <=20:0.001434 <=30:0.0006516 | plateau=None | 2.96e+04 evals/s
+[smoke/f_threads20/seed0] DONE: 1 chunks, 74 s of 60 s
+smoke/f_threads20  (budget 1.0 min per seed, chunk 1.0 min, tiers [12, 20, 30])
+  seed0: done DONE | chunks 1 | 74/60 s | <=12: 0.004786 <=20: 0.001434 <=30: 0.0006516 | plateau(loss) n/a, val-NLL n/a, combined n/a | fallback no | aborted 0 | 2.96e+04 evals/s
+
+===== 16:11:14 <repo>/shape-form-martin/scripts/sr_post.py <repo>/shape-form-martin/results/m3_sr/smoke/specs/f_threads20.toml =====
+[sr_post] seed0 output 0: 24 members, 0 violating (dropped), 0 gauge duplicates, front after scan+dedup 22; round trip max |torch - Julia| = 8.881784197001252e-16 (all <= 1e-05: True); loss max rel diff 6.164773132463302e-15; complexity ok True
+[sr_post] plateau (after scan + gauge dedup): None (needs 4 completed chunks, have 1)
+[sr_post] PASS

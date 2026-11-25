@@ -1,0 +1,238 @@
+{
+ "spec": "shape-form-martin/results/m3_sr/smoke/specs/a_resume.toml",
+ "steps": [
+  {
+   "step": "1 fresh start, SIGKILL during chunk 2",
+   "returncode": -9,
+   "wall_s": 59.857017993927,
+   "chunks_completed_at_kill": 2,
+   "in_flight_at_kill": {
+    "chunk": 2,
+    "started_at": "2026-11-25T15:01:57.817587Z",
+    "timeout_s": 19.999999998,
+    "with_guesses": false
+   },
+   "checkpoint_mtime_minus_kill_s": -8.082309246063232,
+   "checkpoint_written_before_chunk2_start": true,
+   "run_dir_csv_newer_than_checkpoint_s": 7.552197456359863,
+   "chunk1_state_summary": {
+    "n_populations": 24,
+    "n_members": 648,
+    "n_hof_entries": 25,
+    "populations_sha256": "dcd771e70233e154d8267536951f618dd0ad71d63ef516398dc40a8caa5e756a",
+    "hof_sha256": "6321ec91ef6a673c5928d8507a9a8d42be3ee2c2662d59efb837a2eae478d762"
+   },
+   "history": [
+    {
+     "index": 0,
+     "timeout_s": 19.999999998,
+     "fit_wall_s": 27.87677732100201,
+     "fit_overhead_s": 7.87677732300201,
+     "export_s": 0.541662229999929,
+     "evals_per_s_mean": 485333.3333333333,
+     "tier_best": [
+      {
+       "8": 0.03002720571126702,
+       "15": 0.010455929439727063,
+       "25": 0.002544809948387554
+      }
+     ],
+     "torch_in_process": false
+    },
+    {
+     "index": 1,
+     "timeout_s": 19.999999998,
+     "fit_wall_s": 20.564550474999123,
+     "fit_overhead_s": 0.5645504769991234,
+     "export_s": 0.022759611998480977,
+     "evals_per_s_mean": 545333.3333333334,
+     "tier_best": [
+      {
+       "8": 0.03002720571126702,
+       "15": 0.010455929439727063,
+       "25": 0.002544809948387554
+      }
+     ],
+     "torch_in_process": false
+    }
+   ]
+  },
+  {
+   "step": "2 resume after SIGKILL, then SIGINT during the next chunk",
+   "returncode": 0,
+   "wall_s": 43.37656807899475,
+   "restore": {
+    "at": "2026-11-25T15:02:09.659714Z",
+    "method": "from_file",
+    "after_chunk": 1,
+    "restore_s": 0.09090979100074037,
+    "state_summary": {
+     "n_populations": 24,
+     "n_members": 648,
+     "n_hof_entries": 25,
+     "populations_sha256": "dcd771e70233e154d8267536951f618dd0ad71d63ef516398dc40a8caa5e756a",
+     "hof_sha256": "6321ec91ef6a673c5928d8507a9a8d42be3ee2c2662d59efb837a2eae478d762"
+    },
+    "same_as_chunk_end": true,
+    "salvaged_guesses": 25
+   },
+   "aborted_chunk": {
+    "chunk": 2,
+    "started_at": "2026-11-25T15:01:57.817587Z",
+    "timeout_s": 19.999999998,
+    "with_guesses": false,
+    "detected_at": "2026-11-25T15:02:05.937564Z",
+    "lost_s_estimate": 7.5133397579193115,
+    "orphan_snapshots": [
+     "hof_snapshots/aborted002_20261125T150205937341Z_hall_of_fame.csv"
+    ],
+    "orphan_tier_best": [
+     {
+      "8": 0.03002720571126702,
+      "15": 0.010455929439727061,
+      "25": 0.002544809948387554
+     }
+    ]
+   },
+   "first_resumed_chunk": {
+    "index": 2,
+    "with_guesses": true,
+    "hof_not_worse_than_prev_chunk": true,
+    "hof_regressions": null,
+    "fit_wall_s": 33.76981429499938,
+    "fit_overhead_s": 13.769814296999378,
+    "tier_best": [
+     {
+      "8": 0.03002720571126702,
+      "15": 0.010455929439727061,
+      "25": 0.002544809948387554
+     }
+    ]
+   },
+   "sigint_chunk": {
+    "index": 3,
+    "interrupted": true,
+    "timeout_s": 19.999999998,
+    "fit_wall_s": 5.215650283000286,
+    "hof_not_worse_than_prev_chunk": true
+   },
+   "status_after": "stopped",
+   "stop_reason": "sigint",
+   "chunks_completed": 4
+  },
+  {
+   "step": "3 resume to DONE",
+   "returncode": 0,
+   "wall_s": 33.658677101135254,
+   "restore": {
+    "at": "2026-11-25T15:02:53.171073Z",
+    "method": "from_file",
+    "after_chunk": 3,
+    "restore_s": 0.09612552399994456,
+    "state_summary": {
+     "n_populations": 24,
+     "n_members": 648,
+     "n_hof_entries": 25,
+     "populations_sha256": "ad1ed50d1d7a832f370b2443d8da3f8a6212c3835ab48d5e41d4b52e6602ce6d",
+     "hof_sha256": "4f3ae1ba5d5d9061623fa37cb1ceaaedb78c4fd9e719b6ab942893028f63bc23"
+    },
+    "same_as_chunk_end": true
+   },
+   "done": true,
+   "done_file": true,
+   "elapsed_search_s": 116.40832643300018,
+   "budget_s": 120.0,
+   "chunks_completed": 5,
+   "new_chunks": [
+    {
+     "index": 4,
+     "hof_not_worse_than_prev_chunk": true,
+     "fit_wall_s": 28.981534058999387
+    }
+   ]
+  },
+  {
+   "step": "4 extension --budget-min 2.5",
+   "returncode": 0,
+   "wall_s": 37.545132875442505,
+   "restore": {
+    "at": "2026-11-25T15:03:30.362932Z",
+    "method": "from_file",
+    "after_chunk": 4,
+    "restore_s": 0.12322721500095213,
+    "state_summary": {
+     "n_populations": 24,
+     "n_members": 648,
+     "n_hof_entries": 25,
+     "populations_sha256": "0f00a83bcdc767e653f36a934754d4171ab9c12f2392ea80f89fca0ce8576f62",
+     "hof_sha256": "14194e780c382753f2519aeaefb0762f242fb37e0843a187cf54a4781ed0cac1"
+    },
+    "same_as_chunk_end": true
+   },
+   "done": true,
+   "superseded_done_files": [
+    "DONE.superseded-20261125T150323088295Z.json"
+   ],
+   "budget_history": [
+    {
+     "at": "2026-11-25T15:01:06.089531Z",
+     "budget_s": 120.0
+    },
+    {
+     "at": "2026-11-25T15:03:23.088227Z",
+     "budget_s": 150.0
+    }
+   ],
+   "chunks_completed": 6,
+   "new_chunks": [
+    {
+     "index": 5,
+     "hof_not_worse_than_prev_chunk": true,
+     "fit_wall_s": 29.383809989001747
+    }
+   ]
+  },
+  {
+   "step": "5 truncated checkpoint -> fallback restart from the saved hall of fame",
+   "returncode": 0,
+   "wall_s": 41.3880352973938,
+   "restore": {
+    "at": "2026-11-25T15:04:03.542351Z",
+    "method": "fallback_guesses",
+    "reason": "restore failed: UnpicklingError: pickle data was truncated",
+    "moved_checkpoint": "<repo>/shape-form-martin/results/m3_sr/smoke/runs/smoke/a_resume/seed0/pysr/checkpoint.pkl.broken-20261125T150403542231Z",
+    "n_guesses": 24,
+    "after_chunk": 5
+   },
+   "fallback_used": true,
+   "done": true,
+   "broken_checkpoints": [
+    "checkpoint.pkl.broken-20261125T150403542231Z"
+   ],
+   "new_chunks": [
+    {
+     "index": 6,
+     "with_guesses": true,
+     "hof_not_worse_than_prev_chunk": true,
+     "hof_regressions": null,
+     "fit_wall_s": 37.04572861599809,
+     "fit_overhead_s": 17.045728617998087
+    }
+   ]
+  }
+ ],
+ "checks": {
+  "kill_mid_chunk": true,
+  "checkpoint_is_end_of_chunk1": true,
+  "restored_from_file_no_fallback": true,
+  "restored_state_identical_to_chunk1_end": true,
+  "aborted_chunk_detected_and_salvaged": true,
+  "first_resumed_chunk_front_not_worse": true,
+  "sigint_stops_chunk_and_runner": true,
+  "resume_to_done": true,
+  "extension_continues_same_seed": true,
+  "fallback_restart_from_hof": true,
+  "fallback_first_chunk_front_not_worse": true
+ },
+ "passed": true
+}

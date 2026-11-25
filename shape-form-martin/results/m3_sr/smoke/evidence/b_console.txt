@@ -1,0 +1,7 @@
+[smoke/b_stage1_gauge/seed0] chunk 0: 40 s (elapsed 0 / 120 s)
+[smoke/b_stage1_gauge/seed0] chunk 0 done in 67 s | <=12:0.004713 <=20:0.004285 <=30:0.002028 | plateau=None | 1.6e+04 evals/s
+[smoke/b_stage1_gauge/seed0] chunk 1: 40 s (elapsed 67 / 120 s)
+[smoke/b_stage1_gauge/seed0] chunk 1 done in 45 s | <=12:0.004604 <=20:0.00111 <=30:0.000839 | plateau=None | 1.27e+04 evals/s
+[smoke/b_stage1_gauge/seed0] DONE: 2 chunks, 112 s of 120 s
+smoke/b_stage1_gauge  (budget 2.0 min per seed, chunk 0.7 min, tiers [12, 20, 30])
+  seed0: done DONE | chunks 2 | 112/120 s | <=12: 0.004604 <=20: 0.00111 <=30: 0.000839 | plateau(loss) n/a, val-NLL n/a, combined n/a | fallback no | aborted 0 | 1.27e+04 evals/s

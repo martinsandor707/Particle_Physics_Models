@@ -1,0 +1,17 @@
+description = "smoke b/c: Stage-1 vocabulary and gauge loss from operators.search_config, 7800 synthetic rows, 8 threads"
+step = "smoke"
+target = "b_stage1_gauge"
+data = "../data/residual3d.npz"
+output_root = "../runs"
+seeds = [0]
+threads = 8
+budget_minutes = 2.0
+chunk_minutes = 0.6666666667
+min_chunk_seconds = 10
+tiers = [12, 20, 30]
+# deliberately non-compliant guesses: ppow with a variable exponent (admitted by constraints["ppow"] = (7, 1)) and a
+# saturating function nested in itself (forbidden by nested_constraints); the post-processing scan must catch them
+guesses = ["(ppow(zt, rh) * 0.1) + tanh(zt)", "tanh(tanh(zt * 1.2) * 0.5)"]
+
+[search_config]
+kwargs = { stage = "stage1", ndim = 3, loss = "gauge" }

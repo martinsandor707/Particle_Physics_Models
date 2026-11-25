@@ -1,0 +1,15 @@
+description = "smoke e: multi-output (3 outputs), weights (N, 3), guesses list[list[str]] (cubic Horner forms), wl2 loss from operators.search_config"
+step = "smoke"
+target = "e_multiout"
+data = "../data/traj3.npz"
+output_root = "../runs"
+seeds = [0]
+threads = 8
+budget_minutes = 0.75
+chunk_minutes = 0.4
+min_chunk_seconds = 8
+tiers = [6, 12, 18]
+guesses = [["((0.10324900656099942 * x + -0.19926165600314266) * x + 0.4978418681575947) * x + 0.2994551546797589"], ["((-0.4191009577066433 * x + -0.0038967550844883903) * x + 1.1185532550184323) * x + 0.0011408430760683594"], ["((0.021533869582261316 * x + 0.12668174944167232) * x + 0.49945450860952917) * x + -0.0001031344923190199"]]
+
+[search_config]
+kwargs = { stage = "stage1", ndim = 1, loss = "wl2" }

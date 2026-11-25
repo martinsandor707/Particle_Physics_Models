@@ -1,0 +1,227 @@
+{
+ "spec": "shape-form-martin/results/m3_sr/smoke/specs/a_resume.toml",
+ "steps": [
+  {
+   "step": "1 fresh start, SIGKILL during chunk 2",
+   "returncode": -9,
+   "wall_s": 60.3496253490448,
+   "chunks_completed_at_kill": 2,
+   "in_flight_at_kill": {
+    "chunk": 2,
+    "started_at": "2026-11-25T14:58:57.044043Z",
+    "timeout_s": 19.999999998,
+    "with_guesses": false
+   },
+   "checkpoint_mtime_minus_kill_s": -8.115215301513672,
+   "checkpoint_written_before_chunk2_start": true,
+   "run_dir_csv_newer_than_checkpoint_s": 8.065020084381104,
+   "chunk1_state_summary": {
+    "n_populations": 24,
+    "n_members": 648,
+    "n_hof_entries": 25,
+    "populations_sha256": "26b85aab1346cf44c3e99e4a686d9e5fee2983f2f56a5658d740293dcb307410",
+    "hof_sha256": "523bd774623dfb9c804a0c2b18e7fb229c1806ff501ab54a7a136596256b1b52"
+   },
+   "history": [
+    {
+     "index": 0,
+     "timeout_s": 19.999999998,
+     "fit_wall_s": 28.266925842999626,
+     "fit_overhead_s": 8.266925844999626,
+     "export_s": 0.5401773170015076,
+     "evals_per_s_mean": 377333.3333333333,
+     "tier_best": [
+      {
+       "8": 0.03002720571126703,
+       "15": 0.010794920219145649,
+       "25": 0.003285236071309475
+      }
+     ],
+     "torch_in_process": false
+    },
+    {
+     "index": 1,
+     "timeout_s": 19.999999998,
+     "fit_wall_s": 20.583107047998055,
+     "fit_overhead_s": 0.5831070499980555,
+     "export_s": 0.02206767600000603,
+     "evals_per_s_mean": 538000.0,
+     "tier_best": [
+      {
+       "8": 0.03002720571126703,
+       "15": 0.008596204729369714,
+       "25": 0.003285236071309475
+      }
+     ],
+     "torch_in_process": false
+    }
+   ]
+  },
+  {
+   "step": "2 resume after SIGKILL, then SIGINT during the next chunk",
+   "returncode": 0,
+   "wall_s": 39.554555892944336,
+   "restore": {
+    "at": "2026-11-25T14:59:08.881490Z",
+    "method": "from_file",
+    "after_chunk": 1,
+    "restore_s": 0.08636900700003025,
+    "state_summary": {
+     "n_populations": 24,
+     "n_members": 648,
+     "n_hof_entries": 25,
+     "populations_sha256": "26b85aab1346cf44c3e99e4a686d9e5fee2983f2f56a5658d740293dcb307410",
+     "hof_sha256": "523bd774623dfb9c804a0c2b18e7fb229c1806ff501ab54a7a136596256b1b52"
+    },
+    "same_as_chunk_end": true,
+    "salvaged_guesses": 24
+   },
+   "aborted_chunk": {
+    "chunk": 2,
+    "started_at": "2026-11-25T14:58:57.044043Z",
+    "timeout_s": 19.999999998,
+    "with_guesses": false,
+    "detected_at": "2026-11-25T14:59:05.218069Z",
+    "lost_s_estimate": 8.028172254562378,
+    "orphan_snapshots": [
+     "hof_snapshots/aborted002_20261125T145905217834Z_hall_of_fame.csv"
+    ],
+    "orphan_tier_best": [
+     {
+      "8": 0.03002720571126703,
+      "15": 0.008596204729369714,
+      "25": 0.003285236071309475
+     }
+    ]
+   },
+   "first_resumed_chunk": {
+    "index": 2,
+    "with_guesses": true,
+    "hof_not_worse_than_prev_chunk": true,
+    "hof_regressions": null,
+    "fit_wall_s": 34.99420658700183,
+    "fit_overhead_s": 14.994206589001827,
+    "tier_best": [
+     {
+      "8": 0.03002720571126703,
+      "15": 0.008596204729369714,
+      "25": 0.003285236071309475
+     }
+    ]
+   },
+   "sigint_chunk": null,
+   "status_after": "done",
+   "stop_reason": "budget",
+   "chunks_completed": 3
+  },
+  {
+   "step": "3 resume to DONE",
+   "returncode": 0,
+   "wall_s": 0.1641092300415039,
+   "restore": {
+    "at": "2026-11-25T14:59:08.881490Z",
+    "method": "from_file",
+    "after_chunk": 1,
+    "restore_s": 0.08636900700003025,
+    "state_summary": {
+     "n_populations": 24,
+     "n_members": 648,
+     "n_hof_entries": 25,
+     "populations_sha256": "26b85aab1346cf44c3e99e4a686d9e5fee2983f2f56a5658d740293dcb307410",
+     "hof_sha256": "523bd774623dfb9c804a0c2b18e7fb229c1806ff501ab54a7a136596256b1b52"
+    },
+    "same_as_chunk_end": true,
+    "salvaged_guesses": 24
+   },
+   "done": true,
+   "done_file": true,
+   "elapsed_search_s": 83.84423947799951,
+   "budget_s": 90.0,
+   "chunks_completed": 3,
+   "new_chunks": []
+  },
+  {
+   "step": "4 extension --budget-min 2.0",
+   "returncode": 0,
+   "wall_s": 33.94212102890015,
+   "restore": {
+    "at": "2026-11-25T14:59:48.826979Z",
+    "method": "from_file",
+    "after_chunk": 2,
+    "restore_s": 0.10014221999881556,
+    "state_summary": {
+     "n_populations": 24,
+     "n_members": 648,
+     "n_hof_entries": 25,
+     "populations_sha256": "1b1de89d467a40dc2b7e8a8975d846f8a4cdf21f980247ad88c44161b9d92bb9",
+     "hof_sha256": "8106d17f20cd39558dca2d8a521b2d86bfa7b8f4defd55f7a7a78ffa963fdbbc"
+    },
+    "same_as_chunk_end": true
+   },
+   "done": true,
+   "superseded_done_files": [
+    "DONE.superseded-20261125T145944947655Z.json"
+   ],
+   "budget_history": [
+    {
+     "at": "2026-11-25T14:58:04.864862Z",
+     "budget_s": 90.0
+    },
+    {
+     "at": "2026-11-25T14:59:44.947606Z",
+     "budget_s": 120.0
+    }
+   ],
+   "chunks_completed": 4,
+   "new_chunks": [
+    {
+     "index": 3,
+     "hof_not_worse_than_prev_chunk": true,
+     "fit_wall_s": 29.347266300999763
+    }
+   ]
+  },
+  {
+   "step": "5 truncated checkpoint -> fallback restart from the saved hall of fame",
+   "returncode": 0,
+   "wall_s": 39.27992105484009,
+   "restore": {
+    "at": "2026-11-25T15:00:21.786479Z",
+    "method": "fallback_guesses",
+    "reason": "restore failed: UnpicklingError: pickle data was truncated",
+    "moved_checkpoint": "<repo>/shape-form-martin/results/m3_sr/smoke/runs/smoke/a_resume/seed0/pysr/checkpoint.pkl.broken-20261125T150021786292Z",
+    "n_guesses": 25,
+    "after_chunk": 3
+   },
+   "fallback_used": true,
+   "done": true,
+   "broken_checkpoints": [
+    "checkpoint.pkl.broken-20261125T150021786292Z"
+   ],
+   "new_chunks": [
+    {
+     "index": 4,
+     "with_guesses": true,
+     "hof_not_worse_than_prev_chunk": true,
+     "hof_regressions": null,
+     "fit_wall_s": 35.4857778939986,
+     "fit_overhead_s": 15.485777895998602
+    }
+   ]
+  }
+ ],
+ "checks": {
+  "kill_mid_chunk": true,
+  "checkpoint_is_end_of_chunk1": true,
+  "restored_from_file_no_fallback": true,
+  "restored_state_identical_to_chunk1_end": true,
+  "aborted_chunk_detected_and_salvaged": true,
+  "first_resumed_chunk_front_not_worse": true,
+  "sigint_stops_chunk_and_runner": false,
+  "resume_to_done": true,
+  "extension_continues_same_seed": true,
+  "fallback_restart_from_hof": true,
+  "fallback_first_chunk_front_not_worse": true
+ },
+ "passed": false
+}

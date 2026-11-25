@@ -16,3 +16,7 @@ results/**/*.npz
 
 # Gate-0 working copy of the checksum manifest (regenerable)
 results/gates/gate0_checks/protected/
+
+# PySR smoke-test run directories and regenerated data (bulky; run snapshots hold absolute paths)
+results/m3_sr/smoke/runs/
+results/m3_sr/smoke/data/
