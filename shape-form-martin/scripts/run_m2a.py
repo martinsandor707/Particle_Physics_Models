@@ -330,10 +330,20 @@ def phase_parity():
 
 def _plr_decide(names: dict) -> tuple:
     """{lr: run name} -> (winner lr, table). Lowest last-iterate validation mean wins; within 0.5e-4 the smaller lr
-    (paired deltas against the lowest, on this machine's registered arrays)."""
+    (paired deltas against the lowest, on this machine's registered arrays). A pilot without a registry row (diverged
+    or blocked) has no finite last-iterate validation mean and loses (review ruling on C1: [within] the P-lr rule;
+    user decision of 25 Nov 2026). Returns (None, table) if no pilot finished."""
+    tab = {}
+    lost = {lr: n for lr, n in names.items() if L.registered_row(n) is None}
+    for lr, n in lost.items():
+        dv = L.diverged_marker(n)
+        tab[f"{lr:g}"] = {"run": n, "status": ("diverged" if dv else "no registry row (blocked or missing)"),
+                          "within": False, "loses": "no finite last-iterate validation mean (P-lr rule)"}
+    names = {lr: n for lr, n in names.items() if lr not in lost}
+    if not names:
+        return None, tab
     means = {lr: float(np.mean(L.tagged(n).values, dtype=np.float64)) for lr, n in names.items()}
     best = min(means, key=lambda lr: (means[lr], lr))
-    tab = {}
     for lr, n in names.items():
         p = provenance.paired_delta(L.tagged(n), L.tagged(names[best]))
         tab[f"{lr:g}"] = {"run": n, "val_mean": means[lr], "vs_lowest": L.pd(p), "within": bool(p.mean <= PLR_TIE)}
@@ -349,6 +359,8 @@ def phase_plr():
     for sp in poly:
         L.run_spec(sp)
     lr_poly, tab = _plr_decide({sp.lr: sp.name for sp in poly})
+    if lr_poly is None:
+        raise SystemExit("STOP: every polynomial learning-rate pilot diverged; no polynomial run can be configured")
     d.update({"poly": tab, "lr_poly": lr_poly, "rule": "lowest last-iterate validation mean; within 0.5e-4 the "
                                                         "smaller lr (paired deltas, this machine)"})
     L.write_json(d, L.plr_file())
@@ -358,6 +370,8 @@ def phase_plr():
         L.run_spec(sp)
     lr_net, tab = _plr_decide({sp.lr: sp.name for sp in net})
     d.update({"net": tab, "lr_net": lr_net})
+    if lr_net is None:
+        d["lr_net_undecided"] = "every network pilot diverged or is blocked: the network runs are blocked"
     L.write_json(d, L.plr_file())
     log(f"P-lr net -> lr_net = {lr_net}")
 
@@ -366,10 +380,14 @@ def phase_stage0():
     specs = stage0_specs()
     for sp in specs[:2]:                                       # A0 seeds 0, 1 and the drift rule
         L.run_spec(sp)
-    drift = {sp.name: L.pd(L.paired(sp.name, "formula")) for sp in specs[:2]}
+    fin = [sp for sp in specs[:2] if L.registered_row(sp.name) is not None]
+    drift = {sp.name: L.pd(L.paired(sp.name, "formula")) for sp in fin}
     stop = any(abs(v["mean"]) > DRIFT_STOP for v in drift.values())
-    note_decision("A0_drift", {"runs": drift, "rule": "|paired(A0, this machine's formula array)| > 2e-4: stop",
-                               "stop": stop, "enforced": not L.CTX.smoke})
+    rec = {"runs": drift, "rule": "|paired(A0, this machine's formula array)| > 2e-4: stop", "stop": stop,
+           "enforced": not L.CTX.smoke}
+    if len(fin) < 2:                    # a diverged control: recorded, independent runs continue (PLAN 17.11)
+        rec["not_evaluable"] = {sp.name: "diverged - awaiting diagnosis" for sp in specs[:2] if sp not in fin}
+    note_decision("A0_drift", rec)
     log(f"A0 drift: {json.dumps({k: round(v['mean'] * 1e4, 3) for k, v in drift.items()})} (1e-4) -> "
         f"{'STOP' if stop else 'continue'}")
     if stop and L.CTX.smoke:
@@ -388,12 +406,18 @@ def phase_stage1p():
         L.run_spec(sp)
     out = {}
     for sp in poly:                     # convergence rule; reruns only for the pre-registered (poly) primaries
+        if L.done_marker(sp.done_file) is None:                    # diverged or blocked (PLAN 17.11)
+            out[sp.name] = {"converged": None, "status": _status_text(sp.name)}
+            continue
         ok, mv = converged(sp.name)
         out[sp.name] = {"converged": ok, "moved_last_window": mv, "window_steps": L.convergence_window()}
         if ok is False:
             comp2, sp2 = rerun_specs(sp)
             L.run_spec(comp2)
-            L.run_spec(sp2)
+            r2 = L.run_spec(sp2)
+            if L.status_of(r2) != "done":
+                out[sp.name]["rerun"] = {"name": sp2.name, "comparator": comp2.name, "status": _status_text(sp2.name)}
+                continue
             ok2, mv2 = converged(sp2.name)
             out[sp.name]["rerun"] = {"name": sp2.name, "comparator": comp2.name, "converged": ok2,
                                      "moved_last_window": mv2}
@@ -404,7 +428,11 @@ def phase_stage1x():
     seed1 = {}
     for r in EXPLORATORY:
         sp = exploratory_spec(r, 0)
-        L.run_spec(sp)
+        res = L.run_spec(sp)
+        if L.status_of(res) != "done":                 # diverged or blocked: recorded, never omitted (PLAN 17.11)
+            seed1[r] = {"vs": sp.comparator, "status": _status_text(sp.name), "seed1_run": False}
+            log(f"{sp.name}: {seed1[r]['status']} - no second seed; the batch continues")
+            continue
         p = L.paired(sp.name, sp.comparator)
         ke = {"vs": sp.comparator, "paired": L.pd(p), "keep": keep_rule(p), "equal_seed0": equal_rule_one(p)}
         log(f"{sp.name}: Delta vs {sp.comparator} = {p.mean * 1e4:+.2f} +- {p.se * 1e4:.2f} (1e-4, n {p.n}); "
@@ -418,12 +446,30 @@ def phase_stage1x():
                                  "(PLAN 13, A6 revised point 6; PLAN 16.5 recommendation R1). No run was dropped.")
 
 
+def _status_text(name: str) -> str:
+    """'diverged', 'diverged - awaiting diagnosis', 'failed (diagnosed)', 'blocked by <run>' or 'missing'."""
+    dv = L.diverged_marker(name)
+    if dv is not None:
+        if dv.get("cls") in L.EXPLORATORY_CLASSES or dv.get("cls") == "pilot":
+            return "diverged"
+        dg = L.diagnosis(name)
+        if dg and dg.get("valid"):
+            return "failed (diagnosed)" if dg["verdict"] == "failed" else f"diverged - diagnosis: {dg['verdict']}"
+        return "diverged - awaiting diagnosis"
+    b = (L.decisions().get("blocked") or {}).get(name)
+    if b:
+        return f"blocked by {b['blocked_by']}"
+    return "done" if L.done_marker(L.out_dir() / name / "done.json") is not None else "missing"
+
+
 # ---------------------------------------------------------------------------------------------------- guards phase ----
 def stage1_comparisons() -> list:
-    """(run, comparator, rung, kind) of every Stage-1 comparison that exists (registered) on this machine."""
+    """(run, comparator, rung, kind) of every Stage-1 comparison that exists (registered) on this machine. A network
+    run superseded by its warm-start re-run (PLAN 17.11) is replaced by the re-run, in both places."""
     poly, net = primary_specs()
+    E = L.effective
     cand = [(sp.name, sp.comparator, sp.rung, "primary") for sp in poly]
-    cand += [(sp.name, sp.comparator, sp.rung, "primary-net") for sp in net]
+    cand += [(E(sp.name), E(sp.comparator), sp.rung, "primary-net") for sp in net]
     for r in EXPLORATORY:
         for s in (0, 1):
             sp = exploratory_spec(r, s)
@@ -586,6 +632,213 @@ def phase_guards():
         log(f"A6b: observed information of sh_rk = {res['observed_information']:.4g}, SE {res['se_coefficient']}")
 
 
+# ------------------------------------------------------------------------- additions of 25 Nov 2026 (PLAN 17.11) ----
+A2C_NOTE = "control (added by the user on 25 Nov 2026, exploratory, outside the six primaries)"
+A2C_MATCHED = ("A4", "A5", "A7", "A8", "A9", "A4t", "A5h", "A6i", "A6l", "A6b", "A7s", "A7l", "A8c", "A78", "A9r",
+               "A3f", "A3c", "A3x", "A12")       # start = the fitted A2s of the same seed, T_A with 4000 steps, lr_poly
+A2C_UNMATCHED = {"A10": 6000, "A10-2": 6000, "A10-4": 6000, "A10-5": 6000, "A10g": 6000}   # init_from_target, 6000
+A2C_GROUPS = {
+    "matched (A2c)": "component rungs that START FROM the fitted A2s of the same seed (copy by name, or "
+                     "init_shower_long on it): " + ", ".join(A2C_MATCHED) + "; T_A with 4000 steps, the frozen "
+                     "lr_poly, train seed = the rung's seed, fresh optimiser and cosine cycle",
+    "not matched: mixtures": "A10, A10-2, A10-4, A10-5, A10g: 6000 steps and initialised by init_from_target on "
+                             "the MAP of A2s (function space, a new structure), not continued from its weights. "
+                             "Proposal (awaiting the user): 'A2c6k' = A2c with 6000 steps, seeds 0 and 1",
+    "not matched: convergence reruns": "<rung>_s<seed>_x2: 8000 / 12000 steps from the original A2s; their "
+                                       "comparator A2s_s<seed>_x2 is itself a rerun. Proposal (awaiting the user): "
+                                       "'A2c_x2' = A2c with doubled steps, only for seeds with a rerun",
+    "not applicable": "network runs (fitted to their own polynomial run) and Stage 0"}
+
+
+def a2c_specs() -> list:
+    """A2c (user decision of 25 Nov 2026, PLAN 17.11; review B6): the A2s structure started from the fitted A2s of
+    the same seed and trained with exactly the schedule of the rungs that start from it (T_A, 4000 steps, the frozen
+    lr_poly, the same seed). A control: no pre-registered rule consumes it."""
+    return [Spec(run_name("A2c", s), "A2c", "component", dict(variant="survival_exact", start=a2s(s)), s, "poly",
+                 "control", comparator=run_name("A2s", s), steps=4000,
+                 notes=f"A2c {A2C_NOTE}: A2s continued unchanged from A2s_s{s} with the schedule of the rungs that "
+                       "start from the fitted A2s") for s in (0, 1)]
+
+
+def phase_a2c():
+    out = {}
+    for sp in a2c_specs():
+        res = L.run_spec(sp)
+        out[sp.name] = {"status": _status_text(sp.name)}
+        if L.status_of(res) == "done":
+            out[sp.name]["vs_A2s"] = L.pd(L.paired(sp.name, sp.comparator))
+    note_decision("a2c", {"runs": out, "note": A2C_NOTE, "groups": A2C_GROUPS,
+                          "rule": "none: keep, replication and equal NLL stay against A2s as registered"})
+
+
+def _net_runs_executed() -> list:
+    """Network runs of this stage finished with the fit_to before version 3 (no fit_to_version >= 3 in init.json),
+    in the order of the run list; warm-start re-runs (<name>_ws) are not checked again."""
+    order = [s.name for s in plr_specs()[1]] + [s.name for s in stage0_specs() if s.provider == "net"] + \
+        [s.name for s in primary_specs()[1]]
+    out = []
+    for n in order:
+        d = L.done_marker(L.out_dir() / n / "done.json")
+        if d is None:
+            continue
+        ft = ((L.read_json(L.out_dir() / n / "init.json", {}) or {}).get("init_info") or {}).get("fit_to") or {}
+        if (ft.get("fit_to_version") or 2) < 3:
+            out.append(n)
+    return out
+
+
+def target_columns(done: dict) -> dict:
+    """Per-column statistics of the targets of a network warm start, rebuilt on the CPU from the source polynomial
+    run (net_from) or the legacy provider (A1): float64 standard deviation on default_lnp(48) with uniform weights
+    (fit_to's weights=None), constant columns by fit_to's 2^-20 rule, below the floor = varying with std < 1e-2."""
+    from sfm.families.components import default_lnp
+    from sfm.models.paramnet import ParamNet
+    kw = dict(done.get("build_kwargs") or done["spec"]["kwargs"])
+    ctx = L.build_context("cpu", None, 0, skip_init=True)
+    if kw.get("net_from"):
+        tgt = L.models.load_run(kw["net_from"], ctx)
+    else:
+        kw2 = {k: v for k, v in kw.items() if k not in ("provider", "fit_to_steps", "fit_to_lbfgs", "net_from",
+                                                         "fit_to_scale_floor")}
+        tgt = L.models.build(done["spec"]["factory"], ctx, **kw2)
+    base = tgt.base if isinstance(tgt, dfac.LastRing) else tgt
+    names_net, _ = dfac.net_name_split(base)
+    poly = base.provider
+    with torch.no_grad():
+        t = poly(default_lnp(48, device="cpu")).double()
+    cols = {}
+    for n in names_net:
+        c = t[:, poly.names.index(n)]
+        mu, sd = float(c.mean()), float(c.std(unbiased=False))
+        const = sd <= ParamNet.SCALE_FLOOR_REL * max(1.0, abs(mu))
+        cols[n] = {"std": sd, "mean": mu, "constant": bool(const),
+                   "below_floor": bool((not const) and sd < ParamNet.SCALE_FLOOR_ABS)}
+    return {"source": kw.get("net_from") or "legacy provider (A1)", "columns": cols,
+            "below_floor": [n for n, c in cols.items() if c["below_floor"]],
+            "constant": [n for n, c in cols.items() if c["constant"]]}
+
+
+WARMSTART_RULE = ("PLAN 17.11 (fixed before any network result of the job was read): a network run is re-run if and "
+                  "only if (a) one of its varying target columns lies below the floor, so that the fix changes its "
+                  "warm start, or (b) its recorded kl_map at initialisation exceeds 1e-4 nat. Both are properties of "
+                  "the initialisation, not of the outcome. A re-run gets a new run name; the original is kept and "
+                  "labelled as superseded.")
+KL_AFFECTED = 1e-4
+
+
+def warmstart_affected(target_cols: dict, kl_map) -> tuple:
+    """PLAN 17.11, applied verbatim: (rule a, rule b, re-run). (a) a varying target column lies below the floor
+    (target_columns: 'below_floor' = not constant and std < 1e-2); (b) the RECORDED kl_map at initialisation exceeds
+    1e-4 nat. A missing kl_map counts as not exceeding (it is reported)."""
+    a = bool(target_cols.get("below_floor"))
+    b = bool(kl_map is not None and float(kl_map) > KL_AFFECTED)
+    return a, b, bool(a or b)
+
+
+def phase_warmstart_check():
+    """Trains nothing. For every network run executed with fit_to version < 3: target columns (std, below the floor),
+    the recorded kl_map, the step-0 parity of the OLD warm start (rebuilt deterministically: same seed, same build
+    order, fit_to version 2) against the source's registered array, and the PLAN 17.11 decision."""
+    from sfm.models.paramnet import ParamNet
+    names = _net_runs_executed()
+    sets, extras = L.data_cpu()
+    runs, rerun = {}, []
+    for n in names:
+        d = L.done_marker(L.out_dir() / n / "done.json")
+        init = L.read_json(L.out_dir() / n / "init.json", {}) or {}
+        kl = (init.get("init_info") or {}).get("kl_map", d.get("kl_map"))
+        tc = target_columns(d)
+        kw = dict(d.get("build_kwargs") or d["spec"]["kwargs"])
+        seed = int(d["spec"]["seed"])
+
+        def job(n=n, kw=kw, seed=seed, kl=kl):
+            dev = L.common.DEVICE
+            tr, va = sets["train"].to(dev), sets["val"].to(dev)
+            val = registry.ValidationSet(va, extras["val"]["event_number"])
+            registry.check_validation(val)
+            L.train.seed_everything(seed)                  # the order of run_spec: seed, context, build
+            ctx = L.build_context(dev, tr, seed, skip_init=False)
+            m = L.models.build(d["spec"]["factory"], ctx, **{**kw, "fit_to_scale_floor": None})
+            kl2 = (getattr(m, "init_info", {}) or {}).get("kl_map")
+            par = L.step0_parity(m, n, L.warm_start_source(kw), val, subdir="step0_old_warmstart",
+                                 base=L.out_dir() / "warmstart_check" / n)
+            del m, tr, va, val
+            return {"kl_map_rebuilt": kl2, "bit_for_bit": (kl2 == kl), "step0_parity": par}
+
+        reb = L.on_gpu(f"warmstart-check {n}", job)
+        a, b, _ = warmstart_affected(tc, kl)
+        runs[n] = {"kl_map_recorded": kl, "target_columns": tc, **reb, "rule_a_below_floor": a,
+                   "rule_b_kl_map": b, "rerun": bool(a or b),
+                   "rebuild_note": ("rebuilt bit for bit (kl_map equal to the recorded value)" if reb["bit_for_bit"]
+                                    else "NOT bit for bit (kl_map differs from the recorded value): the step-0 "
+                                         "parity refers to the rebuilt warm start, the decision uses the RECORDED "
+                                         "kl_map")}
+        if a or b:
+            rerun.append(n)
+        log(f"warmstart-check {n}: kl_map {kl} (rebuilt {reb['kl_map_rebuilt']}, bit for bit {reb['bit_for_bit']}), "
+            f"below floor {tc['below_floor']} -> {'RE-RUN' if (a or b) else 'keep'}")
+    note_decision("warmstart_check", {"rule": WARMSTART_RULE, "floor": ParamNet.SCALE_FLOOR_ABS,
+                                      "kl_threshold_nat": KL_AFFECTED, "runs": runs, "rerun": rerun,
+                                      "trains_nothing": True})
+    log(f"warmstart-check: {len(rerun)} of {len(names)} network runs to be re-run: {rerun}")
+
+
+def _spec_of(name: str) -> Spec:
+    d = L.done_marker(L.out_dir() / name / "done.json")
+    return Spec(**d["spec"])
+
+
+def phase_warmstart_rerun():
+    """Re-runs exactly the runs listed by warmstart-check under <name>_ws (fit_to version 3, step-0 parity logged),
+    never touching the originals; then whatever depends on them: if a network pilot was re-run, lr_net is decided
+    again among the pilots (re-runs in place of their originals); if it changes, every other network run is re-run
+    with the new rate as well (listed as dependent). Then the guards of the re-run pairs (guards phase)."""
+    chk = decisions().get("warmstart_check")
+    if chk is None:
+        raise SystemExit("warmstart-rerun refused: run warmstart-check first")
+    listed = list(chk.get("rerun") or [])
+    rec = decisions().get("warmstart_rerun") or {"superseded": {}, "dependent": {}, "listed": listed}
+    sup = dict(rec.get("superseded") or {})
+
+    def rerun(name: str, lr=None, reason="listed by warmstart-check"):
+        sp = _spec_of(name)
+        kw = {k: v for k, v in sp.kwargs.items() if k != "fit_to_scale_floor"}     # always fit_to version 3
+        new = replace(sp, name=name + "_ws", kwargs=kw, lr=(lr if lr is not None else sp.lr),
+                      comparator=sup.get(sp.comparator, sp.comparator),
+                      notes=f"warm-start re-run of {name} (PLAN 17.11; {reason}); fit_to version 3")
+        res = L.run_spec(new)
+        sup[name] = new.name
+        rec["superseded"] = sup
+        note_decision("warmstart_rerun", rec)
+        return res
+
+    pilots = [n for n in listed if n.startswith("plr_A2n_")]
+    for n in pilots:
+        rerun(n)
+    lr_net = (L.read_json(L.plr_file(), {}) or {}).get("lr_net")
+    if pilots:
+        net_p = plr_specs()[1]
+        new_lr, tab = _plr_decide({sp.lr: sup.get(sp.name, sp.name) for sp in net_p})
+        rec["lr_net_after_rerun"] = {"lr_net_before": lr_net, "lr_net_after": new_lr, "table": tab}
+        note_decision("warmstart_rerun", rec)
+        if new_lr is not None and new_lr != lr_net:
+            for n in _net_runs_executed():
+                if n not in listed and not n.startswith("plr_A2n_"):
+                    rec.setdefault("dependent", {})[n] = f"lr_net changed from {lr_net} to {new_lr}"
+            lr_net = new_lr
+    todo = [n for n in _net_runs_executed() if not n.startswith("plr_A2n_")
+            and (n in listed or n in (rec.get("dependent") or {}))]
+    lr_changed = bool((rec.get("lr_net_after_rerun") or {}).get("lr_net_after") not in
+                      (None, (rec.get("lr_net_after_rerun") or {}).get("lr_net_before")))
+    for n in todo:
+        rerun(n, lr=(lr_net if lr_changed else None),
+              reason="listed by warmstart-check" if n in listed else rec["dependent"][n])
+    rec["done"] = True
+    note_decision("warmstart_rerun", rec)
+    log(f"warmstart-rerun: superseded {sup}")
+    phase_guards()
+
+
 def phase_report():
     import run_m2a_report as R
     R.report(with_guards=not REPORT_WITHOUT_GUARDS)
@@ -673,6 +926,8 @@ def stage2_approval() -> tuple:
     if appr.get("results_json_sha256") != sha:
         raise SystemExit(f"stage2 refused: the approval names results.json {str(appr.get('results_json_sha256'))[:16]}"
                          f"..., the file on disk is {sha[:16]}... (the table changed after the approval)")
+    if "kept_and_replicated" not in appr:                      # review R7
+        raise SystemExit("stage2 refused: the approval file has no key 'kept_and_replicated' (write [] if empty)")
     reading = appr.get("replication_reading")
     if reading not in REPLICATION_READINGS:
         raise SystemExit(f"stage2 refused: replication_reading must be one of {sorted(REPLICATION_READINGS)}")
@@ -687,8 +942,37 @@ def stage2_approval() -> tuple:
     return appr, kept, sha
 
 
+def stage2_preconditions() -> None:
+    """User decisions of 25 Nov 2026 and review R6: refused while (i) A2c_s0 / A2c_s1 are not finished, (ii) the
+    warm-start check has not run or a run it listed has no finished re-run, (iii) a primary, base, control or rerun
+    run diverged and has no valid diagnosis, or (iv) results.json differs from the report recomputed now from the
+    registered arrays (only a table that follows from the arrays can be approved)."""
+    import run_m2a_report as R
+    miss = [sp.name for sp in a2c_specs() if L.registered_row(sp.name) is None]
+    if miss:
+        raise SystemExit(f"stage2 refused: the A2c control is not finished ({miss}); run `run_m2a.py a2c` first")
+    if _net_runs_executed() and decisions().get("warmstart_check") is None:
+        raise SystemExit("stage2 refused: run `run_m2a.py warmstart-check` (and warmstart-rerun) first")
+    sup = L.superseded()
+    open_ = [n for n in (decisions().get("warmstart_check") or {}).get("rerun", [])
+             if n not in sup or L.registered_row(sup[n]) is None]
+    if open_:
+        raise SystemExit(f"stage2 refused: warm-start re-runs missing for {open_}; run `run_m2a.py warmstart-rerun`")
+    waiting = [n for n, v in (decisions().get("diverged") or {}).items()
+               if v.get("status") == "diverged - awaiting diagnosis" and not (L.diagnosis(n) or {}).get("valid")]
+    if waiting:
+        raise SystemExit(f"stage2 refused: diverged runs await an independent diagnosis: {waiting}")
+    on_disk = json.loads((L.out_dir() / "results.json").read_text())
+    now = json.loads(paths.scrub_str(json.dumps(L._jsonable(R.collect(with_guards=True)))))
+    if now != on_disk:
+        diff = sorted(k for k in set(now) | set(on_disk) if now.get(k) != on_disk.get(k))
+        raise SystemExit(f"stage2 refused: results.json differs from the report recomputed from the registered arrays "
+                         f"(keys {diff}); re-run `run_m2a.py report` and renew the approval")
+
+
 def phase_stage2():
     appr, kept, sha = stage2_approval()
+    stage2_preconditions()
     note_decision("stage2_approval", {"results_json_sha256": sha, "replication_reading": appr["replication_reading"],
                                       "approved_utc": appr["approved_utc"], "approved_by": appr["approved_by"],
                                       "approval_file_sha256": provenance.sha256_file(L.out_dir() / STAGE2_APPROVAL)})
@@ -701,8 +985,10 @@ def phase_stage2():
 
 
 PHASES = {"templates": phase_templates, "parity": phase_parity, "plr": phase_plr, "stage0": phase_stage0,
-          "stage1p": phase_stage1p, "stage1x": phase_stage1x, "guards": phase_guards, "report": phase_report,
-          "stage2": phase_stage2}
+          "stage1p": phase_stage1p, "stage1x": phase_stage1x,
+          "warmstart-check": phase_warmstart_check, "warmstart-rerun": phase_warmstart_rerun, "a2c": phase_a2c,
+          "guards": phase_guards, "report": phase_report, "stage2": phase_stage2}
+ADDED_PHASES = ("warmstart-check", "warmstart-rerun", "a2c")   # PLAN 17.11; never in DEFAULT_PHASES
 
 
 # ---------------------------------------------------------------------------------------------------- listing ---------
@@ -758,6 +1044,30 @@ def print_listing() -> None:
           f" (batch 256, K_train 16)\nconditional fits at most: {lst['n_conditional_fits_max']}, training steps at "
           f"most {lst['training_steps_conditional_max']:,}\nnothing dropped (no budget rule); "
           f"{lst['not_in_default']}")
+    print_listing_additions()
+
+
+def listing_additions() -> list:
+    """Runs added by the user's decisions of 25 Nov 2026 (PLAN 17.11), after the run list above had started. They
+    are not in the default phase list and are issued after the present job has ended."""
+    rows = [{"phase": "a2c", "name": sp.name, "rung": sp.rung, "seed": sp.seed, "provider": sp.provider,
+             "class": sp.cls, "steps": sp.steps, "comparator": sp.comparator, "condition": None} for sp in a2c_specs()]
+    rows.append({"phase": "warmstart-check", "name": "(trains nothing)", "rung": "-", "seed": -1, "provider": "net",
+                 "class": "check", "steps": 0, "comparator": None,
+                 "condition": "every network run executed with fit_to version < 3"})
+    rows.append({"phase": "warmstart-rerun", "name": "<name>_ws", "rung": "-", "seed": -1, "provider": "net",
+                 "class": "as original", "steps": -1, "comparator": "superseding re-run where it exists",
+                 "condition": "exactly the runs listed by warmstart-check (PLAN 17.11 rule), plus all network runs "
+                              "if a re-run network pilot changes lr_net; steps as the original"})
+    return rows
+
+
+def print_listing_additions() -> None:
+    print("\n# Additions of 25 Nov 2026 (user decisions, PLAN.md section 17.11) - NOT in the default phase list; issued "
+          "after the present job has ended, in this order: warmstart-check, warmstart-rerun, a2c, report")
+    for x in listing_additions():
+        print(f"  + {x['phase']:16} {x['name']:18} {x['rung']:6} {x['seed']:4d} {x['provider']:4} {x['class']:12} "
+              f"{x['steps']:6d} {str(x['comparator']):16} {x['condition'] or ''}")
 
 
 def main(argv=None) -> int:

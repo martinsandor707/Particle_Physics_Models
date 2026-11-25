@@ -289,7 +289,7 @@ def net_name_split(model) -> tuple:
 
 
 def make_paramnet(model, poly, lnp_grid=None, steps: int = 2000, lbfgs_iter: int = 500, fit: bool = True,
-                  log=None) -> tuple:
+                  log=None, scale_floor="default") -> tuple:
     """ParamNet for ``model`` (names from ``net_name_split``), v0/vs/mass of ``poly``; fitted to ``poly`` unless
     ``fit`` is False. Returns (net, fit report or None). Seed the global RNG before calling."""
     from ..families.components import default_lnp
@@ -306,7 +306,8 @@ def make_paramnet(model, poly, lnp_grid=None, steps: int = 2000, lbfgs_iter: int
         grid = default_lnp(48, device=dev) if lnp_grid is None else lnp_grid
         # fit_to itself handles columns that are constant in momentum (scale floor, sfm.models.paramnet); the replica
         # that worked around the earlier bug is gone (module docstring)
-        rep = net.fit_to(poly, grid, steps=steps, lbfgs_iter=lbfgs_iter, log=log)
+        sf = ParamNet.SCALE_FLOOR_ABS if scale_floor == "default" else scale_floor
+        rep = net.fit_to(poly, grid, steps=steps, lbfgs_iter=lbfgs_iter, log=log, scale_floor=sf)
     return net, rep
 
 
@@ -381,7 +382,8 @@ def component(ctx: BuildContext, variant: str = "survival_exact", provider: str 
               far: bool = True, det_halo: bool = False, template: str = "stored", start: Optional[str] = None,
               degrees: Optional[dict] = None, coef_shift: Optional[dict] = None, logit_dh_from_far: bool = False,
               init: str = "none", init_ref: Optional[str] = None, net_from: Optional[str] = None,
-              last_ring: bool = False, fit_to_steps: int = 2000, fit_to_lbfgs: int = 500):
+              last_ring: bool = False, fit_to_steps: int = 2000, fit_to_lbfgs: int = 500,
+              fit_to_scale_floor="default"):
     """ComponentModel of AUDIT 4.1 (module docstring). Keyword arguments beyond the audit's list:
     lat_family_kw      ``family_kw`` of ``legacy_shower_lateral`` (A7l), used with a tuple ``shower_lat``
     degrees            polynomial degrees of new rows (A6b: {"sh_rk": 0})
@@ -392,6 +394,8 @@ def component(ctx: BuildContext, variant: str = "survival_exact", provider: str 
     last_ring          wrap in ``LastRing`` (A12)
     fit_to_steps, fit_to_lbfgs   Adam steps / L-BFGS iterations of the ParamNet warm start (AUDIT 4.1: 2000 / 500;
                        other values only in the smoke mode of scripts/run_m2a.py, registered under another stage)
+    fit_to_scale_floor "default" = ParamNet.SCALE_FLOOR_ABS (1e-2, fit_to version 3, user decision of 25 Nov 2026);
+                       None = fit_to version 2 (used only to rebuild a warm start made before version 3)
     """
     from ..families import build_variant
     from ..families.components import init_shower_long
@@ -407,7 +411,7 @@ def component(ctx: BuildContext, variant: str = "survival_exact", provider: str 
         base = model.base if isinstance(model, LastRing) else model
         poly = base.provider
         net, rep = make_paramnet(base, poly, fit=not ctx.skip_init, log=None, steps=fit_to_steps,
-                                 lbfgs_iter=fit_to_lbfgs)
+                                 lbfgs_iter=fit_to_lbfgs, scale_floor=fit_to_scale_floor)
         ref = None
         if not ctx.skip_init:
             import copy
@@ -485,7 +489,7 @@ def component(ctx: BuildContext, variant: str = "survival_exact", provider: str 
     if provider == "net":                         # net_from is None: fit to the model's own (legacy) provider
         base = model.base if isinstance(model, LastRing) else model
         net, rep = make_paramnet(base, base.provider, fit=not ctx.skip_init, steps=fit_to_steps,
-                                 lbfgs_iter=fit_to_lbfgs)
+                                 lbfgs_iter=fit_to_lbfgs, scale_floor=fit_to_scale_floor)
         base.set_provider(net)
         info.update({"net_from": None, "fit_to": _fit_report(rep)})
     if ref is not None:
@@ -500,7 +504,7 @@ def mixture(ctx: BuildContext, K: int = 3, long="emg", long_kw: Optional[dict] =
             lat_kw: Optional[dict] = None, depth: str = "linear", order: bool = True, fine: bool = True,
             template: str = "stored", provider: str = "poly", init: str = "target", init_ref: Optional[str] = None,
             init_steps: Sequence[int] = (1500, 1500), init_search: int = 400, net_from: Optional[str] = None,
-            fit_to_steps: int = 2000, fit_to_lbfgs: int = 500):
+            fit_to_steps: int = 2000, fit_to_lbfgs: int = 500, fit_to_scale_floor="default"):
     """MixtureModel of AUDIT 4.1 (A10 and its exploratory variants). The PolyProvider has degree 3 for every row and
     degree 0 for the c{k}_lat_* shape rows, starts at the family defaults (v0, vs, mass of the legacy fit), and is
     moved onto the map of ``init_ref`` by ``init_from_target`` on the core maps (before the acceptance)."""
@@ -516,7 +520,8 @@ def mixture(ctx: BuildContext, K: int = 3, long="emg", long_kw: Optional[dict] =
         model = load_run(net_from, BuildContext(device=dev, train=ctx.train, seed=ctx.seed, log=ctx.log,
                                                 skip_init=True, results_dir=ctx.results_dir)).train()
         poly = model.provider
-        net, rep = make_paramnet(model, poly, fit=not ctx.skip_init, steps=fit_to_steps, lbfgs_iter=fit_to_lbfgs)
+        net, rep = make_paramnet(model, poly, fit=not ctx.skip_init, steps=fit_to_steps, lbfgs_iter=fit_to_lbfgs,
+                                 scale_floor=fit_to_scale_floor)
         ref = None
         if not ctx.skip_init:
             import copy
@@ -567,4 +572,7 @@ def _fit_report(rep):
             "rms_max_name": max(rms, key=rms.get) if rms else None,
             "constant_columns": rep.get("constant_columns"), "near_floor_columns": rep.get("near_floor_columns"),
             "scale_floor_rel": rep.get("scale_floor_rel"), "lbfgs_stopped": lb.get("stopped"),
-            "fit_to": "sfm.models.paramnet.ParamNet.fit_to (scale floor; no replica)"}
+            "fit_to": "sfm.models.paramnet.ParamNet.fit_to (scale floor; no replica)",
+            "fit_to_version": rep.get("fit_to_version"), "scale_floor_abs": rep.get("scale_floor_abs"),
+            "column_std": rep.get("column_std"), "below_scale_floor": rep.get("below_scale_floor"),
+            "column_weight": rep.get("column_weight"), "rms": rms}

@@ -1,5 +1,182 @@
 # Track A (M2A) - status, 25 Nov 2026 (item E4 of PLAN.md section 16.7)
 
+## R3. The user's decisions of 25 Nov 2026 (PLAN 17.11): A2c, scale floor, divergence - written, waiting for re-review
+
+The real Track A job runs on the H200 from commit `5ddfd9f` (= the reviewed files). Everything below is for AFTER that
+job has ended and after an independent re-review. Nothing here was run on the H200.
+
+**Hard constraint, shown:**
+- `run_m2a.py --list`: the first 102 lines (the whole listing of the reviewed code) are byte-identical (SHA-256
+  `8762ba00...`). The additions follow as a separate block headed "# Additions of 25 Nov 2026".
+- `listing()`, the spec builders, `DEFAULT_PHASES` and every rule and threshold are unchanged.
+- A run with a `done.json` is returned by `run_spec` before any new code path is entered, so the job's runs stay
+  untouched and are still recognised as done.
+- The changes to the phases before `guards` act only when a run diverges or is blocked, which the reviewed code
+  handled by stopping.
+- Rebuilding an existing network run (`load_run`, `skip_init`) never calls `fit_to`.
+- On the starting trajectories of all eight network models of the list, `fit_to` version 3 gives warm starts bit for
+  bit equal to version 2 (test).
+
+### R3.1 What changed
+
+| item | what | where |
+|---|---|---|
+| A2c | `a2c_specs()`: `A2c_s0` and `A2c_s1` are the A2s structure with `start` = A2s of the same seed, T_A with 4000 steps, the frozen lr_poly, seed = the seed (the schedule of the rungs that start from the fitted A2s), class `control`, comparator `A2s_s<seed>`. Phase `a2c`, NOT in `DEFAULT_PHASES`. The report prints, beside every matched rung, "control: Δ vs A2c" (paired, decides nothing), an A2c section marked "control (added by the user on 25 Nov 2026, exploratory, outside the six primaries)", and a banner "NOT FINAL" while A2c is missing. Stage 2 refuses while A2c is not finished. | `run_m2a.py`, `run_m2a_report.py` |
+| step budgets (definition to confirm) | The rungs that start from the fitted A2s do NOT all share one budget. **Matched:** the 19 component rungs that start from the fitted A2s (A4, A5, A7, A8, A9 and 14 exploratory rungs), all 4000 steps; the test checks this set against the run list. **Not matched, proposals awaiting the user:** the mixture family A10, A10-2, A10-4, A10-5, A10g (6000 steps, initialised by `init_from_target` on the map of A2s, not continued from its weights), proposal "A2c6k" (A2c with 6000 steps, seeds 0 and 1); the convergence reruns (8000 / 12000 steps, against `A2s_s<seed>_x2`), proposal "A2c_x2". The report prints "not matched (...)" for those rows. | `A2C_GROUPS` |
+| scale floor | `ParamNet.fit_to` version 3. The weight of a varying column is 1 / max(std_j, 1e-2)^2 in raw (unconstrained) units. Columns with std >= 1e-2 keep the version-2 float32 normalisation bit for bit, and exactly constant columns keep the earlier treatment. `scale_floor=None` reproduces version 2 (used only to rebuild old warm starts). Recorded in init.json (`init_info.fit_to`): `fit_to_version`, `scale_floor_abs`, `column_std`, `below_scale_floor`, `column_weight`, per-column `rms`. Factories: `fit_to_scale_floor` (default = version 3). | `paramnet.py`, `dist_factory.py` |
+| floor: which columns change | On the real run list (starting trajectories of A1, A2n, A4n, A5n, A7n, A8n, A9n, A10n): no varying column below 1e-2 (smallest std 0.041); the warm starts are bit for bit those of version 2 (test `test_scale_floor_leaves_every_net_model_of_the_list_bit_identical`). The fitted targets of the job are checked by `warmstart-check`. The cure, measured (reviewer's case: six cubic columns plus one column of small spread, pre-registered call): worst ordinary column without the floor 60.8 % / 56.5 % / 11.7 % of its spread for an extra column of relative spread 1e-6 / 1e-4 / 1e-3, with the floor 0.79 % / 1.32 % / 0.60 % (0.19 % without the extra column). For spreads >= 5e-3 (std >= 1e-2) nothing changes. | test, `r3/floor_repro.py` (scratch) |
+| step-0 parity | For every new warm-started network run, `run_spec` computes before training the per-event validation NLL of the network at step 0 (the registry's computation: unmodified `common.test_nll` inside `deterministic()`). It saves this as a tagged array `runs/<stage>/<run>/step0/val_nll.npy` (not a registry row) and pairs it with the source polynomial run's registered array through `provenance.paired_delta`. The source is `net_from`, or `A0_init` for A1. The result goes to init.json, done.json and `decisions.json: step0_parity`, and is printed in the Initialisation table. | `run_m2a_lib.step0_parity` |
+| warm-start check | `run_m2a.py warmstart-check` trains nothing. For every network run executed with `fit_to` version < 3 it records: (i) the target columns from the source run (std, constant, below the floor); (ii) the recorded `kl_map`; (iii) a deterministic **rebuild** of the old warm start (same seed, same build order as `run_spec`, `fit_to_scale_floor=None`), judged bit for bit by exact equality of the rebuilt and recorded `kl_map`, and the step-0 parity of that rebuild (tagged arrays under `runs/<stage>/warmstart_check/<run>/`); (iv) the PLAN 17.11 rule applied by code (`warmstart_affected`): re-run iff (a) a varying target column has std < 1e-2, or (b) the recorded kl_map > 1e-4 nat. It writes `decisions.json: warmstart_check` (with `rerun`). If a rebuild is not bit for bit, this is said; the decision always uses the RECORDED kl_map. | `run_m2a.py` |
+| warm-start re-run | `run_m2a.py warmstart-rerun` re-runs exactly the listed runs as `<name>_ws` (fit_to version 3, step-0 parity, comparators mapped to their superseding runs). Originals are never overwritten. `decisions.json: warmstart_rerun.superseded` is written after every run (resumable). Dependents: if a network pilot was re-run, lr_net is decided again among the pilots (re-runs in place of originals); if it changes, every other network run is re-run with the new rate (listed as `dependent`). Then the guards phase runs (targets recomputed with the superseding names). The report shows each original as "superseded: warm start" and applies the rules to the re-run. Stage 2 refuses until every listed run has its finished re-run. | `run_m2a.py`, report |
+| divergence | Definition (`DIVERGENCE_DEFINITION`, below). After `train.fit` and before the registry, `run_spec` checks the history; a `FloatingPointError` of the registry is caught. A diverged run writes `diverged.json` (criteria, step, last finite validation and train NLL, the fit summary with skip counters, parameter statistics with the weight hash of the last kept parameters, the gradient norm at those parameters on a fixed batch, kept files) and `decisions.json: diverged`, frees the GPU, and the job continues. It is terminal: re-issuing the command does not retrain it. A run whose `start` / `init_ref` / `net_from` diverged (or is blocked) is **blocked**: not trained, `decisions.json: blocked` ("blocked by <run>"). A pilot that diverged loses under the P-lr rule (recorded); if every network pilot is lost, lr_net is "undecided" and the network runs are blocked; if every polynomial pilot is lost, the job stops. Exploratory rungs (and the net column, exploratory by AUDIT 4.1): status "diverged", no second seed, the rung stays in every table. Primary, base, control and rerun runs: status "diverged - awaiting diagnosis"; NO rule marks them failed; the report says "failed (diagnosed)" only with a valid diagnosis file; Stage 2 refuses while one waits. A diverged A0 seed makes the drift rule "not evaluable" for that seed (recorded); the job continues. | `run_m2a_lib.py`, `run_m2a.py`, report |
+| review R1-R8 | R1: the alternative column shows the verdict of the alternative reading (literal conditions AND two-seed mean <= -2 SE). R2: the G-region alternative also requires a gain in the total. R3: "the guards phase has not run" when no guard targets are recorded. R4: guard blocks of an original not used by the rules (or superseded) are labelled. R5: rms_max is printed relative to that column's spread; the template marks are "Q1, Q2" for A3c and "Q1" for A3x. R6: `phase_stage2` recomputes the report in memory and requires equality with `results.json` (decisions of Stage 2 and Stage-2 runs are left out of the report, so a resumed Stage 2 is not refused). R7: the approval must contain the key `kept_and_replicated`. R8: `results.json` records `git: {commit, clean}`. | report, `run_m2a.py` |
+
+**Divergence definition (for the reviewer's and the user's eye):**
+> A run is 'diverged' iff (i) a validation mean in its fit history is not finite, or (ii) the registry evaluation of
+> the finished fit finds a non-finite per-event NLL (FloatingPointError), or (iii) 'frozen': in the last evaluation
+> window at least 50 % of the training batches were skipped by sfm.train.fit for a non-finite loss or gradient, or
+> (iv) 'blow-up': the last validation mean exceeds the reference by more than 1 nat per event (10,000 in table units),
+> the reference being the lowest of: the validation means of the fit history, the step-0 validation mean of a network
+> warm start, and the registered validation mean of the run's comparator. Isolated skipped batches of a fit that ends
+> finite are NOT a divergence (they are reported with the run).
+
+It is conservative: `sfm.train.fit` already skips non-finite batches, so only a fit whose result is unusable, or that
+has gone more than 1 nat wrong, is declared diverged. No healthy fit of the list is expected within orders of
+magnitude of 1 nat; the A10 mixtures in smoke were 0.04 nat worse than A2s.
+
+**Diagnosis file** (written by the orchestrator after an independent mathematical diagnosis; never by code):
+`runs/<stage>/diagnosis/<run>.json`
+```
+{"run": "A7_s0", "diverged_json_sha256": "<sha256 of runs/<stage>/A7_s0/diverged.json>",
+ "verdict": "failed" | "rerun_allowed", "diagnosed_by": "Fable (independent mathematical diagnosis)",
+ "diagnosed_utc": "2026-11-26T10:00:00Z", "summary": "..."}
+```
+A file with another hash, another verdict or a missing field is ignored (the run stays "awaiting diagnosis").
+"rerun_allowed" changes no number. A re-run would be a new, explicit decision.
+
+**Proposed change to a base module (not made; `sfm.train` is read-only).** The gradient norm of a diverging fit is
+known only at its last parameters (the diagnostics compute it on a fixed batch). To record it during the fit:
+`src/sfm/train.py` line 553: `torch.nn.utils.clip_grad_norm_(params, cfg.clip)` ->
+`gn = float(torch.nn.utils.clip_grad_norm_(params, cfg.clip)); st["gn_max"] = max(st.get("gn_max", 0.0), gn)`.
+Line 568, in the history entry: add `"grad_norm_max": st.pop("gn_max", None),` before `"seconds"`. In `note_skip`
+(line 514): `st.setdefault("first_skip_step", st["step"] + 1)`. This costs one device sync per step and changes the
+content of `model.pt` / `checkpoint.pt` (history), not the weights.
+
+### R3.2 H200 commands after the present job has ended (in order; one job; resumable by re-issuing)
+
+```
+cd <repo>; git pull          # the commit of this round, after its re-review
+export SFM_OUT_ROOT=<area>/sfm_out SFM_USER_CACHE=<area>/sfm_cache
+L=shape-form-martin/scripts/launch.sh; P=.venv/bin/python
+# 0. only if the job stopped at a non-finite evaluation (reviewed code: FloatingPointError): finish the default list
+#    with the new code - the stopped run becomes 'diverged' and the list continues
+$L m2a $P -B shape-form-martin/scripts/run_m2a.py
+# 1.-4. the additions and the final report, in this order, in one process:
+$L m2a_after $P -B shape-form-martin/scripts/run_m2a.py warmstart-check warmstart-rerun a2c report
+```
+
+| phase | acceptance | output |
+|---|---|---|
+| warmstart-check | one line per network run: `kl_map ... (rebuilt ..., bit for bit True)`, below-floor columns, `RE-RUN` / `keep`; then `N of M network runs to be re-run` | `decisions.json: warmstart_check`; tagged step-0 arrays under `runs/m2a_dist/warmstart_check/` |
+| warmstart-rerun | one `<name>_ws` run per listed run (and dependents), each logging its step-0 parity; then `superseded {...}` and the guards phase | new run directories `<name>_ws`, rows, `decisions.json: warmstart_rerun` |
+| a2c | `A2c_s0`, `A2c_s1` registered | rows, `decisions.json: a2c` |
+| report | `report: ... written` without "NOT FINAL" | RESULTS.md, results.json |
+
+Then the user reads the table. Stage 2 needs the approval file (section 0) and refuses while: A2c is missing, a listed
+warm-start re-run is missing, a diverged primary / base / control waits for its diagnosis, or `results.json` differs
+from a recomputation. Stop a job with `shape-form-martin/scripts/stop_job.sh <pid file>`. Copy back the machine
+directory as in section 4.
+
+### R3.3 Evidence (laptop, smoke mode, scratch output roots)
+
+Two scratch output roots. Each reference set was made by the two-step `val_parity.py` (both runs ALL PASS), and
+real templates + parity passed (A0 at step 0 - formula array = -1.869e-08 ± 1.1e-08 nat, max event 1.34e-05).
+
+**Fresh root (new code from the start).** Smoke default list through the launcher with
+`SFM_M2A_INJECT_DIVERGENCE=A4t_s0,A7_s0` (smoke-only hook: the first parameter tensor is set to NaN half-way).
+- Kill and resume: the job was stopped at `[A2n_s1] step 20`; re-issuing the same command resumed it ("resuming from
+  step 20 of 40").
+- A7_s0 (primary): "DIVERGED (non-finite validation mean in the fit history; frozen: 10 of 10 batches skipped in the
+  last evaluation window)", recorded as "diverged - awaiting diagnosis". The record holds step 30, the last finite
+  validation (step 20), 180 non-finite parameters, the gradient norm at the last parameters, and the kept files.
+  A7n_s0: "BLOCKED by A7_s0", not trained.
+- A4t_s0 (exploratory): "diverged - no second seed; the batch continues".
+- The job ran on through guards and report. In the tables: A7 seed 0 "**diverged - awaiting diagnosis**" (no keep,
+  no replication), A4t "**diverged**", A7n_s0 "**blocked by A7_s0**", and a section "Diverged and blocked runs" with
+  the full diagnostics.
+- Re-issuing after completion started 0 fits; the diverged and blocked runs stayed as recorded.
+- `run_m2a.py --smoke a2c`: stopped at `[A2c_s0] step 20`, resumed, both registered. Report: A2c_s0 - A2s_s0 =
+  +0.51 ± 0.24, and the control column, e.g. A8_s0: Δ vs A2s +0.50 ± 0.23 but Δ vs A2c -0.01 ± 0.04 (on the smoke
+  fits the offset shared by the rungs that start exactly at A2s is the continued training, as the reviewer suspected
+  in B6). The mixtures show "not matched (6000 steps, init_from_target)".
+- Hard constraint: all 55 rows common to this run and the earlier smoke run of the REVIEWED code are identical in the
+  SHA-256 of the validation array and of the weight tensors. This includes the 14 network runs, now with fit_to
+  version 3 and the step-0 parity evaluated before training. Different only: the injected runs (A4t_s0, A7_s0), the
+  blocked A7n_s0, the earlier forced rerun (A7_s0_x2, A2s_s0_x2), and the additions (A2c_s0/1, A11k_s0/1).
+- Stage-2 gate (approval and diagnosis files were TEST FIXTURES written in scratch):
+  - refused without an approval file;
+  - with an approval: refused, "diverged runs await an independent diagnosis: ['A7_s0']";
+  - a diagnosis fixture (verdict failed) changed the table (A7 seed 0 "failed (diagnosed)"), so the old approval
+    was refused as stale;
+  - with a renewed approval Stage 2 ran (nothing kept: A11k_s0/1);
+  - re-issuing Stage 2 after that passed the R6 recomputation (stable with Stage-2 runs present).
+
+**Copy of the old smoke root** (all 14 network runs made with fit_to version 2). Constructed below-floor case, real
+code paths, scratch copy only (the original directories were moved aside, never deleted): A4_s0 with the EMG rows
+at their defaults (`init="none"`), trained 4 smoke steps at lr 5e-4. Its rows sh_mu, sh_rsig and sh_rtau then have
+std 1.4e-3, 1.5e-3 and 4.7e-4. A4n_s0 was warm-started from it with the full pre-registered call in version 2 (kl_map
+4.9e-4 nat).
+- `warmstart-check`: every old warm start was rebuilt **bit for bit** (rebuilt kl_map equal to the recorded one, 14
+  of 14). A4n_s0: rule (a) (sh_mu, sh_rsig, sh_rtau below the floor) and rule (b). The other 13: rule (b) only (the
+  smoke warm start of 40 Adam steps gives 0.008-0.09 nat). Re-run list: all 14. A second issue of the command gave
+  the identical decision.
+- `warmstart-rerun`: stopped at `[A2n_s1_ws] step 20`, resumed ("resuming from step 20 of 40").
+  - All 14 re-run as `<name>_ws`; lr_net re-decided among the re-run pilots: 0.01 -> 0.01 (no dependents); guards of
+    the re-run pairs computed.
+  - **13 of the 14 re-runs are bit-identical to their originals** (validation array and weight hashes): the floor
+    changes nothing where no column lies below it.
+  - Only the constructed A4n_s0 changed: version 3 floored sh_mu, sh_rsig and sh_rtau (weight 1e4 each); the worst
+    column went from 11.5 % to 2.35 % of its spread; step-0 parity against A4_s0 went from -4.30 ± 0.76e-4 (old warm
+    start, rebuilt) to +0.11 ± 0.15e-4.
+  - Its kl_map is still 3.7e-4 nat, so the B2 flag stays on A4n_s0_ws. The rule is applied once (to runs made before
+    version 3), so it does not loop. The full-grid kl_map weights low momenta that the data hardly populate; the
+    step-0 parity is the data-weighted measure.
+- Report: the net column uses `A4n_s0_ws vs A2n_s0_ws`, with the original row "superseded: warm start; rules use the
+  row above". Stage 0 shows `A1_s0_ws - A0_s0` with the original labelled. The Initialisation table shows version,
+  floored columns, step-0 parity ("rebuilt" for the old ones) and "superseded: warm start -> <name>_ws".
+
+**Tests:** `pytest tests/test_dist_factory.py tests/test_run_m2a.py tests/test_models.py` gives 107 passed, 3 skipped
+(default output root, templates absent) and 110 passed, 0 skipped (with a dry-run output root). Repository:
+`results/registry.jsonl` and `results/test_access.log` unchanged; nothing was written in the clone except the
+git-ignored `cache/gpu.lock`.
+
+### R3.4 Definitions that need the reviewer's or the user's eye
+
+1. The divergence definition above: the thresholds (1 nat blow-up, 50 % frozen window) and that isolated skipped
+   batches are not a divergence.
+2. Divergence classes: the net column counts as exploratory ("diverged", no diagnosis needed), as AUDIT 4.1 calls it
+   exploratory. Pilots lose under the P-lr rule. Primaries, bases (A2s, A2n), controls (A0, A1, A2c) and reruns wait
+   for a diagnosis. A diverged A0 seed makes the drift rule not evaluable for that seed, and the job continues (the
+   user's "allow independent rungs to finish").
+3. Stage 2 also refuses while a primary / base / control / rerun waits for its diagnosis (my addition; the user asked
+   only that no primary be called failed without one).
+4. The A2c step-budget groups and the two proposals (A2c6k, A2c_x2), which await the user.
+5. The scale floor is absolute (1e-2 in raw units, the user's words), not relative to the column's mean as the
+   reviewer suggested (2^-5 max(1, |mean|)). "Below the floor" = varying (not constant by the 2^-20 rule) and float64
+   std on `default_lnp(48)` with uniform weights < 1e-2. A column with |mean| >> 1 and std just above 1e-2 is not
+   floored.
+6. The source of the step-0 parity of A1 is `A0_init` (the legacy coefficients at step 0).
+7. Warm-start re-run dependents: an lr_net change re-runs every network run with the new rate; comparators are
+   mapped to the superseding runs; the guards of the re-run pairs are computed; nothing else depends on a network
+   run in Stage 1.
+8. R6: the comparison leaves out Stage-2 decisions and Stage-2 runs; the git record holds `commit` and `clean` only
+   (the number of changed files of a dirty laptop clone would make the comparison fragile).
+
+### R3.5 Awaiting the user
+
+A2c6k and A2c_x2 (R3.4, item 4). The proposed `sfm.train` change for gradient norms (R3.1). Unchanged from
+section 0: A11p is not implemented, and `stage2_specs` still needs its review.
+
 **Update after the independent review of commit `c4f39fd` (`results/m2a_dist/REVIEW.md`: PASS WITH REQUIRED FIXES,
 no class-A finding).** The real run starts on the H200 from the reviewed files. The fixes B1-B5 and C2 (section 0)
 change only the report, the Stage-2 gate and an extra report option. **Nothing that any phase before `guards` fits or
@@ -507,6 +684,12 @@ first as machine `rtx-4060-laptop-gpu-g144-629104b0`, then as `...-76c0f59a` (th
   with its primary.
 
 ## 8. Files for explicit staging
+
+**Round R3 (user decisions of 25 Nov 2026):** `shape-form-martin/scripts/run_m2a.py`,
+`shape-form-martin/scripts/run_m2a_lib.py`, `shape-form-martin/scripts/run_m2a_report.py`,
+`shape-form-martin/src/sfm/models/paramnet.py`, `shape-form-martin/src/sfm/models/dist_factory.py`,
+`shape-form-martin/tests/test_run_m2a.py`, `shape-form-martin/tests/test_models.py`,
+`shape-form-martin/tests/test_dist_factory.py`, `shape-form-martin/results/m2a_dist/STATUS.md`. Nothing else.
 
 **This round (review fixes B1-B5, C2):** `shape-form-martin/scripts/run_m2a_report.py`,
 `shape-form-martin/scripts/run_m2a.py`, `shape-form-martin/tests/test_run_m2a.py`,

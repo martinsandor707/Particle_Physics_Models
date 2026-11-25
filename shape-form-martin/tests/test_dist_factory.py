@@ -312,3 +312,22 @@ def test_constant_and_varying_columns_are_far_apart(rid, fac, kw):
           min(varying.values()) if varying else None)
     assert all(ratio[n] <= 1.0 for n in rep["constant_columns"])
     assert not varying or min(varying.values()) > 1e3
+
+
+@pytest.mark.parametrize("rid,fac,kw", NET_MODELS, ids=[m[0] for m in NET_MODELS])
+def test_scale_floor_leaves_every_net_model_of_the_list_bit_identical(rid, fac, kw):
+    """fit_to version 3 (floor max(std_j, 1e-2)) against version 2 (scale_floor=None) on the starting trajectories of
+    every net model of the list: no varying column lies below the floor (legacy spreads >= 0.041), so the warm start
+    is bit for bit the same (shortened call; the identity does not depend on the number of steps)."""
+    m = build(fac, kw)
+    poly = (m.base if hasattr(m, "base") else m).provider
+    res = []
+    for floor in (None, "default"):
+        torch.manual_seed(0)
+        net, rep = dfac.make_paramnet(m, poly, steps=200, lbfgs_iter=100, scale_floor=floor)
+        res.append((net.state_dict(), rep))
+    (sa, ra), (sb, rb) = res
+    assert rb["below_scale_floor"] == [] and rb["fit_to_version"] == 3 and ra["fit_to_version"] == 2
+    assert all(torch.equal(sa[k], sb[k]) for k in sa)
+    varying = [n for n in rb["column_std"] if n not in rb["constant_columns"]]
+    assert not varying or min(rb["column_std"][n] for n in varying) >= 0.041 * 0.99

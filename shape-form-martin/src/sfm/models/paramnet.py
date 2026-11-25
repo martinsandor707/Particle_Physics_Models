@@ -157,9 +157,14 @@ class ParamNet(ParamProvider):
     # grid is at most SCALE_FLOOR_REL * max(1, |weighted mean|) is "constant in momentum" at float32 resolution
     # (2**-20 = 8 float32 ulps of a number of magnitude 1, 2**-23 being the float32 machine epsilon).
     SCALE_FLOOR_REL = 2.0 ** -20
+    # Scale floor of the variance normalisation (user decision of 25 Nov 2026, PLAN.md section 17.11): the scale of a
+    # varying column is max(std_j, SCALE_FLOOR_ABS) in the raw (unconstrained) units of the target column.
+    SCALE_FLOOR_ABS = 1e-2
+    FIT_TO_VERSION = 3              # 1: original; 2: constant columns exact (25 Nov); 3: + scale floor max(std, 1e-2)
 
     def fit_to(self, provider: nn.Module, lnp_grid: torch.Tensor, weights: Optional[torch.Tensor] = None,
-               steps: int = 2000, lr: float = 1e-2, lbfgs_iter: int = 500, log=None) -> dict:
+               steps: int = 2000, lr: float = 1e-2, lbfgs_iter: int = 500, log=None,
+               scale_floor: Optional[float] = SCALE_FLOOR_ABS) -> dict:
         """Function-space warm start: weighted least squares on another provider's trajectories.
 
         target[g, j] = provider(lnp_grid)[g, name_j] for every name of this ParamNet (matched by name; the provider
@@ -195,6 +200,16 @@ class ParamNet(ParamProvider):
         Columns above the floor are normalised exactly as before (same float32 operations), so when no constant
         column is present the result is bit-for-bit the earlier one.
 
+        Scale floor of the varying columns (version 3; user decision of 25 Nov 2026, PLAN.md section 17.11). The
+        weight of a varying (non-constant) column is 1 / max(s_j, F)^2 with F = ``scale_floor`` = 1e-2 in the raw
+        (unconstrained) units of the column, instead of 1 / s_j^2: a column whose float64 standard deviation s_j over
+        the grid is below F ("below the floor") gets the weight 1 / F^2 = 1e4, so that a nearly constant column (the
+        review measured: relative spread 1e-6 ... 5e-3 degrades EVERY column of the warm start to 1.6-17 % of its
+        spread) cannot dominate the gradient of the shared layers. Columns with s_j >= F keep the float32
+        normalisation 1 / var_j of version 2 bit for bit (``torch.where`` selects the denominator per column), and
+        constant columns keep the version-2 treatment. ``scale_floor=None`` is version 2 exactly (used to rebuild a
+        warm start made before version 3).
+
         L-BFGS guard: every chunk of at most 100 iterations runs inside try/except (an overflowing line search
         raised "value cannot be converted to type float without overflow"); after each chunk the objective must be
         finite. On an exception or a non-finite value the best state seen so far (start of the polish included) is
@@ -204,7 +219,10 @@ class ParamNet(ParamProvider):
 
         Returns {"rms": {name: weighted rms error}, "max_abs": {name: max |error|}, "loss": final loss,
         "constant_columns": [names], "near_floor_columns": {name: s_j / (floor * max(1,|mu_j|))} for non-constant
-        columns with that ratio below 1e3, "scale_floor_rel": SCALE_FLOOR_REL, "lbfgs": {...}}.
+        columns with that ratio below 1e3, "scale_floor_rel": SCALE_FLOOR_REL, "lbfgs": {...},
+        "fit_to_version": 3 (2 with scale_floor=None), "scale_floor_abs": F or None, "column_std": {name: s_j},
+        "below_scale_floor": [varying columns with s_j < F], "column_weight": {name: 1/max(s_j,F)^2-type weight
+        actually used (0 for constant columns)}} - the last four only with normalised weights.
         """
         if not is_param_provider(provider):
             raise TypeError("fit_to: provider must be an nn.Module with a list of unique names")
@@ -257,11 +275,29 @@ class ParamNet(ParamProvider):
             ratio = s64 / floor64
             near_floor = {n: float(ratio[j]) for j, n in enumerate(self.names)
                           if not bool(const_mask[j]) and float(ratio[j]) < 1e3}
-            w = w / torch.where(var > 0, var, torch.ones_like(var))         # unchanged for non-constant columns
+            denom = torch.where(var > 0, var, torch.ones_like(var))         # unchanged for non-constant columns
+            below = torch.zeros(P, dtype=torch.bool, device=dev)
+            if scale_floor is not None:
+                below = (~const_mask) & (s64 < float(scale_floor))
+                if bool(below.any()):                                        # version 3: max(std_j, F)
+                    denom = torch.where(below, torch.full_like(denom, float(scale_floor) ** 2), denom)
+            w = w / denom
+            colw = torch.where(const_mask, torch.zeros_like(denom), 1.0 / denom)  # the column factor actually used
             if bool(const_mask.any()):
                 w = torch.where(const_mask[None, :], torch.zeros_like(w), w)
                 mean = torch.where(const_mask, mu64.to(torch.float32), mean)
         constant_columns = [n for j, n in enumerate(self.names) if bool(const_mask[j])]
+        floor_info = {}
+        if normalise:
+            floor_info = {"fit_to_version": self.FIT_TO_VERSION if scale_floor is not None else 2,
+                          "scale_floor_abs": float(scale_floor) if scale_floor is not None else None,
+                          "column_std": {n: float(s64[j]) for j, n in enumerate(self.names)},
+                          "below_scale_floor": [n for j, n in enumerate(self.names) if bool(below[j])],
+                          "column_weight": {n: float(colw[j]) for j, n in enumerate(self.names)}}
+        else:
+            floor_info = {"fit_to_version": self.FIT_TO_VERSION if scale_floor is not None else 2,
+                          "scale_floor_abs": None, "column_std": None, "below_scale_floor": [], "column_weight": None,
+                          "note": "explicit (G, P) weights: no normalisation, no floor"}
         col = {n: j for j, n in enumerate(self.names)}
         net_idx = [col[n] for n in self.names_net]
         with torch.no_grad():
@@ -356,4 +392,4 @@ class ParamNet(ParamProvider):
                 "max_abs": {n: float(mx[j]) for j, n in enumerate(self.names)},
                 "loss": final if math.isfinite(final) else float("nan"),
                 "constant_columns": constant_columns, "near_floor_columns": near_floor,
-                "scale_floor_rel": self.SCALE_FLOOR_REL, "lbfgs": lbfgs_rep}
+                "scale_floor_rel": self.SCALE_FLOOR_REL, "lbfgs": lbfgs_rep, **floor_info}

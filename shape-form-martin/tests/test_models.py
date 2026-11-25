@@ -535,3 +535,59 @@ def test_paramnet_satisfies_the_families_contract():
     assert set(raw) == {"a", "b", "k"} and all(v.shape == (len(LNP),) for v in raw.values())
     # same kinetic variable as the families' providers
     assert torch.allclose(net.x(LNP), FP.x_of_lnp(LNP, FP.V0_PION, FP.VS_PION), atol=1e-6)
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# fit_to version 3: scale floor max(std_j, 1e-2) (user decision of 25 Nov 2026, PLAN.md section 17.11)
+# ---------------------------------------------------------------------------------------------------------------------
+def test_fit_to_scale_floor_changes_nothing_when_every_varying_column_is_above_it():
+    target = Poly(["mu", "log_s", "frac", "c2"], V0, VS)
+    with torch.no_grad():
+        spread = target(GRID).double().std(0, unbiased=False)
+    assert float(spread.min()) > 1e-2
+    out = []
+    for floor in (None, 1e-2):
+        torch.manual_seed(5)
+        net = ParamNet(["mu", "log_s", "frac"], ["c2"], v0=V0, vs=VS)
+        rep = net.fit_to(target, GRID, steps=300, lbfgs_iter=200, scale_floor=floor)
+        out.append((net.state_dict(), rep))
+    (sa, ra), (sb, rb) = out
+    assert all(torch.equal(sa[k], sb[k]) for k in sa) and ra["rms"] == rb["rms"] and ra["loss"] == rb["loss"]
+    assert ra["fit_to_version"] == 2 and rb["fit_to_version"] == 3 and rb["below_scale_floor"] == []
+    assert rb["scale_floor_abs"] == 1e-2 and set(rb["column_std"]) == set(net.names)
+
+
+def test_fit_to_scale_floor_cures_a_nearly_constant_column():
+    """The review's degraded case (section 3): six ordinary cubic columns plus one column of relative spread 1e-4.
+    Measured on the laptop CPU with the pre-registered call (48 points, 2000 Adam, 500 L-BFGS): worst ordinary
+    column 56.5 % of its spread without the floor, 1.3 % with it (0.19 % without the extra column)."""
+    from sfm.families.components import default_lnp
+    g = torch.Generator().manual_seed(0)
+    base = torch.randn(6, 4, generator=g) * torch.tensor([1.0, 0.5, 0.3, 0.2])
+    grid = default_lnp(48)
+    xg = (torch.log(kinetic(grid)) - V0) / VS
+    shape = torch.tensor([[0.0, 1.0, 0.5, 0.3]])
+    sd = float((torch.stack([xg ** k for k in range(4)], 1) @ shape.T).std(unbiased=False))
+    coef = torch.cat([base, torch.tensor([[2.0, 0, 0, 0]]) + shape * (1e-4 * 2.0 / sd)])
+
+    class Prov(ParamProvider):
+        names = [f"c{i}" for i in range(6)] + ["x"]
+
+        def forward(self, lnp):
+            x = (torch.log(kinetic(lnp)) - V0) / VS
+            return torch.stack([x ** k for k in range(4)], 1) @ coef.T
+
+    prov = Prov()
+    worst = {}
+    for floor in (None, 1e-2):
+        torch.manual_seed(0)
+        net = ParamNet(prov.names, [], v0=V0, vs=VS)
+        rep = net.fit_to(prov, grid, steps=2000, lbfgs_iter=500, scale_floor=floor)
+        with torch.no_grad():
+            t = prov(grid)
+            e = net(grid) - t
+        worst[floor] = max(float(e[:, j].pow(2).mean().sqrt() / t[:, j].std(unbiased=False)) for j in range(6))
+        if floor:
+            assert rep["below_scale_floor"] == ["x"] and rep["column_weight"]["x"] == pytest.approx(1e4)
+            assert rep["column_std"]["x"] == pytest.approx(2e-4, rel=1e-3) and rep["constant_columns"] == []
+    assert worst[None] > 0.10 and worst[1e-2] < 0.02, worst

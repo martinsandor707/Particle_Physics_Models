@@ -301,3 +301,183 @@ def test_b4_template_notes_carry_the_reviewers_numbers():
     assert "0.50 against 0.35" in R.TEMPLATE_NOTE_Q1 and "-0.16 ± 0.02" in R.TEMPLATE_NOTE_Q1
     s = R.TEMPLATE_NOTE_Q2.format(n101=79, z=1379, mx=1.81, den=0.186)
     assert "79 cells at z' >= 1379 mm" in s and "`deep`" in s and "`beyond_zb`" in s
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# user decisions of 25 Nov 2026 (PLAN 17.11): A2c, scale floor + step-0 parity, divergence handling
+# ---------------------------------------------------------------------------------------------------------------------
+def _h(step, val, sl=0, sg=0, tr=18.1):
+    return {"step": step, "val": val, "skipped_loss": sl, "skipped_grad": sg, "train_nll": tr}
+
+
+def test_divergence_definition_is_explicit_and_conservative():
+    ok = [_h(500, 18.13), _h(1000, 18.125), _h(1500, 18.121)]
+    assert L.divergence_check(ok, [18.12]) == []
+    assert L.divergence_check(ok[:2] + [_h(1500, 18.121, sl=3)], [18.12]) == []           # isolated skips: no
+    nan = ok[:2] + [_h(1500, float("nan"))]
+    assert any("non-finite" in c for c in L.divergence_check(nan, []))
+    frozen = ok[:2] + [_h(1500, 18.13, sl=200, sg=60)]                                       # 260 of 500 skipped
+    assert any(c.startswith("frozen") for c in L.divergence_check(frozen, []))
+    assert L.divergence_check(ok[:2] + [_h(1500, 18.13, sl=240)], []) == []                 # 240 of 500: below 50 %
+    blow = ok[:2] + [_h(1500, 19.2)]
+    assert any(c.startswith("blow-up") for c in L.divergence_check(blow, []))                # 19.2 - 18.125 > 1 nat
+    assert L.divergence_check(ok[:2] + [_h(1500, 19.0)], []) == []                           # 0.875 nat: not
+    assert any(c.startswith("blow-up") for c in L.divergence_check([_h(500, 19.2)], [18.1]))  # vs comparator
+    assert L.BLOWUP_NAT == 1.0 and L.FROZEN_FRACTION == 0.5 and "conservative" not in L.DIVERGENCE_DEFINITION
+
+
+def test_injection_hook_is_refused_in_the_real_mode(monkeypatch):
+    monkeypatch.setenv(L.INJECT_ENV, "A4t_s0")
+    with pytest.raises(SystemExit, match="smoke-mode testing hook"):
+        L.configure(smoke=False)
+    monkeypatch.delenv(L.INJECT_ENV)
+    L.configure(smoke=False)
+
+
+def test_a_diverged_pilot_loses_under_the_pilot_rule(monkeypatch):
+    rng = np.random.default_rng(3)
+    base = 18.12 + 1e-3 * rng.standard_normal(500)
+    arrays = {"p1": base + 1e-4, "p3": base + 3e-4}
+    _fake_tagged(monkeypatch, arrays)
+    monkeypatch.setattr(L, "registered_row", lambda n, ckpt=None, need_guards=False: {} if n in arrays else None)
+    monkeypatch.setattr(L, "diverged_marker", lambda n: {"status": "diverged"} if n == "p2" else None)
+    win, tab = M._plr_decide({0.001: "p1", 0.003: "p2", 0.01: "p3"})
+    assert win == 0.001 and tab["0.003"]["status"] == "diverged" and tab["0.003"]["within"] is False
+    monkeypatch.setattr(L, "registered_row", lambda n, ckpt=None, need_guards=False: None)
+    win, tab = M._plr_decide({0.001: "p1", 0.003: "p2"})
+    assert win is None and len(tab) == 2
+
+
+def test_blocked_by_a_diverged_source_or_an_undecided_lr_net(tmp_path, monkeypatch):
+    import json as _json
+    monkeypatch.setattr(L, "out_dir", lambda: tmp_path)
+    monkeypatch.setattr(L, "diverged_marker", lambda n: {"status": "diverged"} if n == "A7_s0" else None)
+    sp = M.primary_specs()[1][2]                                    # A7n_s0: net_from m2a_dist/A7_s0
+    assert sp.name == "A7n_s0" and L.blocked_by(sp) == "A7_s0"
+    assert L.blocked_by(M.primary_specs()[1][0]) is None            # A4n_s0 does not depend on A7_s0
+    (tmp_path / "plr.json").write_text(_json.dumps({"lr_poly": 0.003, "lr_net": None}))
+    assert L.blocked_by(M.primary_specs()[1][0]).startswith("P-lr")
+
+
+def test_diagnosis_file_must_name_the_diverged_record(tmp_path, monkeypatch):
+    import json as _json
+    monkeypatch.setattr(L, "out_dir", lambda: tmp_path)
+    (tmp_path / "A7_s0").mkdir()
+    (tmp_path / "A7_s0" / L.DIVERGED_FILE).write_text(_json.dumps({"machine_id": L.MACHINE_ID, "cls": "primary",
+                                                                   "status": "diverged"}))
+    assert L.diagnosis("A7_s0") is None
+    (tmp_path / "diagnosis").mkdir()
+    sha = provenance.sha256_file(tmp_path / "A7_s0" / L.DIVERGED_FILE)
+    good = {"run": "A7_s0", "diverged_json_sha256": sha, "verdict": "failed", "diagnosed_by": "Fable",
+            "diagnosed_utc": "2026-11-26T10:00:00Z", "summary": "x"}
+    (tmp_path / "diagnosis" / "A7_s0.json").write_text(_json.dumps(good))
+    assert L.diagnosis("A7_s0")["valid"] is True
+    monkeypatch.setattr(L, "decisions", lambda: {})
+    assert M._status_text("A7_s0") == "failed (diagnosed)"
+    for bad in ({"diverged_json_sha256": "0" * 64}, {"verdict": "maybe"}, {"diagnosed_by": ""}):
+        (tmp_path / "diagnosis" / "A7_s0.json").write_text(_json.dumps({**good, **bad}))
+        assert L.diagnosis("A7_s0")["valid"] is False
+        assert M._status_text("A7_s0") == "diverged - awaiting diagnosis"
+    (tmp_path / "A4t_s0").mkdir()
+    (tmp_path / "A4t_s0" / L.DIVERGED_FILE).write_text(_json.dumps({"machine_id": L.MACHINE_ID,
+                                                                    "cls": "exploratory"}))
+    assert M._status_text("A4t_s0") == "diverged"                     # exploratory: no diagnosis needed
+
+
+def test_a2c_is_the_matched_control_of_the_rungs_that_start_from_the_fitted_a2s():
+    a = M.a2c_specs()
+    assert [s.name for s in a] == ["A2c_s0", "A2c_s1"]
+    for s, sp in enumerate(a):
+        assert sp.kwargs == {"variant": "survival_exact", "start": f"m2a_dist/A2s_s{s}"} and sp.seed == s
+        assert sp.steps == 4000 and sp.lr is None and sp.provider == "poly" and sp.cls == "control"
+        assert sp.comparator == f"A2s_s{s}" and sp.k_train == 16
+    # every rung of the list that starts from the fitted A2s with 4000 steps is in the matched group, the
+    # mixtures (6000 steps, init_from_target) are not
+    rungs = M.primary_specs()[0] + [M.exploratory_spec(r, 0) for r in M.EXPLORATORY]
+    started = {sp.rung for sp in rungs if sp.kwargs.get("start") == "m2a_dist/A2s_s0" and sp.steps == 4000}
+    assert started == set(M.A2C_MATCHED)
+    assert {sp.rung for sp in rungs if sp.factory == "mixture"} == set(M.A2C_UNMATCHED)
+    assert "a2c" not in M.DEFAULT_PHASES and set(M.ADDED_PHASES) <= set(M.PHASES)
+    assert not set(M.ADDED_PHASES) & set(M.DEFAULT_PHASES)
+
+
+def test_listing_additions_are_separate_and_the_existing_listing_is_unchanged(capsys):
+    lst = M.listing()
+    assert lst["n_unconditional_fits"] == 54 and len(lst["rows"]) == 97
+    add = M.listing_additions()
+    assert [x["name"] for x in add][:2] == ["A2c_s0", "A2c_s1"] and add[2]["phase"] == "warmstart-check"
+    M.print_listing()
+    out = capsys.readouterr().out
+    head, sep, tail = out.partition("\n# Additions of 25 Nov 2026")
+    assert sep and "A2c_s0" in tail and "A2c_s0" not in head
+
+
+def test_warmstart_rule_is_plan_17_11_verbatim():
+    assert M.warmstart_affected({"below_floor": []}, 5e-5) == (False, False, False)
+    assert M.warmstart_affected({"below_floor": ["sh_mu"]}, 5e-5) == (True, False, True)
+    assert M.warmstart_affected({"below_floor": []}, 2e-4) == (False, True, True)
+    assert M.warmstart_affected({"below_floor": []}, 1e-4) == (False, False, False)     # "exceeds"
+    assert M.warmstart_affected({"below_floor": []}, None) == (False, False, False)
+    assert "if and only if" in M.WARMSTART_RULE and M.KL_AFFECTED == 1e-4
+
+
+def test_warmstart_target_columns_of_the_a1_control():
+    d = {"spec": {"factory": "component", "kwargs": {"variant": "legacy_centre", "provider": "net"}},
+         "build_kwargs": {"variant": "legacy_centre", "provider": "net"}}
+    tc = M.target_columns(d)
+    assert tc["below_floor"] == [] and tc["constant"] == []
+    assert min(c["std"] for c in tc["columns"].values()) >= 0.04
+
+
+def test_stage2_preconditions(monkeypatch, tmp_path):
+    import json as _json
+    import run_m2a_report as RR
+    monkeypatch.setattr(L, "out_dir", lambda: tmp_path)
+    monkeypatch.setattr(L, "registered_row", lambda n, ckpt=None, need_guards=False: None)
+    with pytest.raises(SystemExit, match="A2c control is not finished"):
+        M.stage2_preconditions()
+    monkeypatch.setattr(L, "registered_row", lambda n, ckpt=None, need_guards=False: {})
+    monkeypatch.setattr(M, "_net_runs_executed", lambda: ["A4n_s0"])
+    monkeypatch.setattr(M, "decisions", lambda: {})
+    with pytest.raises(SystemExit, match="warmstart-check"):
+        M.stage2_preconditions()
+    monkeypatch.setattr(M, "decisions", lambda: {"warmstart_check": {"rerun": ["A4n_s0"]}})
+    monkeypatch.setattr(L, "superseded", lambda: {})
+    with pytest.raises(SystemExit, match="warm-start re-runs missing"):
+        M.stage2_preconditions()
+    monkeypatch.setattr(L, "superseded", lambda: {"A4n_s0": "A4n_s0_ws"})
+    monkeypatch.setattr(M, "decisions", lambda: {"warmstart_check": {"rerun": ["A4n_s0"]},
+                                                 "diverged": {"A7_s0": {"status": "diverged - awaiting diagnosis"}}})
+    monkeypatch.setattr(L, "diagnosis", lambda n: None)
+    with pytest.raises(SystemExit, match="await an independent diagnosis"):
+        M.stage2_preconditions()
+    monkeypatch.setattr(L, "diagnosis", lambda n: {"valid": True, "verdict": "failed"})
+    (tmp_path / "results.json").write_text(_json.dumps({"a": 1}))
+    monkeypatch.setattr(RR, "collect", lambda with_guards=True: {"a": 2})
+    with pytest.raises(SystemExit, match="differs from the report recomputed"):
+        M.stage2_preconditions()
+    monkeypatch.setattr(RR, "collect", lambda with_guards=True: {"a": 1})
+    M.stage2_preconditions()                                     # all satisfied
+
+
+def test_report_shows_diverged_and_blocked_runs_with_their_status(monkeypatch):
+    have = {"A2s_s0", "A2s_s1", "A7_s1"}
+    monkeypatch.setattr(R, "have", lambda n: n in have)
+    monkeypatch.setattr(R, "run_status", lambda n: {"A7_s0": "diverged - awaiting diagnosis"}.get(n, "missing"))
+    monkeypatch.setattr(R, "comparison", lambda run, comp, masks: {"run": run, "vs": comp, "paired": {"mean": 0}})
+    c, orig = R.primary_pairs("A7", {})
+    assert c[0]["status"] == "diverged - awaiting diagnosis" and c[0]["paired"] is None and c[1]["run"] == "A7_s1"
+    assert R.replication(c[0], c[1], "A7_s0", "A2s_s0", "A7_s1", "A2s_s1") is None
+    assert R._cell(c[0]) == "**diverged - awaiting diagnosis**" and R._yn(c[0], "keep") == "-"
+    assert R.entry("A8_s0", "A2s_s0", {}) is None                     # not run at all: no row
+
+
+def test_stage2_approval_requires_the_kept_key(tmp_path, monkeypatch):
+    import json as _json
+    monkeypatch.setattr(L, "out_dir", lambda: tmp_path)
+    (tmp_path / "results.json").write_text(_json.dumps({"kept_and_replicated": {}}))
+    sha = provenance.sha256_file(tmp_path / "results.json")
+    (tmp_path / M.STAGE2_APPROVAL).write_text(_json.dumps({"results_json_sha256": sha, "replication_reading":
+                                                          "literal", "approved_utc": "t", "approved_by": "u"}))
+    with pytest.raises(SystemExit, match="no key 'kept_and_replicated'"):
+        M.stage2_approval()

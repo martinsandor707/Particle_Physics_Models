@@ -119,8 +119,9 @@ def comparison(run: str, comp: str, masks: dict) -> dict:
 
 def replication(c0: dict, c1: dict | None, run0: str, comp0: str, run1: str | None, comp1: str | None) -> dict | None:
     """AUDIT 4.0 replication: seed 1 Delta <= half the threshold (-1.5e-4) with the same sign, and the mean of the two
-    seeds meets the threshold (-3e-4). The two-seed mean is the mean of the per-event differences (same events)."""
-    if c1 is None:
+    seeds meets the threshold (-3e-4). The two-seed mean is the mean of the per-event differences (same events).
+    Not evaluated (None) when a seed has no comparison (diverged / blocked)."""
+    if c1 is None or c0 is None or c0.get("paired") is None or c1.get("paired") is None:
         return None
     arrs = [L.tagged(run0), L.tagged(run1), L.tagged(comp0), L.tagged(comp1)]
     provenance.check_pairable(*arrs)                  # all four on the same points and arithmetic
@@ -232,7 +233,7 @@ def g_region_block(run: str, comp: str, main: np.ndarray) -> dict | None:
                                                       if float(hit_total.mean()) != 0 else None),
             "alternative_margin_flagged_minus_half_hit_term": L.pd(stats.paired(diffs["flagged"] - 0.5 * hit_total,
                                                                                 np.zeros_like(main))),
-            "alternative_passed_hit_term": bool(float(hit_total.mean()) < 0
+            "alternative_passed_hit_term": bool(gain < 0 and float(hit_total.mean()) < 0          # review R2
                                                 and float((diffs["flagged"] - 0.5 * hit_total).mean()) >= 0.0),
             "passed": bool(gain < 0 and margin.mean >= 0.0), "resolved": abs(margin.z) >= 2.0,
             "rule": "<= 50 % of the gain from deep, border or Abar <= 0.3 cells (hit term, by hit centre); "
@@ -258,13 +259,15 @@ def warm_start_targets(done: dict) -> dict:
     poly = base.provider
     with torch.no_grad():
         t = poly(default_lnp(48, device="cpu")).double()
-    rel = {}
+    rel, std = {}, {}
     for n in names_net:
         col = t[:, poly.names.index(n)]
-        rel[n] = float(col.std(unbiased=False)) / max(1.0, abs(float(col.mean())))
+        std[n] = float(col.std(unbiased=False))
+        rel[n] = std[n] / max(1.0, abs(float(col.mean())))
     floor = ParamNet.SCALE_FLOOR_REL
     varying = {n: r for n, r in rel.items() if r > floor}
-    return {"target": kw.get("net_from") or "the model's own (legacy) provider",
+    return {"target": kw.get("net_from") or "the model's own (legacy) provider", "std": std,
+            "below_scale_floor": sorted(n for n in varying if std[n] < ParamNet.SCALE_FLOOR_ABS),
             "constant": sorted(n for n, r in rel.items() if r <= floor),
             "nearly_constant": {n: r for n, r in varying.items() if r < NEAR_CONSTANT_HI},
             "smallest_varying": (min(varying, key=varying.get), min(varying.values())) if varying else None}
@@ -274,11 +277,15 @@ def initialisation_table() -> list:
     """Review B2: kl_map of every finished run against what it was started / initialised / fitted from, the
     "exactly A2s" claims, and for net runs the warm-start report with the degraded-start flag."""
     out = []
+    chk = (L.decisions().get("warmstart_check") or {}).get("runs") or {}
+    sup = L.superseded()
     for f in sorted(L.out_dir().glob("*/done.json")):
         d = L.done_marker(f)
         init = L.read_json(f.parent / "init.json", {}) or {}
         info = init.get("init_info") or {}
         spec = d.get("spec") or {}
+        if spec.get("cls") == "stage2":                         # Stage 2 has its own report (keeps R6 stable)
+            continue
         row = {"run": f.parent.name, "rung": spec.get("rung"), "provider": spec.get("provider"),
                "cls": spec.get("cls"), "kl_map": d.get("kl_map", info.get("kl_map")), "kl_ref": info.get("kl_ref"),
                "sources_verified": sorted((d.get("sources_verified") or {}).keys())}
@@ -288,14 +295,28 @@ def initialisation_table() -> list:
             row["claim_holds"] = row["kl_map"] is not None and abs(row["kl_map"]) <= KL_EXACT
         if spec.get("provider") == "net":
             ft = info.get("fit_to") or {}
+            name = f.parent.name
             row.update({"fit_to_rms_max": ft.get("rms_max"), "fit_to_rms_max_name": ft.get("rms_max_name"),
                         "fit_to_constant_columns": ft.get("constant_columns"),
                         "fit_to_lbfgs_stopped": ft.get("lbfgs_stopped"),
-                        "degraded": row["kl_map"] is not None and row["kl_map"] > KL_DEGRADED})
+                        "fit_to_version": ft.get("fit_to_version") or 2,
+                        "fit_to_below_scale_floor": ft.get("below_scale_floor"),
+                        "degraded": row["kl_map"] is not None and row["kl_map"] > KL_DEGRADED,
+                        "superseded_by": sup.get(name)})
+            if init.get("step0_parity"):
+                row["step0_parity"] = {**init["step0_parity"], "origin": "logged at initialisation"}
+            elif (chk.get(name) or {}).get("step0_parity"):
+                row["step0_parity"] = {**chk[name]["step0_parity"],
+                                       "origin": "rebuilt old warm start (warmstart-check; bit for bit: "
+                                                 f"{chk[name].get('bit_for_bit')})"}
             try:
                 row["targets"] = warm_start_targets(d)
             except Exception as err:                   # reporting only: never stops the report
                 row["targets"] = {"error": f"{type(err).__name__}: {err}"}
+            std = (ft.get("column_std") or (row["targets"].get("std") if isinstance(row["targets"], dict) else None)
+                   or {})
+            nm, rm = row["fit_to_rms_max_name"], row["fit_to_rms_max"]
+            row["fit_to_rms_max_rel"] = (rm / std[nm]) if (rm is not None and std.get(nm)) else None   # review R5
         out.append(row)
     return out
 
@@ -333,14 +354,31 @@ TEMPLATE_NOTE_Q2 = ("Q2 (A3c): the back_corrected template exceeds 1 by more tha
 
 
 # ----------------------------------------------------------------------------------------------------------------------
+def run_status(name: str) -> str:
+    return _m()._status_text(name)
+
+
+def entry(run: str, comp: str, masks: dict) -> dict | None:
+    """The comparison of run vs comp if both are registered; a status record if the run (or its comparator) diverged
+    or is blocked (user decision of 25 Nov 2026: never silently omitted); None if the run does not exist at all."""
+    if have(run) and have(comp):
+        return comparison(run, comp, masks)
+    st_r = run_status(run)
+    if st_r == "missing" and not have(run):
+        return None
+    st = st_r if not have(run) else f"comparator {comp}: {run_status(comp)}"
+    return {"run": run, "vs": comp, "status": st, "paired": None, "keep": None, "equal_one": None, "k": None,
+            "vs_formula": None, "secondary": {}}
+
+
 def primary_pairs(r: str, masks: dict) -> tuple:
     """Review B1: ({seed: comparison used by the rules}, {seed: original not used}). For each seed the doubled-step
-    rerun pair (<r>_s<seed>_x2 vs A2s_s<seed>_x2) replaces the non-converged original when it exists."""
+    rerun pair (<r>_s<seed>_x2 vs A2s_s<seed>_x2) replaces the non-converged original when it exists. Diverged or
+    blocked runs appear with their status (PLAN 17.11)."""
     c, orig = {}, {}
     for s in (0, 1):
-        o = comparison(f"{r}_s{s}", f"A2s_s{s}", masks) if have(f"{r}_s{s}") and have(f"A2s_s{s}") else None
-        x = (comparison(f"{r}_s{s}_x2", f"A2s_s{s}_x2", masks)
-             if have(f"{r}_s{s}_x2") and have(f"A2s_s{s}_x2") else None)
+        o = entry(f"{r}_s{s}", f"A2s_s{s}", masks)
+        x = entry(f"{r}_s{s}_x2", f"A2s_s{s}_x2", masks)
         if x is not None:                         # the converged measurement of this seed is the rerun pair
             x["pair"] = "rerun"
             c[s] = x
@@ -355,23 +393,33 @@ def primary_pairs(r: str, masks: dict) -> tuple:
 
 def collect(with_guards: bool = True) -> dict:
     M = _m()
-    dec = L.read_json(L.decisions_file(), {}) or {}
+    dec = {k: v for k, v in (L.read_json(L.decisions_file(), {}) or {}).items() if not k.startswith("stage2")}
+    from sfm import machine as _machine
+    gs = _machine.git_state()
+    E = L.effective
     res = {"stage": L.stage(), "smoke": L.CTX.smoke, "machine_id": L.MACHINE_ID, "stream_id": L.live_stream_id(),
+           "git": {"commit": gs.get("commit"), "clean": gs.get("clean")},              # review R8
            "units": "1e-4 nat per event (deltas); paired SE; n events", "decisions": dec,
            "plr": L.read_json(L.plr_file()), "refset": paths.portable(L.refset().dir),
            "refset_json_sha256": L.refset().manifest_sha256}
     masks = secondary_masks()
     res["secondary_strata_n"] = {k: int(v.sum()) for k, v in masks.items()}
     # Stage 0
-    s0 = {}
+    s0, s0_status, s0_superseded = {}, {}, {}
     for a, b in (("A0_s0", "formula"), ("A0_s1", "formula"), ("A1_s0", "A0_s0"), ("A1_s1", "A0_s1"),
                  ("A2e_s0", "A0_s0"), ("A2e_s1", "A0_s1"), ("A2s_s0", "A2e_s0"), ("A2s_s1", "A2e_s1"),
                  ("A2n_s0", "A2s_s0"), ("A2n_s1", "A2s_s1"), ("A2n_s2", "A2s_s2"),
                  ("A2s_s1", "A2s_s0"), ("A2s_s2", "A2s_s0"), ("A2s_s2", "A2s_s1")):
-        if have(a) and (b == "formula" or have(b)):
-            s0[f"{a} - {b}"] = pdict(a, b)
+        ea, eb = E(a), (b if b == "formula" else E(b))
+        if have(ea) and (eb == "formula" or have(eb)):
+            s0[f"{ea} - {eb}"] = pdict(ea, eb)
+            if ea != a and have(a) and (b == "formula" or have(b)):
+                s0_superseded[f"{a} - {b}"] = pdict(a, b)
+        elif run_status(ea) not in ("missing", "done"):
+            s0_status[f"{ea} - {eb}"] = run_status(ea)
     means = [float(np.mean(L.tagged(f"A2s_s{s}").values, dtype=np.float64)) for s in (0, 1, 2) if have(f"A2s_s{s}")]
-    res["stage0"] = {"deltas": s0, "A2s_seed_sd_of_means": float(np.std(means, ddof=1)) if len(means) > 1 else None}
+    res["stage0"] = {"deltas": s0, "status": s0_status, "superseded_warm_start": s0_superseded,
+                     "A2s_seed_sd_of_means": float(np.std(means, ddof=1)) if len(means) > 1 else None}
     # step-0 Delta of A9
     res["A9_step0"] = {f"A9_s{s}_init - A2s_s{s}": pdict(f"A9_s{s}_init", f"A2s_s{s}")
                        for s in (0, 1) if have(f"A9_s{s}_init") and have(f"A2s_s{s}")}
@@ -387,11 +435,19 @@ def collect(with_guards: bool = True) -> dict:
                    "equal_both": (all(v["equal_one"] for v in c.values()) if len(c) == 2 else None),
                    "convergence": {s: convergence(c[s]["run"]) for s in c},
                    "convergence_original": {s: convergence(f"{r}_s{s}") for s in (0, 1) if have(f"{r}_s{s}")}}
-        if have(f"{r}n_s0") and have("A2n_s0"):
-            net[r + "n"] = comparison(f"{r}n_s0", "A2n_s0", masks)
-            net[r + "n"]["convergence"] = convergence(f"{r}n_s0")
+        nr, nc = E(f"{r}n_s0"), E("A2n_s0")
+        x = entry(nr, nc, masks)
+        if x is not None:
+            net[r + "n"] = x
+            x["convergence"] = convergence(nr)
+            if nr != f"{r}n_s0" or nc != "A2n_s0":
+                x["supersedes"] = entry(f"{r}n_s0", "A2n_s0", masks)
     for r in M.EXPLORATORY:
-        c = {s: comparison(f"{r}_s{s}", f"A2s_s{s}", masks) for s in (0, 1) if have(f"{r}_s{s}") and have(f"A2s_s{s}")}
+        c = {}
+        for s in (0, 1):
+            x = entry(f"{r}_s{s}", f"A2s_s{s}", masks)
+            if x is not None:
+                c[s] = x
         if not c:
             continue
         for x in c.values():
@@ -409,8 +465,32 @@ def collect(with_guards: bool = True) -> dict:
             kr[r] = bool(c0 and c0["keep"] and v["replication"] and v["replication"]["replicated"])
             kr_alt[r] = bool(c0 and c0["keep"] and v["replication"] and v["replication"]["replicated_alternative_2se"])
             for s, c in v["seeds"].items():
+                if c.get("paired") is None:
+                    c["cleaner_by_gain"] = c["cleaner_by_constants"] = None
+                    continue
                 c["cleaner_by_gain"] = c["vs_formula"]["mean"] <= -M.KEEP_GAIN
                 c["cleaner_by_constants"] = bool(c["k"] <= 0.9 * A2S_CONSTANTS and v["equal_both"])
+    # A2c control column (user decision of 25 Nov 2026; decides nothing)
+    a2c = {"note": M.A2C_NOTE, "groups": M.A2C_GROUPS, "runs": {}, "control_column": {}}
+    for s in (0, 1):
+        x = entry(f"A2c_s{s}", f"A2s_s{s}", masks)
+        a2c["runs"][s] = x if x is not None else {"run": f"A2c_s{s}", "status": "not run yet"}
+    a2c["complete"] = all(have(f"A2c_s{s}") for s in (0, 1))
+    for grp in (prim, expl):
+        for r, v in grp.items():
+            for s, c in v["seeds"].items():
+                if r in M.A2C_MATCHED and c.get("pair") in ("original", None) and have(c["run"]) \
+                        and have(f"A2c_s{s}"):
+                    a2c["control_column"][c["run"]] = pdict(c["run"], f"A2c_s{s}")
+                elif r in M.A2C_UNMATCHED:
+                    a2c["control_column"][c["run"]] = {"not_matched": f"{M.A2C_UNMATCHED[r]} steps, init_from_target"}
+                elif c.get("pair") == "rerun":
+                    a2c["control_column"][c["run"]] = {"not_matched": "doubled-step rerun"}
+    res["a2c"] = a2c
+    res["diverged"] = {n: {**v, "status_now": run_status(n), "diagnosis": L.diagnosis(n)}
+                       for n, v in (dec.get("diverged") or {}).items()}
+    res["blocked"] = dict(dec.get("blocked") or {})
+    res["superseded_warm_start"] = L.superseded()
     res["kept_and_replicated"] = kr
     res["kept_and_replicated_alternative_2se"] = kr_alt
     res["primary_rungs"], res["exploratory_rungs"] = list(M.PRIMARIES), list(M.EXPLORATORY)
@@ -433,22 +513,51 @@ def collect(with_guards: bool = True) -> dict:
     # convergence of every finished run
     conv = {}
     for f in sorted(L.out_dir().glob("*/done.json")):
+        if ((L.done_marker(f) or {}).get("spec") or {}).get("cls") == "stage2":
+            continue
         conv[f.parent.name] = convergence(f.parent.name)
     res["convergence_all"] = conv
     return res
 
 
 # ----------------------------------------------------------------------------------------------------------------------
+def _cell(c) -> str:
+    """A comparison cell: mean ± SE (n), or the status of a diverged / blocked run (never omitted)."""
+    if c is None:
+        return "-"
+    if c.get("status"):
+        return f"**{c['status']}**"
+    return fmt(c.get("paired"))
+
+
+def _k(*cs) -> str:
+    for c in cs:
+        if c and c.get("k") is not None:
+            return str(c["k"])
+    return "-"
+
+
+def _yn(c, key):
+    return yn(None if (c is None or c.get("status")) else c.get(key))
+
+
 def markdown(res: dict) -> str:
     out = []
     w = out.append
     title = "Track A (M2A) - SMOKE RUN (shortened fits; not numbers of record)" if res["smoke"] else \
         "Track A (M2A) - results on the machine of record"
     w(f"# {title}\n")
-    w(f"Stage `{res['stage']}`, machine `{res['machine_id']}`, stream `{res['stream_id']}`. Reference set "
+    w(f"Stage `{res['stage']}`, machine `{res['machine_id']}`, stream `{res['stream_id']}`, report code at commit "
+      f"`{(res.get('git') or {}).get('commit')}` (clean clone: {(res.get('git') or {}).get('clean')}). Reference set "
       f"`{res['refset']}` (refset.json SHA-256 `{res['refset_json_sha256'][:16]}...`). Validation only. Every delta: "
       "mean ± paired SE (n events), unit 1e-4 nat per event, through `sfm.provenance.paired_delta`. Report-metric "
       "tables (K = 64) and guard tables are separate. Nulls and negative results as measured.\n")
+    a2c = res.get("a2c") or {}
+    if not a2c.get("complete"):
+        w("**NOT FINAL: the A2c control (user decision of 25 Nov 2026) is not finished - `run_m2a.py a2c`.**\n")
+    if res.get("diverged") or res.get("blocked"):
+        w(f"**Diverged or blocked runs: {len(res.get('diverged') or {})} diverged, {len(res.get('blocked') or {})} "
+          "blocked - see the section 'Diverged and blocked runs'. None is omitted from the tables.**\n")
     dec = res["decisions"]
     par = dec.get("parity", {})
     w("## Harness\n")
@@ -461,68 +570,105 @@ def markdown(res: dict) -> str:
     dr = dec.get("A0_drift")
     if dr:
         w(f"- A0 drift rule (stop if |A0 - formula| > 2): " + ", ".join(f"{k} {fmt(v)}" for k, v in dr["runs"].items())
-          + f" -> {'STOP' if dr['stop'] else 'continue'}")
+          + f" -> {'STOP' if dr['stop'] else 'continue'}"
+          + (f"; not evaluable: {dr['not_evaluable']}" if dr.get("not_evaluable") else ""))
     if res.get("plr"):
         p = res["plr"]
         w(f"- P-lr: lr_poly = {p.get('lr_poly')}, lr_net = {p.get('lr_net')}; " + "; ".join(
-            f"{grp} lr {lr}: {fmt(v['vs_lowest'])} vs lowest" for grp in ("poly", "net") for lr, v in
-            (p.get(grp) or {}).items()))
+            f"{grp} lr {lr}: " + (fmt(v['vs_lowest']) + " vs lowest" if v.get("vs_lowest") else
+                                  f"{v.get('status')} - loses (P-lr rule)")
+            for grp in ("poly", "net") for lr, v in (p.get(grp) or {}).items()))
+    ws = dec.get("warmstart_rerun") or {}
+    if (ws.get("lr_net_after_rerun") or {}):
+        x = ws["lr_net_after_rerun"]
+        w(f"- lr_net after the warm-start re-run of the network pilots: {x.get('lr_net_after')} (before: "
+          f"{x.get('lr_net_before')})")
     w(f"- Dropped runs: {dec.get('dropped', [])} ({dec.get('budget_rule', 'budget rule: not applied')})\n")
     w("## Stage 0 (report metric)\n")
     w("| comparison | Δ |\n|---|---|")
     for k, v in res["stage0"]["deltas"].items():
         w(f"| {k} | {fmt(v)} |")
+    for k, v in (res["stage0"].get("status") or {}).items():
+        w(f"| {k} | **{v}** |")
+    for k, v in (res["stage0"].get("superseded_warm_start") or {}).items():
+        w(f"| {k} (superseded: warm start; not used) | {fmt(v)} |")
     sd = res["stage0"]["A2s_seed_sd_of_means"]
     w(f"\nA2s seed scatter (sd of the validation means of the seeds): {sd * E4:.2f}e-4\n" if sd is not None else "")
     if res["A9_step0"]:
         w("A9 at step 0 (logit_dh = -5): " + "; ".join(f"{k} {fmt(v)}" for k, v in res["A9_step0"].items()) + "\n")
+    # A2c
+    w(f"## A2c - {a2c.get('note', '')}\n")
+    w("A2s continued unchanged from the fitted A2s of the same seed, with the schedule of the rungs that start from "
+      "it (T_A, 4000 steps, the frozen lr_poly, the same seed). No pre-registered rule consumes it: keep, replication "
+      "and equal NLL stay against A2s as registered. The column 'control: Δ vs A2c' below decides nothing.\n")
+    for s_, x in (a2c.get("runs") or {}).items():
+        w(f"- A2c_s{s_} - A2s_s{s_}: {_cell(x) if x.get('vs') else x.get('status')}")
+    w("- Matched step-budget groups: " + "; ".join(f"**{k}**: {v}" for k, v in (a2c.get("groups") or {}).items())
+      + "\n")
+    cc = a2c.get("control_column") or {}
+
+    def ctrl(c):
+        if c is None or c.get("status"):
+            return "-"
+        x = cc.get(c["run"])
+        if x is None:
+            return "A2c missing" if not a2c.get("complete") else "-"
+        return f"not matched ({x['not_matched']})" if "not_matched" in x else fmt(x)
+
     w("## Stage 1 - primaries, poly (pre-registered comparisons, vs A2s of the same seed; report metric)\n")
     w("Multiplicity: these six rungs are the pre-registered primary comparisons of Track A; every other row of this "
       "report is exploratory and is not a test.\n")
-    w(f"| rung | k | pairs used by the rules (s0 / s1) | Δ seed 0 | keep s0 | Δ seed 1 | keep s1 | replicated "
-      f"(two-seed mean) | {ALT}: two-seed mean <= -2 SE | equal NLL (both) | Δ vs formula s0 | converged s0/s1 |\n"
-      "|---|---|---|---|---|---|---|---|---|---|---|---|")
+    w("| rung | k | pairs used by the rules (s0 / s1) | Δ seed 0 | keep s0 | Δ seed 1 | keep s1 | replicated "
+      "(two-seed mean) | replicated under the alternative reading (literal conditions AND two-seed mean <= -2 SE; "
+      f"{ALT}) | equal NLL (both) | Δ vs formula s0 | converged s0/s1 | control: Δ vs A2c s0 / s1 |\n"
+      "|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for r, v in res["primaries"].items():
         c0, c1 = v["seeds"].get(0), v["seeds"].get(1)
         rep = v["replication"]
         cv = v["convergence"]
-        used = " / ".join((v["seeds"][s]["pair"] if s in v["seeds"] else "-") for s in (0, 1))
-        w(f"| {r} | {(c0 or c1)['k']} | {used} | {fmt(c0 and c0['paired'])} | {yn(c0 and c0['keep'])} | "
-          f"{fmt(c1 and c1['paired'])} | {yn(c1 and c1['keep'])} | "
+        used = " / ".join((v["seeds"][s_].get("pair", "original") if s_ in v["seeds"] else "-") for s_ in (0, 1))
+        w(f"| {r} | {_k(c0, c1)} | {used} | {_cell(c0)} | {_yn(c0, 'keep')} | {_cell(c1)} | {_yn(c1, 'keep')} | "
           f"{yn(rep and rep['replicated'])} ({fmt(rep and rep['two_seed_mean'])}) | "
-          f"{yn(rep and rep['alternative_two_seed_mean_2se'])} | {yn(v['equal_both'])} | "
-          f"{fmt(c0 and c0['vs_formula'])} | {'/'.join(yn((cv.get(s) or {}).get('converged')) for s in (0, 1))} |")
-        for s, x in v["originals_not_used"].items():
-            co = (v["convergence_original"].get(s) or {})
-            w(f"| {r} s{s} original - not converged, NOT used by the rules | {x['k']} | {x['run']} vs {x['vs']} | "
-              f"{fmt(x['paired']) if s == 0 else ''} | {yn(x['keep']) if s == 0 else ''} | "
-              f"{fmt(x['paired']) if s == 1 else ''} | {yn(x['keep']) if s == 1 else ''} | | | | | "
-              f"{yn(co.get('converged'))} |")
+          f"{yn(rep and rep['replicated_alternative_2se'])} | {yn(v['equal_both'])} | "
+          f"{fmt(c0 and c0.get('vs_formula'))} | "
+          f"{'/'.join(yn((cv.get(s_) or {}).get('converged')) for s_ in (0, 1))} | {ctrl(c0)} / {ctrl(c1)} |")
+        for s_, x in v["originals_not_used"].items():
+            co = (v["convergence_original"].get(s_) or {})
+            w(f"| {r} s{s_} original - not converged, NOT used by the rules | {_k(x)} | {x['run']} vs {x['vs']} | "
+              f"{_cell(x) if s_ == 0 else ''} | {_yn(x, 'keep') if s_ == 0 else ''} | "
+              f"{_cell(x) if s_ == 1 else ''} | {_yn(x, 'keep') if s_ == 1 else ''} | | | | | "
+              f"{yn(co.get('converged'))} | {ctrl(x)} |")
     w("\nRules use the rerun pair (`<rung>_s<seed>_x2` vs `A2s_s<seed>_x2`) of a seed whenever it exists (AUDIT 4.0, "
       "convergence rule); seeds may then mix an original and a rerun, each paired with its own comparator. Kept = "
       "keep rule on seed 0 and replication by seed 1 (rule applied in seed order): a rung that passes keep on seed 1 "
-      "only is not kept; the table shows both keep flags.")
-    a2s_mv = {s: (res["convergence_all"].get(f"A2s_s{s}") or {}).get("moved") for s in (0, 1)}
+      "only is not kept; the table shows both keep flags. A primary run that diverged is shown as 'diverged - "
+      "awaiting diagnosis'; no rule marks it failed before an independent diagnosis (PLAN 17.11).")
+    a2s_mv = {s_: (res["convergence_all"].get(f"A2s_s{s_}") or {}).get("moved") for s_ in (0, 1)}
     w("Reading aid (review B6; decides nothing): every rung that starts at the fitted A2s also carries a common "
-      "'continued training' term; convergence movement of the base over its last window: "
-      + ", ".join(f"A2s_s{s} {('-' if m is None else f'{m * E4:.2f}e-4')}" for s, m in a2s_mv.items())
+      "'continued training' term, measured by the A2c column; convergence movement of the base over its last "
+      "window: " + ", ".join(f"A2s_s{s_} {('-' if m is None else f'{m * E4:.2f}e-4')}" for s_, m in a2s_mv.items())
       + ". Differences between rungs that share the start (paired) are free of that term.\n")
-    w("\n## Stage 1 - net column (exploratory; vs A2n seed 0)\n")
+    w("\n## Stage 1 - net column (exploratory; vs A2n seed 0, or its warm-start re-run)\n")
     w("| run | k | Δ | keep | equal NLL (seed 0) | converged |\n|---|---|---|---|---|---|")
     for r, c in res["net"].items():
-        w(f"| {r} | {c['k']} | {fmt(c['paired'])} | {yn(c['keep'])} | {yn(c['equal_one'])} | "
+        w(f"| {c['run']} vs {c['vs']} | {_k(c)} | {_cell(c)} | {_yn(c, 'keep')} | {_yn(c, 'equal_one')} | "
           f"{yn((c.get('convergence') or {}).get('converged'))} |")
+        sp = c.get("supersedes")
+        if sp:
+            w(f"| {sp['run']} vs {sp['vs']} (**superseded: warm start**; rules use the row above) | {_k(sp)} | "
+              f"{_cell(sp)} | {_yn(sp, 'keep')} | {_yn(sp, 'equal_one')} | |")
     w("\n## Stage 1 - exploratory (vs A2s of the same seed)\n")
-    w(f"| rung | k | Δ seed 0 | keep s0 | equal s0 | Δ seed 1 | replicated | {ALT}: two-seed mean <= -2 SE | "
-      "equal NLL (both) | cleaner (gain / constants) |\n|---|---|---|---|---|---|---|---|---|---|")
+    w("| rung | k | Δ seed 0 | keep s0 | equal s0 | Δ seed 1 | replicated | replicated under the alternative reading "
+      f"(literal conditions AND two-seed mean <= -2 SE; {ALT}) | equal NLL (both) | cleaner (gain / constants) | "
+      "control: Δ vs A2c s0 / s1 |\n|---|---|---|---|---|---|---|---|---|---|---|")
     for r, v in res["exploratory"].items():
         c0, c1 = v["seeds"].get(0), v["seeds"].get(1)
         rep = v["replication"]
-        mark = " (template note Q1/Q2)" if r in ("A3c", "A3x") else ""
-        w(f"| {r}{mark} | {(c0 or c1)['k']} | {fmt(c0 and c0['paired'])} | {yn(c0 and c0['keep'])} | "
-          f"{yn(c0 and c0['equal_one'])} | {fmt(c1 and c1['paired'])} | {yn(rep and rep['replicated'])} | "
-          f"{yn(rep and rep['alternative_two_seed_mean_2se'])} | "
-          f"{yn(v['equal_both'])} | {yn(c0 and c0['cleaner_by_gain'])} / {yn(c0 and c0['cleaner_by_constants'])} |")
+        mark = {"A3c": " (template notes Q1, Q2)", "A3x": " (template note Q1)"}.get(r, "")       # review R5
+        w(f"| {r}{mark} | {_k(c0, c1)} | {_cell(c0)} | {_yn(c0, 'keep')} | {_yn(c0, 'equal_one')} | {_cell(c1)} | "
+          f"{yn(rep and rep['replicated'])} | {yn(rep and rep['replicated_alternative_2se'])} | "
+          f"{yn(v['equal_both'])} | {_yn(c0, 'cleaner_by_gain')} / {_yn(c0, 'cleaner_by_constants')} | "
+          f"{ctrl(c0)} / {ctrl(c1)} |")
     tl = res.get("templates")
     w("\n**Template limitations (A3c / A3x; review rulings Q1 and Q2, runs as registered):**\n")
     w(f"- {TEMPLATE_NOTE_Q1}")
@@ -539,25 +685,37 @@ def markdown(res: dict) -> str:
     w("\n## Secondary columns (pre-registered, never selection criteria; report metric on strata)\n")
     n = res["secondary_strata_n"]
     w("| run vs comparator | " + " | ".join(f"{k} (n {n[k]})" for k in n) + " |\n|---|" + "---|" * len(n))
+
+    def srow(c, label=""):
+        if c.get("status"):
+            w(f"| {c['run']} vs {c['vs']}{label} | " + " | ".join(f"**{c['status']}**" for _ in n) + " |")
+        else:
+            w(f"| {c['run']} vs {c['vs']}{label} | " + " | ".join(fmt(c["secondary"][k]) for k in n) + " |")
     for grp in ("primaries", "exploratory"):
         for r, v in res[grp].items():
-            for s, c in v["seeds"].items():
-                w(f"| {c['run']} vs {c['vs']} | " + " | ".join(fmt(c["secondary"][k]) for k in n) + " |")
-            for s, c in (v.get("originals_not_used") or {}).items():
-                w(f"| {c['run']} vs {c['vs']} (original, not used by the rules) | "
-                  + " | ".join(fmt(c["secondary"][k]) for k in n) + " |")
+            for s_, c in v["seeds"].items():
+                srow(c)
+            for s_, c in (v.get("originals_not_used") or {}).items():
+                srow(c, " (original, not used by the rules)")
     for r, c in res["net"].items():
-        w(f"| {c['run']} vs {c['vs']} | " + " | ".join(fmt(c["secondary"][k]) for k in n) + " |")
+        srow(c)
+        if c.get("supersedes"):
+            srow(c["supersedes"], " (superseded: warm start)")
     w("\n## Guards (own tables; K = 1024, bulk stratum, mass monitors, G-region)\n")
+    not_used = {c["run"] for v in res["primaries"].values() for c in (v.get("originals_not_used") or {}).values()}
+    not_used |= set((res.get("superseded_warm_start") or {}).keys())
     if not res.get("with_guards", True):
         w("**This report was produced WITHOUT guard columns (`--without-guards`): the guards phase failed or has not "
           "run. No guard statement can be read from it.**\n")
+    elif "guard_targets" not in dec:                                                          # review R3
+        w("**The guards phase has not run** (no guard targets recorded): no guard statement can be read yet.\n")
     elif not res["guards"] and not res.get("guards_missing"):
         w("No run passed the keep or the equal-NLL rule: no guard columns.\n")
     if res.get("guards_missing"):
         w("Guard data MISSING (guards phase failed or not finished) for: " + ", ".join(res["guards_missing"]) + "\n")
     for key, g in res["guards"].items():
-        w(f"### {key}\n")
+        label = " (original, NOT the pair used by the rules)" if g["run"] in not_used else ""          # review R4
+        w(f"### {key}{label}\n")
         gk, gb = g["G-K"], g["G-bulk"]
         nk, nb = gk["persistence"]["numbers"], gb["persistence"]["numbers"]
         w("| guard | Δ (guard metric) | persistence margin guard - 0.5 main | passed | resolved (2 SE) |\n"
@@ -583,7 +741,7 @@ def markdown(res: dict) -> str:
             sa = gr.get("alternative_flagged_share_of_hit_term")
             w(f"*{ALT}:* flagged share of the hit-term total {sa if sa is None else round(sa, 3)}; margin flagged - "
               f"0.5 hit term {fmt(gr.get('alternative_margin_flagged_minus_half_hit_term'))} -> would pass "
-              f"{yn(gr.get('alternative_passed_hit_term'))}\n")
+              f"{yn(gr.get('alternative_passed_hit_term'))} (requires a gain in the total as well)\n")
         w("| G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |\n|---|---|---|---|")
         for k, v in g["G-mass"].items():
             w(f"| {k} | {v['run_mean']:.4e} | {v['comp_mean']:.4e} | {fmt(v['delta'])} |")
@@ -592,6 +750,23 @@ def markdown(res: dict) -> str:
         f = res["A6b_fisher_k"]
         w(f"## A6b: Fisher information of k\n\nObserved information of the raw coefficient of `sh_rk` on the "
           f"training events: {f['observed_information']:.4g} (SE of the coefficient {f['se_coefficient']}).\n")
+    w("## Diverged and blocked runs (user decision of 25 Nov 2026, PLAN 17.11)\n")
+    w(f"Definition: {L.DIVERGENCE_DEFINITION}\n")
+    if not res.get("diverged") and not res.get("blocked"):
+        w("None.\n")
+    for nme, v in (res.get("diverged") or {}).items():
+        lf = v.get("last_finite") or {}
+        gr_ = v.get("gradient") or {}
+        dg = v.get("diagnosis")
+        w(f"- **{nme}** ({v.get('cls')}): {v.get('status_now')}; criteria: {'; '.join(v.get('criteria') or [])}; "
+          f"step {v.get('step')}; last finite validation {lf.get('val')} at step {lf.get('step')} (train NLL "
+          f"{lf.get('train_nll')}); parameters: {(v.get('params') or {}).get('n_nonfinite')} non-finite, max |finite| "
+          f"{(v.get('params') or {}).get('max_abs_finite')}; gradient norm at the last parameters "
+          f"{gr_.get('grad_norm')} (finite: {gr_.get('finite')})"
+          + (f"; diagnosis: {dg.get('verdict')} (valid: {dg.get('valid')})" if dg else ""))
+    for nme, v in (res.get("blocked") or {}).items():
+        w(f"- **{nme}** ({v.get('cls')}): blocked by {v.get('blocked_by')} - not trained")
+    w("")
     w("## Convergence (|val(last) - val(last - window)| < 0.5e-4)\n")
     w("| run | converged | moved |\n|---|---|---|")
     for k, v in res["convergence_all"].items():
@@ -600,28 +775,42 @@ def markdown(res: dict) -> str:
             w(f"| {k} | {yn(v['converged'])} | {moved} |")
     w("\n## Initialisation (review B2; kl_map in nat against the start / initialisation / fit_to target)\n")
     w(f"Net runs with kl_map > {KL_DEGRADED:g} nat are flagged: warm start degraded - net column not interpretable "
-      "for this run (reference: the pre-registered warm start of A1 gives 5.5e-6 nat). Target columns of a net warm "
-      f"start with a relative spread between the 2^-20 floor and {NEAR_CONSTANT_HI:g} are listed (reporting only; "
-      "fit_to is unchanged).\n")
-    w("| run | provider | kl_map | reference | claim | net: rms_max (column) / L-BFGS stopped | flag | nearly-constant "
-      "target columns |\n|---|---|---|---|---|---|---|---|")
+      "for this run (reference: the pre-registered warm start of A1 gives 5.5e-6 nat). 'step-0 parity' = paired "
+      "difference on validation between the network at step 0 and its source polynomial run (user decision of 25 Nov "
+      "2026; for runs made before fit_to version 3 it refers to the warm start rebuilt by warmstart-check). "
+      "'rms_max / std' is the worst column's rms error divided by that column's spread (review R5). Target columns "
+      f"with a relative spread between the 2^-20 floor and {NEAR_CONSTANT_HI:g} and columns below the scale floor "
+      "(std < 1e-2, fit_to version 3) are listed.\n")
+    w("| run | provider | kl_map | reference | claim | net: fit_to version / rms_max / std (column) / L-BFGS stopped | "
+      "step-0 parity Δ(step 0 - source) | flag | nearly-constant / below-floor target columns |\n"
+      "|---|---|---|---|---|---|---|---|---|")
     for x in res.get("initialisation") or []:
         kl = x.get("kl_map")
         claim = (f"exactly A2s: {yn(x.get('claim_holds'))}" if x.get("claim") else "")
-        netc, flag, near = "", "", ""
+        netc, flag, near, par0 = "", "", "", ""
         if x.get("provider") == "net":
-            rm = x.get("fit_to_rms_max")
-            netc = f"{'-' if rm is None else f'{rm:.2e}'} ({x.get('fit_to_rms_max_name')}) / " \
-                   f"{x.get('fit_to_lbfgs_stopped') or 'no'}"
+            rr = x.get("fit_to_rms_max_rel")
+            netc = f"v{x.get('fit_to_version')} / {'-' if rr is None else f'{rr * 100:.2f} %'} " \
+                   f"({x.get('fit_to_rms_max_name')}) / {x.get('fit_to_lbfgs_stopped') or 'no'}"
             flag = "**warm start degraded**" if x.get("degraded") else "ok"
+            if x.get("superseded_by"):
+                flag += f"; **superseded: warm start** -> {x['superseded_by']}"
             tg = x.get("targets") or {}
             if "error" in tg:
                 near = f"not recomputed ({tg['error'][:80]})"
             else:
                 nc = tg.get("nearly_constant") or {}
-                near = ", ".join(f"{k} {v:.1e}" for k, v in nc.items()) or "none"
+                bf = tg.get("below_scale_floor") or []
+                near = (", ".join(f"{k} {v:.1e}" for k, v in nc.items()) or "none") + \
+                       (f"; below floor: {', '.join(bf)}" if bf else "")
+            p0 = x.get("step0_parity") or {}
+            if p0.get("available"):
+                par0 = f"{fmt(p0.get('paired'))} vs {p0.get('source')}, max {p0.get('max_abs_event', 0):.1e}" \
+                       + (" (rebuilt)" if "rebuilt" in str(p0.get("origin")) else "")
+            elif p0:
+                par0 = f"n/a ({p0.get('reason')})"
         w(f"| {x['run']} | {x.get('provider')} | {'-' if kl is None else f'{kl:.2e}'} | {x.get('kl_ref') or '-'} | "
-          f"{claim} | {netc} | {flag} | {near} |")
+          f"{claim} | {netc} | {par0} | {flag} | {near} |")
     nearly = [(x["run"], (x.get("targets") or {}).get("nearly_constant")) for x in res.get("initialisation") or []
               if (x.get("targets") or {}).get("nearly_constant")]
     w("\nNearly-constant target columns in a net warm start: "
@@ -630,7 +819,7 @@ def markdown(res: dict) -> str:
     prs, exs = set(res.get("primary_rungs") or []), set(res.get("exploratory_rungs") or [])
     for label, keys in (("primaries", prs), ("exploratory", exs)):
         w(f"- {label}: " + ", ".join(f"{r}: {yn(v)}" for r, v in res["kept_and_replicated"].items() if r in keys))
-    w(f"- *{ALT}* (two-seed mean also <= -2 SE): " + ", ".join(
+    w(f"- *{ALT}* (literal conditions AND two-seed mean <= -2 SE): " + ", ".join(
         f"{r}: {yn(v)}" for r, v in (res.get("kept_and_replicated_alternative_2se") or {}).items()) + "\n")
     return "\n".join(out) + "\n"
 

@@ -81,6 +81,8 @@ def configure(smoke: bool = False) -> None:
     if smoke and os.environ.get(SMOKE_ENV) != "1":
         raise SystemExit(f"smoke mode refused: set {SMOKE_ENV}=1 explicitly (end-to-end testing only; its rows are "
                          f"registered under stage '{SMOKE_STAGE}' and are never numbers of record)")
+    if not smoke and os.environ.get("SFM_M2A_INJECT_DIVERGENCE"):
+        raise SystemExit("SFM_M2A_INJECT_DIVERGENCE is a smoke-mode testing hook; refused in the real mode")
     CTX.stage = SMOKE_STAGE if smoke else REAL_STAGE
     CTX.smoke = bool(smoke)
 
@@ -419,11 +421,265 @@ def verify_sources(kwargs: dict) -> dict:
     return out
 
 
+# ----------------------------------------------------------------------------------------------------------------------
+# decisions written by the library (one key per kind; the driver's note_decision writes whole keys of its own)
+# ----------------------------------------------------------------------------------------------------------------------
+def record_decision(key: str, name: str, value) -> None:
+    d = read_json(decisions_file(), {}) or {}
+    d.setdefault(key, {})[name] = value
+    write_json(d, decisions_file())
+
+
+def decisions() -> dict:
+    return read_json(decisions_file(), {}) or {}
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# divergence (user decision of 25 Nov 2026, PLAN.md section 17.11)
+# ----------------------------------------------------------------------------------------------------------------------
+DIVERGED_FILE = "diverged.json"
+BLOWUP_NAT = 1.0          # nat per event (= 10,000 in the 1e-4 units of the tables)
+FROZEN_FRACTION = 0.5     # skipped batches in the last evaluation window
+EXPLORATORY_CLASSES = ("exploratory", "primary-net")     # AUDIT 4.1: the net column is exploratory
+INJECT_ENV = "SFM_M2A_INJECT_DIVERGENCE"                 # smoke only: comma-separated run names (testing hook)
+DIVERGENCE_DEFINITION = (
+    "A run is 'diverged' iff (i) a validation mean in its fit history is not finite, or (ii) the registry evaluation "
+    "of the finished fit finds a non-finite per-event NLL (FloatingPointError), or (iii) 'frozen': in the last "
+    "evaluation window at least 50 % of the training batches were skipped by sfm.train.fit for a non-finite loss or "
+    "gradient, or (iv) 'blow-up': the last validation mean exceeds the reference by more than 1 nat per event "
+    "(10,000 in table units), the reference being the lowest of: the validation means of the fit history, the "
+    "step-0 validation mean of a network warm start, and the registered validation mean of the run's comparator. "
+    "Isolated skipped batches of a fit that ends finite are NOT a divergence (they are reported with the run).")
+
+
+def diverged_marker(name: str) -> Optional[dict]:
+    """The diverged.json of a run of THIS machine and stage, or None."""
+    f = out_dir() / name / DIVERGED_FILE
+    if not f.exists():
+        return None
+    d = json.loads(f.read_text())
+    if d.get("machine_id") != MACHINE_ID:
+        raise RuntimeError(f"{paths.portable(f)} was written on machine {d.get('machine_id')!r}, this is "
+                           f"{MACHINE_ID!r}")
+    return d
+
+
+def status_of(res) -> str:
+    """'done' (a done.json content), 'diverged' or 'blocked' (the records returned by run_spec)."""
+    return (res or {}).get("status", "done")
+
+
+def source_names(kwargs: dict) -> list:
+    out = []
+    for key in SOURCE_KEYS:
+        ref = kwargs.get(key)
+        if ref:
+            out.append(str(ref).partition("/")[2])
+    return out
+
+
+def blocked_by(spec: Spec) -> Optional[str]:
+    """The run this spec depends on (start / init_ref / net_from) that diverged or is itself blocked, if any."""
+    blk = decisions().get("blocked") or {}
+    if spec.provider == "net" and spec.lr is None and plr_file().exists():
+        plr = read_json(plr_file(), {}) or {}
+        if "lr_net" in plr and plr["lr_net"] is None:
+            return "P-lr (lr_net undecided: every network pilot diverged or is blocked)"
+    for n in source_names(spec.kwargs):
+        if diverged_marker(n) is not None:
+            return n
+        if n in blk:
+            return n
+    return None
+
+
+def diagnosis(name: str) -> Optional[dict]:
+    """The independent diagnosis of a diverged run (runs/<stage>/diagnosis/<name>.json, written by the orchestrator
+    after a Fable diagnosis; never by code). Valid only if it names the SHA-256 of the run's diverged.json and a
+    verdict in DIAGNOSIS_VERDICTS. Format:
+        {"run": "<name>", "diverged_json_sha256": "<sha256 of runs/<stage>/<name>/diverged.json>",
+         "verdict": "failed" | "rerun_allowed", "diagnosed_by": "Fable (independent mathematical diagnosis)",
+         "diagnosed_utc": "...", "summary": "..."}"""
+    f = out_dir() / "diagnosis" / f"{name}.json"
+    dv = out_dir() / name / DIVERGED_FILE
+    if not (f.exists() and dv.exists()):
+        return None
+    d = json.loads(f.read_text())
+    ok = (d.get("run") == name and d.get("diverged_json_sha256") == provenance.sha256_file(dv)
+          and d.get("verdict") in DIAGNOSIS_VERDICTS and d.get("diagnosed_by") and d.get("diagnosed_utc"))
+    return {**d, "valid": bool(ok)}
+
+
+DIAGNOSIS_VERDICTS = ("failed", "rerun_allowed")
+
+
+def _inject_callback(spec: Spec, cfg):
+    """Smoke only: make the named runs diverge (all parameters of the first tensor set to NaN half-way)."""
+    names = [x for x in os.environ.get(INJECT_ENV, "").split(",") if x]
+    if spec.name not in names:
+        return None
+    if not CTX.smoke:
+        raise SystemExit(f"{INJECT_ENV} is a smoke-mode testing hook; refused in the real mode")
+    at = max(2, int(cfg.steps) // 2)
+
+    def cb(step, model):
+        if step == at:
+            with torch.no_grad():
+                next(iter(model.parameters())).fill_(float("nan"))
+            log(f"[{spec.name}] SMOKE INJECTION: parameters set to NaN at step {step}")
+    return cb
+
+
+def _grad_norm(model, tr) -> dict:
+    """Gradient norm of the mean training NLL at the final parameters, on the first 256 training events with K = 16
+    and a fixed fold generator (a diagnostic; sfm.train.fit does not record gradient norms)."""
+    from sfm import metric
+    try:
+        model.train()
+        b = tr.batch(torch.arange(min(256, len(tr)), device=tr.off.device))
+        gen = torch.Generator(device=tr.off.device).manual_seed(0)
+        model.zero_grad(set_to_none=True)
+        nll, _ = metric.event_nll(model, b, tr.box, 16, gen)
+        loss = nll.mean()
+        loss.backward()
+        g = [p.grad for p in model.parameters() if p.grad is not None]
+        norm = float(torch.sqrt(sum((x.double() ** 2).sum() for x in g))) if g else None
+        return {"loss": float(loss.detach()), "grad_norm": norm,
+                "finite": bool(norm is not None and math.isfinite(norm) and math.isfinite(float(loss.detach())))}
+    except Exception as err:                                                   # diagnostic only
+        return {"error": f"{type(err).__name__}: {err}"}
+    finally:
+        model.zero_grad(set_to_none=True)
+
+
+def divergence_check(history: list, ref_vals: list) -> list:
+    """The criteria (i), (iii), (iv) of DIVERGENCE_DEFINITION that a fit history meets (criterion (ii) is the
+    registry's FloatingPointError)."""
+    crit = []
+    vals = [h.get("val") for h in history]
+    if any(v is None or not math.isfinite(float(v)) for v in vals):
+        crit.append("non-finite validation mean in the fit history")
+    if len(history) >= 1:
+        last = history[-1]
+        prev = history[-2] if len(history) >= 2 else {"step": 0, "skipped_loss": 0, "skipped_grad": 0}
+        n = max(1, int(last["step"]) - int(prev["step"]))
+        sk = (last.get("skipped_loss", 0) + last.get("skipped_grad", 0)
+              - prev.get("skipped_loss", 0) - prev.get("skipped_grad", 0))
+        if sk >= FROZEN_FRACTION * n:
+            crit.append(f"frozen: {sk} of {n} batches skipped in the last evaluation window")
+        lv = last.get("val")
+        refs = [float(v) for v in list(vals) + list(ref_vals) if v is not None and math.isfinite(float(v))]
+        if lv is not None and math.isfinite(float(lv)) and refs and float(lv) - min(refs) > BLOWUP_NAT:
+            crit.append(f"blow-up: last validation {float(lv):.4f} exceeds the reference {min(refs):.4f} by more "
+                        f"than {BLOWUP_NAT} nat")
+    return crit
+
+
+def _diverged_record(spec, cfg, res, model, tr, crit, eval_error=None, step0=None) -> dict:
+    hist = res.history if res is not None else []
+    finite = [h for h in hist if h.get("val") is not None and math.isfinite(float(h["val"]))]
+    first_bad = next((h["step"] for h in hist if h.get("val") is None or not math.isfinite(float(h["val"]))), None)
+    state = model.state_dict()
+    tens = [v for v in state.values() if torch.is_tensor(v) and v.is_floating_point()]
+    n_bad = int(sum(int((~torch.isfinite(t)).sum()) for t in tens))
+    mx = max((float(t[torch.isfinite(t)].abs().max()) for t in tens if bool(torch.isfinite(t).any())), default=None)
+    rec = {"status": "diverged", "run": spec.name, "rung": spec.rung, "cls": spec.cls, "seed": spec.seed,
+           "comparator": spec.comparator, "criteria": crit, "definition": DIVERGENCE_DEFINITION,
+           "step": first_bad if first_bad is not None else (hist[-1]["step"] if hist else None),
+           "last_finite": ({"step": finite[-1]["step"], "val": finite[-1]["val"],
+                            "train_nll": finite[-1].get("train_nll")} if finite else None),
+           "history": hist, "fit": res.summary() if res is not None else None,
+           "params": {"n_nonfinite": n_bad, "max_abs_finite": mx,
+                      "weights_sha256": provenance.weights_sha256(state),
+                      "note": "sfm.train.fit skips non-finite updates, so these are the last parameters it kept"},
+           "gradient": _grad_norm(model, tr), "eval_error": eval_error, "step0_parity": step0,
+           "files_kept": [f for f in (train.MODEL_FILE, train.CHECKPOINT, train.DONE_FILE, train.LOG_FILE)
+                          if (spec.out_dir / f).exists()],
+           "machine_id": MACHINE_ID, "stream_id": live_stream_id(), "batch": CTX.batch,
+           "utc": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    write_json(rec, spec.out_dir / DIVERGED_FILE)
+    record_decision("diverged", spec.name, {k: rec[k] for k in ("rung", "cls", "seed", "criteria", "step",
+                                                                "last_finite", "params", "gradient", "eval_error")}
+                    | {"status": ("diverged" if spec.cls in EXPLORATORY_CLASSES or spec.cls == "pilot"
+                                  else "diverged - awaiting diagnosis")})
+    log(f"[{spec.name}] DIVERGED ({'; '.join(crit)}); recorded in {DIVERGED_FILE} and decisions.json; the job "
+        "continues with the runs that do not depend on it")
+    return rec
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# step-0 parity of a network warm start (user decision of 25 Nov 2026)
+# ----------------------------------------------------------------------------------------------------------------------
+def warm_start_source(kwargs: dict) -> Optional[str]:
+    """The registered polynomial run a network warm start reproduces: net_from, or A0_init (the legacy coefficients
+    at step 0) for a net model fitted to its own legacy provider (A1)."""
+    if kwargs.get("net_from"):
+        return str(kwargs["net_from"]).partition("/")[2]
+    if kwargs.get("provider") == "net" and kwargs.get("variant") == "legacy_centre":
+        return "A0_init"
+    return None
+
+
+def step0_parity(model, name: str, source: Optional[str], val, subdir: str = "step0", base: Optional[Path] = None) -> dict:
+    """Paired difference on validation between a network at step 0 and its source polynomial run's registered array:
+    the per-event NLL of the step-0 model with the unmodified common.test_nll inside metric.deterministic() (the
+    registry's computation, same points), saved as a tagged array (not a registry row) and paired through
+    provenance.paired_delta with the source's registered array."""
+    from sfm import metric
+    if source is None or registered_row(source) is None:
+        return {"source": source, "available": False, "reason": "no registered source array"}
+    was = model.training
+    model.eval()
+    with metric.deterministic():
+        nll = common.test_nll(model, val.showers)
+    model.train(was)
+    f = (Path(base) if base is not None else out_dir() / name) / subdir / "val_nll.npy"
+    if not np.isfinite(nll).all():
+        return {"source": source, "available": False, "reason": f"{int((~np.isfinite(nll)).sum())} non-finite values"}
+    ta = provenance.save_tagged(f, nll, live()["points"], live_machine(), label=f"{CTX.stage}/{name}:{subdir}")
+    src = tagged(source)
+    p = provenance.paired_delta(ta, src)
+    d = provenance.paired_difference(ta, src)
+    return {"source": source, "available": True, "paired": pd(p), "max_abs_event": float(np.abs(d).max()),
+            "step0_val_mean": float(np.mean(nll, dtype=np.float64)), "array": paths.portable(f), "sha256": ta.sha256}
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# supersession (warm-start re-runs, PLAN 17.11)
+# ----------------------------------------------------------------------------------------------------------------------
+def superseded() -> dict:
+    return dict((decisions().get("warmstart_rerun") or {}).get("superseded") or {})
+
+
+def effective(name: Optional[str]) -> Optional[str]:
+    """The run that stands for ``name`` in the rules: its warm-start re-run if it was superseded, else itself."""
+    if name is None:
+        return None
+    return superseded().get(name, name)
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# one run
+# ----------------------------------------------------------------------------------------------------------------------
 def run_spec(spec: Spec) -> dict:
-    """Execute (or skip, or resume) one run; returns its done.json content."""
+    """Execute (or skip, or resume) one run. Returns its done.json content, or - user decision of 25 Nov 2026 - the
+    record {"status": "diverged", ...} (diverged.json; DIVERGENCE_DEFINITION) or {"status": "blocked",
+    "blocked_by": <run>} when a run it starts from / is initialised from / is fitted to diverged. A diverged or
+    blocked run is terminal: re-issuing the command does not retrain it."""
     d = done_marker(spec.done_file)
     if d is not None:
         return d
+    dv = diverged_marker(spec.name)
+    if dv is not None:
+        return dv
+    b = blocked_by(spec)
+    if b is not None:
+        rec = {"status": "blocked", "run": spec.name, "blocked_by": b, "rung": spec.rung, "cls": spec.cls,
+               "seed": spec.seed}
+        record_decision("blocked", spec.name, {"blocked_by": b, "rung": spec.rung, "cls": spec.cls,
+                                               "seed": spec.seed})
+        log(f"[{spec.name}] BLOCKED by {b} (diverged or blocked); not trained, recorded in decisions.json")
+        return rec
     cfg = fit_config(spec)
     sets, extras = data_cpu()
 
@@ -445,9 +701,18 @@ def run_spec(spec: Spec) -> dict:
         build_s = time.time() - tb
         info = getattr(model, "init_info", None)
         if not resuming:
+            parity0 = None
+            if spec.provider == "net":                     # step-0 parity of the warm start (PLAN 17.11)
+                registry.check_validation(val)
+                parity0 = step0_parity(model, spec.name, warm_start_source(kw), val)
+                record_decision("step0_parity", spec.name, parity0)
+                if parity0.get("available"):
+                    log(f"[{spec.name}] step-0 parity vs {parity0['source']}: "
+                        f"{parity0['paired']['mean'] * 1e4:+.3f} +- {parity0['paired']['se'] * 1e4:.3f}e-4")
             write_json({"init_info": info, "build_seconds": build_s, "n_params": int(model.n_params()),
                         "spec": asdict(spec), "build_kwargs": kw, "sources_verified": sources,
-                        "machine_id": MACHINE_ID, "machine_tag": MACHINE.to_dict()}, init_file)
+                        "step0_parity": parity0, "machine_id": MACHINE_ID, "machine_tag": MACHINE.to_dict()},
+                       init_file)
         init = read_json(init_file, {})
         info = init.get("init_info") or {}
         log(f"[{spec.name}] built {spec.factory} {kw}: {model.n_params()} constants, kl_map {info.get('kl_map')}, "
@@ -468,14 +733,36 @@ def run_spec(spec: Spec) -> dict:
                 f"{row0['vs_formula']['mean'] * 1e4:+.3f}e-4")
         meta = {"model": {"factory": spec.factory, "kwargs": kw}, "spec": asdict(spec), "init": info,
                 "stage": CTX.stage, "smoke": CTX.smoke}
-        res = train.fit(model, tr, va, cfg, meta=_jsonable(meta), log=log)
+        res = train.fit(model, tr, va, cfg, meta=_jsonable(meta), log=log, callback=_inject_callback(spec, cfg))
+        # divergence (PLAN 17.11; DIVERGENCE_DEFINITION): checked before the registry is touched
+        refs = []
+        p0 = init.get("step0_parity") or {}
+        if p0.get("available"):
+            refs.append(p0["step0_val_mean"])
+        crow = registered_row(spec.comparator) if spec.comparator and spec.comparator != "formula" else None
+        if crow is not None:
+            refs.append(crow["val_mean"])
+        crit = divergence_check(res.history, refs)
+        if crit:
+            rec = _diverged_record(spec, cfg, res, model, tr, crit, step0=p0 or None)
+            del model, tr, va, val
+            return rec
         row = registered_row(spec.name, res.model_path)
         if row is None:
-            row = registry.evaluate(model, spec.name, CTX.stage, val,
-                                    meta={**meta_common, "config": {"spec": asdict(spec), "fit": cfg.result_dict()},
-                                          "config_hash": cfg.hash(), "checkpoint": str(res.model_path),
-                                          "notes": spec.notes or None, "fit": res.summary(),
-                                          "trained_on": {"machine_id": MACHINE_ID, "source": "trained in this job"}})
+            try:
+                row = registry.evaluate(model, spec.name, CTX.stage, val,
+                                        meta={**meta_common, "config": {"spec": asdict(spec),
+                                                                        "fit": cfg.result_dict()},
+                                              "config_hash": cfg.hash(), "checkpoint": str(res.model_path),
+                                              "notes": spec.notes or None, "fit": res.summary(),
+                                              "trained_on": {"machine_id": MACHINE_ID,
+                                                             "source": "trained in this job"}})
+            except FloatingPointError as err:              # criterion (ii): non-finite per-event validation NLL
+                rec = _diverged_record(spec, cfg, res, model, tr,
+                                       ["non-finite per-event validation NLL at registration"],
+                                       eval_error=str(err), step0=p0 or None)
+                del model, tr, va, val
+                return rec
         log(f"[{spec.name}] registered: val {row['val_mean']:.6f}  vs formula {row['vs_formula']['mean'] * 1e4:+.3f}"
             f" +- {row['vs_formula']['se'] * 1e4:.3f}e-4  skipped {res.skipped_loss}/{res.skipped_grad}")
         done = {"name": spec.name, "stage": CTX.stage, "smoke": CTX.smoke, "spec": asdict(spec), "build_kwargs": kw,
@@ -483,7 +770,8 @@ def run_spec(spec: Spec) -> dict:
                 "val_mean": row["val_mean"], "k": row["k"], "kl_map": info.get("kl_map"),
                 "checkpoint_sha256": row.get("checkpoint_sha256"), "val_nll_sha256": row.get("val_nll_sha256"),
                 "build_seconds": init.get("build_seconds"), "job_seconds": time.time() - t0,
-                "sources_verified": sources, "machine_id": MACHINE_ID, "machine_tag": MACHINE.to_dict(),
+                "sources_verified": sources, "step0_parity": init.get("step0_parity"),
+                "machine_id": MACHINE_ID, "machine_tag": MACHINE.to_dict(),
                 "stream_id": live_stream_id(), "batch": CTX.batch,
                 "finished_utc": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         write_json(done, spec.done_file)
