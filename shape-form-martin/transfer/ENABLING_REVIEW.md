@@ -396,3 +396,204 @@ emulated guards, which a grid-1056 machine skips); the re-score of two networks 
 memory, four CPU threads under the launcher. Its CUDA tests take no campaign lock and are not capped until one of
 them calls `machine.startup`. It is worth running there for 5a and 5b; the remainder says nothing about the H200.
 It must never be wrapped in a process that holds the GPU lock.
+
+---
+
+## 5. Re-check of commit `0c38b32` (25 Nov 2026, second pass)
+
+Reviewed: the 22 files of commit `0c38b32` (unchanged in the working tree during the re-check). The worker's account
+(`ENABLING_STATUS.md` sections 2, 7, 8, 9) was again treated as claims. Method per finding: my reproducer of the
+first pass re-run (adapted to the new interface where needed), one variation, and the fix read. Reproducers of this
+pass: `<scratch>/r2/` (`vp.py`, `rs.py`, `g5_recheck.py`, `run_gpu.sh`, `run_e.sh`). Same rules as before; nothing
+ran on the H200.
+
+### 5.1 Verdicts
+
+- **Steps 5-8: GO**, with the step list of 5.6 and launch grid 1056. If step 6 reads another grid: stop after step 6
+  (the fallback for the re-score is still not implemented; the command now refuses such a grid).
+- **Steps 9-11: GO**, with the step list of 5.6.
+
+All eight findings A1-A5 and B1-B3 are closed. The re-check found six new points, all ranked (C); N1 changes how
+one line of the step list has to be read and is worth a two-line fix before the first ssh session.
+
+### 5.2 A1-A5 and B1-B3, one line each
+
+| Finding | Status | Evidence of this pass | Variation tried |
+|---|---|---|---|
+| A1 step 5 red by construction | **closed** | step 5a through the launcher, guard on: `107 passed in 39.78s`, peak GPU memory 544 MiB; step 5b: `26 passed in 2.14s`. Whole suite in one process, no guard: `749 passed, 8 skipped` in 110 s | the launcher reports the 2-second job 5b as `FAILED` (N1) |
+| A2 verdict ignored four checks | **closed** | `verdict_items` is the only source of the exit code. On a real report every one of 13 single flipped checks (R0, second run, a mean, a per-event target, both kinds of record identity, A3, R1b, R3, emulated R2, set status, an R2 target, the stratum count) gives exactly one FAIL line | a recomputation that differs by one ULP in one event: `exists_DIFFERENT`, FAIL, exit 1. A record failing the hash check: FAIL, no set. Not part of the verdict: a P3 banner, and R3 when `--skip-r3` is given (N2) |
+| A3 set created before the checks | **closed** | forced R0 failure with `--create-refset` on a fresh root: `NOT created`, exit 1, no `refsets/` directory. Same for an unverified record. A created set carries the parity record; the SHA-256 of the parity report on disk equals `parity.report_sha256` | after the differing recomputation a marker `<set>.DIFFERENT_<utc>.json` exists and the re-score stops with `ReferenceSetDisputed`. The licence is a field of a dictionary: the interface accepts any `parity={"verdict": "PASS"}` (5.5) |
+| A4 silent skips in the re-score | **closed** | records "not found": every required check `NOT MADE`, `INCOMPLETE`, exit 2. Normal run: PASS with each required check listed (`+21.81 ± 3.17`, `+1.19 ± 0.42`, the laptop's numbers) | records present but failing the hash check (one array, one mass-monitor file): `NOT MADE`, exit 2. Without `--emulate-laptop` R1b is not required and the verdict is PASS: the flag must be in the command (it is, step 8) |
+| A5 fail-open pristine mode and guard | **closed** | with the policy list emptied (this machine "not the laptop"): `UnguardedStart` from `machine.startup`, `registry.evaluate`, `create_reference_set` and `train.fit`; also with the output root outside but the guard off | a tag with another Python version is not the laptop (fail closed). The policy accepts any active guard area, including one that does not contain the clone (N4) |
+| B1 machine id moved with settings | **closed** | id identical for `deterministic=False`, `draw="emulated"` and a set cuBLAS variable; different for another Python or TF32 on. After a real (shortened) fit through the launcher the id is the same in the row (`scored_on`, `trained_on`), `model.pt` (`deterministic: False`), `fit_done.json`, `done.json` | pairing is as strict as before: `paired_delta` raises `MixedTags` for each of the three settings. One check became weaker: `save_tagged` onto an existing file (N3) |
+| B2 starting point unverified | **closed for `run_m2b_fit.py`** | `init_from` (file and weights SHA-256, source row) is in the row, `model.pt` and `done.json` of the real run; step 9-pre through the launcher: `starting point verified`, `built weights agree`, nothing written | refused: another stage-1 seed, another spelling of the same run, another factory, a name outside the eight, a file at the right path with other weights, a model changed after the build. Not pinned: the recipe and the location of the config file (N5). `fit.py` and `fit_queue.py` do not call the check (later batch, run-book step 14) |
+| B3 step 11 had no failing outcome | **closed** | renamed array-and-sidecar pair: `UntaggedArray`; `representatives_verdict` false for a failing or missing representative; report with no control: banner, `b0_controls_complete` false, exit 2; ensembles without the members: exit 1 | a pair renamed with its sidecar's `array` field edited as well loads (a sidecar is a consistency check, not a signature; for the subset files the member SHA-256 and the representatives stand behind it). The ensemble path with all members present was read, not run |
+
+### 5.3 The (C) items
+
+- **C1 (P3), fixed, and it is the deciding test.** `scripts/p3_compare.py` re-derives the events on the laptop, compares
+  `(iz, ir)` point by point and attributes the difference with the laptop's log rho held fixed.
+  - Run on events of my choice with genuine flips. Another arithmetic was imitated by computing the fold-point
+    coordinates in float64 and rounding; 36 of the 14,950 validation events then have one point in another cell. For
+    seven of them the script finds exactly that one point and reproduces my independently computed NLL difference
+    to 3e-8 or better ("flip: explained"); two events without a flip give "no differing cell: NOT a bin-edge flip".
+  - The path writer to reader works: material written by the real `save_outliers` (identical cells, a fake target)
+    is read and gives "no differing cell", residual equal to the fake difference.
+  - Not right yet: the label (N6).
+  - For the user and Gate 2c, not a code finding: in that imitation the flips alone move 5 events by more than 1e-4
+    (largest 2.5e-4; rms 3e-6). The relaxed clause allows three. The imitation changes every coordinate's rounding
+    and is therefore an upper-range case, but it shows that confirmed bin-edge flips and "at most three events above
+    1e-4" are not the same condition.
+- **C2 (guard events), fixed.** Refused now, the other project's files untouched: rename, replace, remove, unlink,
+  mkdir, makedirs, rmdir, hard link, chmod, truncate, utime, `shutil.move`, `shutil.rmtree`, `os.system` (also with
+  redirection or `cd`). Legitimate renames, removals and temporary files inside the output root and the cache pass.
+  Left, and acceptable as documented limits: a hard link that already exists, `guard._STATE`. Left and not
+  documented: a shell command given to `subprocess` as one string (`os.popen`, `shell=True`) is read as a single
+  path and passes from the clone root (executed: the foreign file was read). The campaign code has no such call.
+- **C3 (launcher, stop helper), fixed except N1.** The PID is the interpreter's; `.job` holds PID, start time,
+  working directory and command line; `uv` is refused; a command that cannot start is `FAILED`, exit 1.
+  `stop_job.sh` against a PID that is not the job's: refused when the PID file names another live process of mine,
+  when the `.job` file was edited to that PID as well, and when its start time was forged too (the command line
+  still differs); the other process stayed alive. The genuine job received SIGTERM and its exit status (143) was
+  recorded; a second call after its end signals nothing.
+- **C4, fixed.** `--no-optional-locks`; `upstream` and `head_equals_upstream` in every git record (seen in the row of
+  the real run); the switches in force are in the batch record (`SFM_ALLOW_DIRTY_CLONE: "1"`, `SFM_GUARD_AREA:
+  "<area>"`); git state again at the end of a batch.
+- **C5, fixed in part, the rest acceptable.** `registered_row(stream_id=None)` raises; `common_py_sha256` is in rows
+  and `refset.json`. Left as it was, with reasons I accept: `latest()` and `table()` defaults (callers of other
+  workers; `row_array` and `select_1se` refuse untagged rows), the mass-monitor mean criterion (it is in the
+  hand-over text, section 1.2 of `REVIEW_STATUS.md`; my remark was wrong on that point), the asserted constants of
+  the points tag (now pinned by the hash of `common.py`), the test-access log inside the clone (E8).
+
+### 5.4 New findings (all C)
+
+**N1. The launcher reports a job that succeeds within the grace period as FAILED.**
+- Evidence: `launch.sh quick true` prints `FAILED: job quick ended within 3 s (exit status 0)` and returns 1. Step
+  5b as written did the same on the laptop (`26 passed in 2.14s`), and so did a repeated step 9 whose run was
+  already done. `launch.sh:110-114` tests only whether the job has ended.
+- Consequence: the first or second line the orchestrator reads over ssh is a false alarm, and a script that waits
+  for the `pid file:` line never gets one (my own driver hung on exactly this).
+- Fix: when the `.exit` file exists and holds 0, print `finished within <n> s (exit status 0)` and return 0; FAILED
+  only for a non-zero or missing status. Until then: 5.6.
+
+**N2. Two options of `val_parity.py` weaken the parity that licenses a reference set.** `--skip-r3` removes R3 from
+the verdict (30 items instead of 32, still PASS). `--no-guards` creates a set without guard arrays, and a later
+normal run then finds the guard arrays "missing in the existing set", writes the dispute marker and blocks the set.
+Fix: refuse both together with `--create-refset` off the laptop of record. The step list uses neither. A P3 banner
+does not change the exit code either; the plan allows the set in that case (every event within 1e-4), so this is a
+remark: a distinct exit code would stop an unattended batch at step 6.
+
+**N3. `save_tagged` no longer notices another setting on an existing file.** It compares the sidecar's
+`machine_id`, which used to contain the settings. Executed: the same values saved with `draw="emulated"` onto a
+native file return a tag that says "emulated" while the sidecar says "native". No campaign code saves emulated
+arrays today. Fix: compare the sidecar's `machine` fields with the tag's.
+
+**N4. The policy accepts any active guard.** `require_guarded_start` asks `guard.active()`; an area that does not
+contain the clone satisfies it. The launcher's default is right and the step list forbids setting the variable.
+Fix: also require the clone to lie inside the guarded area. Related: a process without CUDA is exempt, so on the
+H200 `CUDA_VISIBLE_DEVICES=""` with `SFM_ALLOW_CPU=1` would let `train.fit` run unguarded; two deliberate settings.
+
+**N5. `run_m2b_fit.py` pins the starting point, not the recipe.** A copy of `s2_seed13.toml` with 500 steps, kept
+outside the clone, was accepted, trained and registered under the name `s2_seed13` (config hash `92c7e44e...`
+instead of `0354cc66...`; its absolute path stands in `done.json`). On the H200 the configs are tracked files in a
+clean clone, and Gate 1 can compare the hash. Fix: pin the config hashes of the six pre-registered files beside
+`ALLOWED_INIT`, or accept only config files inside the clone.
+
+**N6. Two details of the new text handling.**
+- `p3_compare.py` labels an event "flip: explained" when the residual is at most 3e-5. Executed: a recorded
+  difference of -8.8e-5 of which the flip explains -1.17e-4 (residual +2.9e-5) gets the label. With a banner
+  threshold of 5e-5 that is too wide. The numbers are printed and the decision is not the script's; the label
+  should demand a residual at the level of events without a differing cell (which the script already measures as
+  `max_abs_logg_diff_on_identical_cells` and does not use) and well below the recorded difference.
+- `paths.scrub_str` now replaces a root only before `/`, a quote, white space and a few other characters. A path
+  followed by `.`, `>`, `}` or `|` is left as it is (executed: `see <output root>.` stays absolute). The earlier
+  code replaced unconditionally. No such string was found in the JSON files of this pass; 5.6 adds a search before
+  anything is copied back.
+
+### 5.5 The risks asked about
+
+- **Can the laptop lock itself out?** Yes, by design: the policy names it by an id that contains the Python patch
+  version, torch, CUDA, cuDNN and both TF32 flags. After an upgrade every CUDA start-up outside the launcher raises
+  `UnguardedStart` until `policy.py` is updated. `startup` and `fit` switch TF32 off before the id is read, so a
+  flag set elsewhere does not cause it.
+- **Can another machine pass as the laptop?** Only a GPU of the same model with the same builds; the host is not
+  part of the id. The H200 cannot.
+- **Unit tests and CPU-only processes.** Under the launcher the policy is met, so step 5a is not affected (107
+  passed with guard and scratch output root here). No test asserts that it runs on the laptop. Without the launcher
+  on another CUDA machine the tests that start fits or evaluations fail with `UnguardedStart`, as intended.
+- **The parity record.** Through `val_parity.py` a set cannot be created from a failed run (three failure modes
+  tried). A foreign report cannot be attached there either: the record is built in the same process from that
+  run's own report. Through the function itself the record is a claim (the unit tests pass
+  `{"verdict": "PASS", "source": "unit test"}`); what makes it checkable is the report SHA-256 in `refset.json`,
+  which I confirmed against the file. The report does not hold the SHA-256 of the arrays it checked; adding them
+  would let a gate tie report and arrays together from the report alone.
+- **The blocking marker.** Written beside the sealed set by a differing recomputation; `reference_set` (hence
+  `evaluate`, the re-score, Track A) refuses the set while any marker exists. Nothing removes it by code. It can
+  also be caused without a numerical difference by the option of N2.
+- **The new machine id.** The split is right: identity names directories, `trained_on`, `scored_on` and the lock
+  file; settings stay in the tag and in `check_pairable`. `load_tagged(expect_machine_id=...)` alone no longer
+  separates settings; every use I found is followed by a pairing check on the full fields. N3 is the one place
+  that lost strictness.
+- **Starting points.** For `run_m2b_fit.py` exactly the pre-registered ones: `s2_seed11..15` from the stage-1 run
+  of the same seed, `b0h_seed0..2` from `mlp_std.pt`, each verified by SHA-256 before the build and by weight hash
+  after it. See N5 for what is not pinned.
+- **Test-split lock.** Not touched by the fixes (`data.py` is not in the commit; the deferred names and their
+  release are unchanged). `check_test_access_allowed` goes through `startup`, so on the H200 a test access now also
+  needs the launcher's settings. The guard log of every guarded run of this pass holds `pyarrow` import refusals
+  only.
+- **Writes into the clone.** None added. The marker, the parity report, the job files and the P3 report go under
+  the output root. In each launcher run of this pass the only file touched in the clone was the git-ignored
+  `cache/gpu.lock`.
+
+**Track A (`scripts/run_m2a*.py`, commit `c4f39fd`; not my subject).** I found no silent change of behaviour. The
+changes it will meet are all loud: reference sets made before this commit have no parity record and are refused;
+machine directories under the old id are not found; `create_reference_set` needs `parity=` (Track A does not call
+it); `registered_row` needs a stream id (it passes one); off the laptop a start without the launcher is refused.
+Its own markers compare the directory's machine id, which is now stable. Two things for its reviewer:
+`run_m2a_report.py:169-170` wraps arrays read from files in the live tag with `TaggedArray.make`, and
+`expect_machine_id` no longer distinguishes settings (the pairing check behind it still does).
+
+### 5.6 Step list endorsed (H200, steps 5-11)
+
+The list of `ENABLING_STATUS.md` section 2 is right as written, with these amendments.
+
+**Before every start** (as there): `cd <repo>`; `export SFM_OUT_ROOT=... SFM_USER_CACHE=...`; `L`, `S`, `P`;
+`nvidia-smi`; `git status --porcelain` empty and `HEAD` equal to the pushed branch. In addition:
+- Pass no option that the list does not show: no `--skip-r3`, `--no-guards`, `--emulated-guards`,
+  `--allow-unchecked-grid`, `--names`, `--source-registry`.
+- Use only the tracked config files of `shape-form-martin/configs/m2b/` (N5).
+- A job is finished when `<job>.exit` exists. Its content is the result: read it and the end of the log. If the
+  launcher prints `FAILED: job ... ended within 3 s (exit status 0)`, the job has finished successfully (N1).
+- After every campaign command the log must not contain `WARNING: the clone is no longer clean`.
+
+| Step | Command | Read in the log | Stop when |
+|---|---|---|---|
+| 5a | as written (eight test files, one process) | `N passed`; `.exit` = 0 | any failure other than a CUDA tolerance test of `test_train.py`; `test_emulation_reproduces_torch_rand_bitwise` must be among the passed |
+| 5b | as written (`test_transfer_package.py`) | `26 passed`; `.exit` = 0. The launcher will probably say FAILED (N1) | `.exit` not 0 |
+| 6 | `$L val_parity $P -B shape-form-martin/scripts/val_parity.py` | first line: `outputs under <out>/...`, `file-access guard ACTIVE`; `launch grid 1056`; every verdict line PASS, among them `R1 emulated_equals_native`, four `laptop record verified` lines, two R1b and two R3 lines; `P3: no validation event differs ...`; no line beginning `R2 reference set`; `ALL APPLICABLE CHECKS: PASS` | grid not 1056; any FAIL; a P3 banner (the exit code is 0 with a banner: copy `checks/val_parity/outliers_*` back and run `scripts/p3_compare.py` on the laptop before step 7) |
+| 7 | only after 6: the same command with `--create-refset`, twice | first run: `[refset] created ...; sealed read-only`, `R2 reference set status: created`, eight further R2 lines PASS. Second run: `R2 reference set status: exists_identical`, exit 0 | `NOT created`; `exists_DIFFERENT` or `BLOCKED` (the set is then refused everywhere; report to the user, delete nothing) |
+| 8 | as written, with `--emulate-laptop` | per network `sha ok` and `-> PASS`, with `predicted_mean`, `predicted_delta_vs_mlp_e4` and `R1b_emulated_144_vs_laptop` listed `ok`; for `b0_seed0`, `s2_seed11`, `s2_seed12` also `predicted_k1024_mean`, `predicted_bulk_mean`, `mass_monitors`; `ALL APPLICABLE CHECKS: PASS`, `.exit` = 0 | `INCOMPLETE` (`.exit` = 2: a quarantine record is missing or fails its hash; fix the copy, run again) or `FAIL`. A FAIL of `mass_monitors` alone is reported with its per-key numbers before anything else is decided |
+| 9-pre | as written (six configs, `--verify-init-only`) | six `starting point verified` lines and six `verify-only: starting point and built weights agree` lines; no `runs/` entry for these names appears | any `SystemExit` text |
+| 9 | as written | per run: `starting point verified`, `start: 6000 steps`, `registered: ...`, `done: ...`; three rows whose `trained_on.init_from.file_sha256` equals the laptop row of `s1_seed13..15` | `MachineMismatch`, `FileExistsError`, `InsufficientGPUMemory` |
+| 10 | as written | as 9, starting file `mlp_std.pt`; none of the three `checkpoint_sha256` begins `75de31f2` | as 9 |
+| 11 | ensembles, then report | ensembles: `PASS: all three representatives bit-equal ...`, `.exit` = 0. Report: no `INCOMPLETE` banner, `.exit` = 0, `b0_controls_complete: true` in `summary.json` | `FAIL: representatives not bit-equal`; `members are not today's files`; report `.exit` = 2 |
+
+**Before anything is copied back:** search the machine directory for the area's path and the account name
+(`grep -rl` over `*.json` and `*.jsonl`); nothing may match (N6). Job logs stay on the H200.
+
+Laptop durations of this pass: 5a 40 s, 5b 3 s, step 6 or 7 about 90 s each (with the emulated guards that a
+grid-1056 machine skips), the re-score of two networks 25 s, 9-pre for two configs 15 s, a 500-step fit with its
+guarded evaluation 39 s.
+
+### 5.7 Verified in this pass, and what stays open
+
+- By execution: everything in 5.2 to 5.4 marked as executed; the step-7 command and a shortened step 9 through the
+  launcher with the guard active; the failing outcomes of step 11; `p3_compare.py` on real validation events.
+- By reading only: the grid-1056 branches of `val_parity.py` and of the re-score; the ensemble path with all
+  members present (`check_members`, the member hashes in the subset sidecars); `lib.finish`.
+- `results/registry.jsonl`, `results/test_access.log` and `common.py` have the SHA-256 of the first pass. The only
+  file written in the repository is this one.
+- Only the H200 can settle: the launch grid and the generator check; arithmetic parity and whether a P3 banner
+  appears; the predicted table; `UnguardedStart` and `DirtyClone` with the real machine id and a clean clone;
+  `setsid` and `/proc` as the launcher and the stop helper use them; whether 5b finishes inside the grace period
+  there; the 10 GB cap with real jobs; `flock` on its file system; durations; steps 9-11 at full length.
