@@ -39,7 +39,10 @@ from . import translate as T
 
 __all__ = ["MLP_BASE_PERIOD_MM", "sign_changes", "count_extrema", "containment", "monotone_sequence",
            "slope_sign_changes", "baseline_tail_slopes", "decide_tail_criterion", "verify_tail_criterion",
-           "format_tail_criterion", "TAIL_R_MIN_MM", "TAIL_R_MAX_MM", "RADIAL_SLOPE_LIMIT", "modulation_expr", "template_modulation", "modulation_amplitude", "trig_periods",
+           "format_tail_criterion", "TAIL_R_MIN_MM", "TAIL_R_MAX_MM", "RADIAL_SLOPE_LIMIT", "profile_sign_changes",
+           "profile_rising_lobes",
+           "SIGN_TOL_DEPTH_PER_MM", "SIGN_TOL_RADIAL", "REFERENCE_KINDS", "MEASURED_KIND", "DEPTH_RULE",
+           "TAIL_SCHEMA", "modulation_expr", "template_modulation", "modulation_amplitude", "trig_periods",
            "period_check", "period_band_coverage", "seed_null_comparison", "CHECK_MOMENTA_GEV",
            "MODULATION_LIMIT_NAT"]
 
@@ -159,11 +162,17 @@ def baseline_tail_slopes(log_rho, z_mm, r_mm, n_fit: int = 4) -> dict:
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-# Tail criterion of a baseline (PLAN 17.11, S4): decided once, from the baseline alone
+# Tail criterion of a reference baseline (PLAN 17.11, S4, and the user's decision on the depth rule): decided once,
+# from the FIXED non-SR baseline alone
 # ----------------------------------------------------------------------------------------------------------------------
-TAIL_SCHEMA = "sfm.sr.tail_criterion/1"
+TAIL_SCHEMA = "sfm.sr.tail_criterion/2"
 TAIL_R_MIN_MM, TAIL_R_MAX_MM = 200.0, 1500.0
 RADIAL_SLOPE_LIMIT = -2.0
+SIGN_TOL_DEPTH_PER_MM = 1e-5         # 0.001 nat per 100 mm: lobes of d ln rho / d z' below this are not counted
+SIGN_TOL_RADIAL = 1e-3               # in d ln rho / d ln r
+REFERENCE_KINDS = ("track_a_finalist", "c1_refit_only", "legacy_preview", "synthetic")
+MEASURED_KIND = "refitted_baseline"  # a table of the jointly refitted baseline: model side only, never a reference
+DEPTH_RULE = "inherit_reference"     # d_z' ln rho_model <= max(0, d_z' ln rho_reference) beyond z_90
 
 
 def _tail_record_hash(rec: Mapping) -> str:
@@ -171,12 +180,57 @@ def _tail_record_hash(rec: Mapping) -> str:
     return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:32]
 
 
+def _r9(a) -> list:
+    """Nested list of floats rounded to 9 significant digits; non-finite values become None."""
+    a = np.asarray(a, dtype=np.float64)
+    out = np.array([float(f"{v:.9g}") if np.isfinite(v) else np.nan for v in a.ravel()]).reshape(a.shape)
+    return json.loads(json.dumps(np.where(np.isfinite(out), out, None).tolist()))
+
+
+def profile_sign_changes(slopes, tol: float) -> np.ndarray:
+    """Sign changes of slope profiles along the LAST axis, counted in a way that depends only on the grid of the
+    profile and on ``tol``: non-finite and zero entries are skipped; a lobe is a maximal run of consecutive
+    entries of one sign; lobes whose largest |slope| is below ``tol`` are dropped; the count is the number of
+    sign alternations between the remaining consecutive lobes. Returns an integer array without the last axis."""
+    a = np.asarray(slopes, dtype=np.float64)
+    flat = a.reshape(-1, a.shape[-1])
+    out = np.zeros(len(flat), dtype=np.int64)
+    for i, v in enumerate(flat):
+        v = v[np.isfinite(v) & (v != 0)]
+        if len(v) < 2:
+            continue
+        sg = np.sign(v)
+        starts = np.concatenate([[0], np.flatnonzero(sg[1:] != sg[:-1]) + 1, [len(v)]])
+        keep = [sg[a_] for a_, b_ in zip(starts[:-1], starts[1:]) if np.max(np.abs(v[a_:b_])) >= tol]
+        out[i] = sum(1 for x, y in zip(keep[:-1], keep[1:]) if x != y)
+    return out.reshape(a.shape[:-1])
+
+
+def profile_rising_lobes(slopes, tol: float) -> np.ndarray:
+    """Number of rising stretches per profile along the last axis: lobes as in ``profile_sign_changes`` (same
+    skipping of zeros, same tolerance), counting those with positive slope. Unlike the number of sign changes it
+    does not depend on whether a profile happens to begin inside a rising stretch."""
+    a = np.asarray(slopes, dtype=np.float64)
+    flat = a.reshape(-1, a.shape[-1])
+    out = np.zeros(len(flat), dtype=np.int64)
+    for i, v in enumerate(flat):
+        v = v[np.isfinite(v) & (v != 0)]
+        if not len(v):
+            continue
+        sg = np.sign(v)
+        starts = np.concatenate([[0], np.flatnonzero(sg[1:] != sg[:-1]) + 1, [len(v)]])
+        keep = [sg[a_] for a_, b_ in zip(starts[:-1], starts[1:]) if np.max(np.abs(v[a_:b_])) >= tol]
+        merged = [x for n_, x in enumerate(keep) if n_ == 0 or x != keep[n_ - 1]]
+        out[i] = sum(1 for x in merged if x > 0)
+    return out.reshape(a.shape[:-1])
+
+
 def decide_tail_criterion(log_rho, z_mm, r_mm, momenta_gev, z90_mm, *, baseline_hash: str, label: str,
-                          r_min_mm: float = TAIL_R_MIN_MM, r_max_mm: float = TAIL_R_MAX_MM,
-                          slope_limit: float = RADIAL_SLOPE_LIMIT, n_z_bands: int = 8, n_depth_bands: int = 4,
-                          note: str = "", allow_depth_alternative: bool = False) -> dict:
-    """Decide the tail criterion of a baseline ONCE, from the baseline alone (delta = 0), and return the record
-    that ``audit.certify_finalist`` needs.
+                          reference_kind: str = "track_a_finalist", r_min_mm: float = TAIL_R_MIN_MM,
+                          r_max_mm: float = TAIL_R_MAX_MM, slope_limit: float = RADIAL_SLOPE_LIMIT, note: str = "",
+                          rising_annotations: Optional[Mapping] = None) -> dict:
+    """The tail-criterion record of a baseline: its slope tables at the pre-registered momenta, where it rises in
+    depth beyond z_90, and the rules that follow. Made ONCE for the fixed reference baseline and bound to its hash.
 
     log_rho      (P, NZ, NR) ln of the 3-D DENSITY rho(z', r) of the baseline at the points (z_mm[i], r_mm[j]) for
                  each momentum - log P minus the log cell volume, or the density functional itself. NOT the ring
@@ -187,25 +241,28 @@ def decide_tail_criterion(log_rho, z_mm, r_mm, momenta_gev, z90_mm, *, baseline_
     momenta_gev  (P,) the pre-registered momenta, ``CHECK_MOMENTA_GEV`` = 0.05, 0.1, 1, 5, 20, 30, 50 GeV
     z90_mm       (P,) depth containing 90 % of the baseline's energy at each momentum (``containment``)
     baseline_hash, label   what the record is bound to (e.g. the SHA-256 of the baseline's checkpoint)
+    reference_kind   "track_a_finalist" (default: the finalist BEFORE any PySR refit - the reference of record),
+                 "c1_refit_only" (the baseline refitted alone with the candidate's schedule), "legacy_preview",
+                 "synthetic"; or ``MEASURED_KIND`` = "refitted_baseline" for the slope table of a jointly refitted
+                 baseline, which ``audit.tail_check`` uses on the MODEL side and which is refused as a reference:
+                 a joint refit must not be able to bend its own bound.
+    rising_annotations   {momentum index: dict} merged into ``depth.rising_regions`` - which component makes the
+                 baseline rise there (``refit.tail_criterion_for_baseline`` fills it)
 
-    Radial rule. d ln rho / d ln r is taken by finite differences between adjacent radii, at every depth given and
+    Radial rule (S4). d ln rho / d ln r by finite differences between adjacent radii, at every depth given and
     every momentum, for all intervals that overlap [r_min_mm, r_max_mm]. If its maximum is <= ``slope_limit`` (-2:
     rho integrable in r dr) the rule is "loglog_slope_le_limit"; otherwise - the baseline is itself flatter, as
-    with the legacy far halo exp(-r/R) / (r + 1 cm) - the rule is "monotone_and_no_flattening": d_r ln rho < 0 and
-    d_r delta <= 0 for r > 200 mm. Depth rule: d ln rho / d z' <= 0 beyond z_90, by finite differences between
-    adjacent depths beyond z_90(p), at every radius up to ``r_max_mm``.
+    with the legacy far halo - "monotone_and_no_flattening": the model may nowhere be flatter than THIS baseline.
+    Depth rule (user decision after the investigation of STATUS section 14), always "inherit_reference": beyond
+    z_90 the model may not rise where this baseline falls and may not rise faster where it rises,
+    d_z' ln rho_model <= max(0, d_z' ln rho_reference), point by point. Every cell in which the reference itself
+    rises is logged (``depth.rising_cells``: momentum index, depth interval index, radius index, slope) and
+    summarised per momentum (``depth.rising_regions``), so that a reviewer can check them against the physics.
+    Sign changes (Stage 2): ``radial.sign_changes`` / ``depth.sign_changes`` count them per profile with
+    ``profile_sign_changes`` (tolerances ``SIGN_TOL_*``) on this record's own grid.
 
-    Depth, when the baseline itself fails (NOT covered by the user's decision S4, which names an alternative for
-    the radial rule only): the record says so (``depth.baseline_satisfies`` False, where and by how much) and the
-    governing rule stays the accepted "dz_le_0_beyond_z90" - under which no correction can then be certified -
-    unless ``allow_depth_alternative=True`` is passed, which is to be done only after the user has decided it:
-    the rule then becomes "no_depth_flattening", d_z' delta <= 0 beyond z_90, the analogue of the radial
-    alternative. ``audit.tail_check`` always reports both.
-
-    The record stores the measured slopes (maxima per momentum, depth band and radial interval; per momentum,
-    depth band beyond z_90 and radius), whether the baseline itself satisfies each rule, the chosen rule, the
-    baseline hash and its own hash (``verify_tail_criterion``). The choice is a property of the baseline: it is
-    not, and cannot be, made per equation."""
+    The record holds the full slope tables, is self-hashed (``verify_tail_criterion``) and cannot be chosen or
+    edited per equation."""
     lr = np.asarray(log_rho, dtype=np.float64)
     z, r = np.asarray(z_mm, dtype=np.float64), np.asarray(r_mm, dtype=np.float64)
     mom, z90 = np.asarray(momenta_gev, dtype=np.float64), np.asarray(z90_mm, dtype=np.float64)
@@ -215,6 +272,8 @@ def decide_tail_criterion(log_rho, z_mm, r_mm, momenta_gev, z90_mm, *, baseline_
         raise ValueError("z_mm and r_mm must be ascending, r_mm non-negative")
     if not baseline_hash or not isinstance(baseline_hash, str):
         raise ValueError("baseline_hash is required: the criterion is bound to one baseline")
+    if reference_kind not in REFERENCE_KINDS + (MEASURED_KIND,):
+        raise ValueError(f"reference_kind must be one of {REFERENCE_KINDS + (MEASURED_KIND,)}")
     P, NZ, NR = lr.shape
     # ---- radial --------------------------------------------------------------------------------------------------
     iv = np.flatnonzero((r[1:] > r_min_mm) & (r[:-1] < r_max_mm * (1 + 1e-9)) & (r[:-1] > 0))
@@ -225,81 +284,100 @@ def decide_tail_criterion(log_rho, z_mm, r_mm, momenta_gev, z90_mm, *, baseline_
     with np.errstate(invalid="ignore"):
         sl = np.diff(lr[:, :, i0:i1 + 1], axis=2) / np.diff(np.log(rn))[None, None, :]          # (P, NZ, ni)
     fin = np.isfinite(sl)
-    bands = [b for b in np.array_split(np.arange(NZ), min(n_z_bands, NZ)) if len(b)]
-    zb = [float(z[b[0]]) for b in bands] + [float(z[-1])]
-    M = np.stack([np.where(fin[:, b, :], sl[:, b, :], -np.inf).max(1) for b in bands], 1)       # (P, nb, ni)
     slm = np.where(fin, sl, -np.inf)
     gmax = float(slm.max())
     w = np.unravel_index(int(np.argmax(slm)), slm.shape)
-    per_p = slm.reshape(P, -1).max(1)
-    frac = float(np.mean(sl[fin] > slope_limit)) if fin.any() else float("nan")
     satisfies = bool(gmax <= slope_limit + 1e-12)
-    monotone = bool(gmax < 0.0)
     # ---- depth beyond z_90 ---------------------------------------------------------------------------------------
     jr = np.flatnonzero(r <= r_max_mm * (1 + 1e-9))
     with np.errstate(invalid="ignore"):
         dz = np.diff(lr[:, :, jr], axis=1) / np.diff(z)[None, :, None]                           # (P, NZ - 1, nr)
-    D = np.full((P, n_depth_bands, len(jr)), -np.inf)
-    dbe = np.zeros((P, n_depth_bands + 1))
-    dmax, dwhere = -np.inf, None
+    k0 = []
     for j in range(P):
         ks = np.flatnonzero(z[:-1] > z90[j])
         if len(ks) < 1:
             raise ValueError(f"no depth interval beyond z_90 = {z90[j]:.0f} mm at p = {mom[j]:g} GeV")
-        groups = [g for g in np.array_split(ks, min(n_depth_bands, len(ks))) if len(g)]
-        edges = [float(z[g[0]]) for g in groups] + [float(z[ks[-1] + 1])]
-        for b in range(n_depth_bands):
-            g = groups[b] if b < len(groups) else groups[-1][-1:]
-            v = dz[j][g]
-            D[j, b] = np.where(np.isfinite(v), v, -np.inf).max(0)
-            dbe[j, b], dbe[j, b + 1] = (edges[b], edges[b + 1]) if b < len(groups) else (edges[-1], edges[-1])
-        if D[j].max() > dmax:
-            dmax = float(D[j].max())
-            bw, rw = np.unravel_index(int(np.argmax(D[j])), D[j].shape)
-            dwhere = {"p_GeV": float(mom[j]), "z_band_mm": [float(dbe[j, bw]), float(dbe[j, bw + 1])],
-                      "r_mm": float(r[jr][rw])}
+        k0.append(int(ks[0]))
+    beyond = np.zeros(dz.shape, bool)
+    for j in range(P):
+        beyond[j, k0[j]:, :] = True
+    dfin = np.isfinite(dz) & beyond
+    dzm = np.where(dfin, dz, -np.inf)
+    dmax = float(dzm.max())
+    wj, wk, wr = np.unravel_index(int(np.argmax(dzm)), dzm.shape)
+    rising = np.argwhere(dfin & (dz > 0))
+    cells = [[int(j), int(k), int(q), float(f"{dz[j, k, q]:.9g}")] for j, k, q in rising]
+    regions = []
+    for j in range(P):
+        sel = rising[rising[:, 0] == j]
+        reg = {"p_GeV": float(mom[j]), "z90_mm": float(z90[j]), "n_cells": int(len(sel)),
+               "share_of_cells_beyond_z90": float(len(sel) / max(int(dfin[j].sum()), 1))}
+        if len(sel):
+            v = dz[j][sel[:, 1], sel[:, 2]]
+            m = int(np.argmax(v))
+            col = lr[j, k0[j]:, jr[sel[m, 2]]]
+            reg.update({"z_range_mm": [float(z[sel[:, 1].min()]), float(z[sel[:, 1].max() + 1])],
+                        "r_range_mm": [float(r[jr][sel[:, 2].min()]), float(r[jr][sel[:, 2].max()])],
+                        "max_slope_per_100mm": float(v.max() * 100.0),
+                        "max_at": {"z_mm": [float(z[sel[m, 1]]), float(z[sel[m, 1] + 1])], "r_mm": float(r[jr][sel[m, 2]])},
+                        "total_rise_at_that_radius_nat": float(np.sum(np.clip(np.diff(col[np.isfinite(col)]), 0, None)))})
+        if rising_annotations and j in rising_annotations:
+            reg["attribution"] = json.loads(json.dumps(rising_annotations[j]))
+        regions.append(reg)
     rec = {
-        "schema": TAIL_SCHEMA, "label": str(label), "baseline_hash": str(baseline_hash), "note": str(note),
+        "schema": TAIL_SCHEMA, "label": str(label), "baseline_hash": str(baseline_hash),
+        "reference_kind": str(reference_kind), "note": str(note),
         "density": "slopes of the 3-D density rho(z', r) (probability per volume), not of the ring mass 2 pi r rho",
         "momenta_GeV": mom.tolist(), "x": O.x_of_p(mom).tolist(), "r_min_mm": float(r_min_mm),
-        "r_max_mm": float(r_max_mm), "slope_limit": float(slope_limit), "r_nodes_mm": rn.tolist(),
-        "z_range_mm": [float(z[0]), float(z[-1])], "n_depths": int(NZ),
+        "r_max_mm": float(r_max_mm), "slope_limit": float(slope_limit), "z_nodes_mm": z.tolist(),
+        "r_nodes_mm": rn.tolist(), "z_range_mm": [float(z[0]), float(z[-1])], "n_depths": int(NZ),
         "covers_r_max": bool(rn[-1] >= r_max_mm * (1 - 0.05)),
-        "radial": {"z_band_edges_mm": zb, "max_loglog_slope": np.where(np.isfinite(M), M, -1e300).tolist(),
-                   "baseline_max": gmax, "baseline_max_at": {"p_GeV": float(mom[w[0]]), "z_mm": float(z[w[1]]),
-                                                             "r_mm": float(np.sqrt(rn[w[2]] * rn[w[2] + 1]))},
-                   "baseline_max_per_momentum": per_p.tolist(), "fraction_above_limit": frac,
-                   "baseline_satisfies_limit": satisfies, "baseline_monotone": monotone,
-                   "n_nonfinite": int((~fin).sum())},
-        "depth": {"z90_mm": z90.tolist(), "z_band_edges_mm": dbe.tolist(), "r_nodes_mm": r[jr].tolist(),
-                  "max_dz_per_mm": np.where(np.isfinite(D), D, -1e300).tolist(), "baseline_max": dmax,
-                  "baseline_max_at": dwhere, "baseline_satisfies": bool(dmax <= 1e-12),
-                  "baseline_max_per_momentum": D.reshape(P, -1).max(1).tolist(),
-                  "alternative_allowed": bool(allow_depth_alternative)},
+        "sign_change_tolerance": {"depth_per_mm": SIGN_TOL_DEPTH_PER_MM, "radial_loglog": SIGN_TOL_RADIAL,
+                                  "counting": "per profile on this record's grid; lobes below the tolerance dropped"},
+        "radial": {"loglog_slope": _r9(sl), "baseline_max": gmax,
+                   "baseline_max_at": {"p_GeV": float(mom[w[0]]), "z_mm": float(z[w[1]]),
+                                       "r_mm": float(np.sqrt(rn[w[2]] * rn[w[2] + 1]))},
+                   "baseline_max_per_momentum": slm.reshape(P, -1).max(1).tolist(),
+                   "fraction_above_limit": float(np.mean(sl[fin] > slope_limit)) if fin.any() else float("nan"),
+                   "baseline_satisfies_limit": satisfies, "baseline_monotone": bool(gmax < 0.0),
+                   "n_nonfinite": int((~fin).sum()),
+                   "sign_changes": profile_sign_changes(sl, SIGN_TOL_RADIAL).tolist()},
+        "depth": {"z90_mm": z90.tolist(), "k0": k0, "r_nodes_mm": r[jr].tolist(), "dz_per_mm": _r9(dz),
+                  "baseline_max": dmax,
+                  "baseline_max_at": {"p_GeV": float(mom[wj]), "z_mm": [float(z[wk]), float(z[wk + 1])],
+                                      "r_mm": float(r[jr][wr])},
+                  "baseline_max_per_momentum": dzm.reshape(P, -1).max(1).tolist(),
+                  "baseline_falls_everywhere": bool(dmax <= 1e-12), "n_rising_cells": int(len(cells)),
+                  "rising_cells": cells, "rising_cells_columns": ["momentum index", "depth interval index k (between "
+                                                                  "z_nodes k and k + 1)", "radius index", "slope / mm"],
+                  "rising_regions": regions,
+                  "sign_changes": [profile_sign_changes(np.where(beyond[j], dz[j], np.nan).T, SIGN_TOL_DEPTH_PER_MM).tolist()
+                                   for j in range(P)]},
         "criterion": {"radial": "loglog_slope_le_limit" if satisfies else "monotone_and_no_flattening",
-                      "depth": "no_depth_flattening" if (allow_depth_alternative and dmax > 1e-12)
-                      else "dz_le_0_beyond_z90",
-                      "decided_from": "the baseline alone (delta = 0); not selectable per equation"},
+                      "depth": DEPTH_RULE,
+                      "decided_from": "the fixed reference baseline alone (delta = 0); not selectable per equation"},
     }
     rec["record_hash"] = _tail_record_hash(rec)
     return rec
 
 
-def verify_tail_criterion(record: Mapping, baseline_hash: Optional[str] = None) -> None:
-    """Raise ``ValueError`` unless the record is intact (its hash matches its content) and, if ``baseline_hash``
-    is given, bound to that baseline. ``certify_finalist`` calls it with the hash of the baseline in hand."""
+def verify_tail_criterion(record: Mapping, baseline_hash: Optional[str] = None, as_reference: bool = True) -> None:
+    """Raise ``ValueError`` unless the record is intact (its hash matches its content), its rules follow from its
+    own slopes and - if ``baseline_hash`` is given - it is bound to that baseline. With ``as_reference`` (default)
+    a table of a jointly refitted baseline (``reference_kind == "refitted_baseline"``) is refused: the bound of the
+    depth rule and of the radial alternative must come from the fixed non-SR baseline."""
     if record.get("schema") != TAIL_SCHEMA:
-        raise ValueError(f"not a tail-criterion record (schema {record.get('schema')!r})")
+        raise ValueError(f"not a tail-criterion record of schema {TAIL_SCHEMA} (found {record.get('schema')!r})")
     if record.get("record_hash") != _tail_record_hash(record):
         raise ValueError("the tail-criterion record was altered after it was made (hash mismatch)")
     if record["criterion"]["radial"] != ("loglog_slope_le_limit" if record["radial"]["baseline_satisfies_limit"]
                                          else "monotone_and_no_flattening"):
         raise ValueError("the radial rule of the record does not follow from its measured baseline slopes")
-    dep = record["depth"]
-    want = "no_depth_flattening" if (dep.get("alternative_allowed") and not dep["baseline_satisfies"]) \
-        else "dz_le_0_beyond_z90"
-    if record["criterion"]["depth"] != want:
-        raise ValueError("the depth rule of the record does not follow from its measured baseline slopes")
+    if record["criterion"]["depth"] != DEPTH_RULE:
+        raise ValueError(f"the depth rule of the record is not {DEPTH_RULE!r}")
+    if as_reference and record.get("reference_kind") == MEASURED_KIND:
+        raise ValueError("a slope table of the jointly refitted baseline cannot be the reference: the bound has to "
+                         "come from the fixed baseline (Track A finalist, or the refit-only control C1)")
     if baseline_hash is None:
         return
     if record.get("baseline_hash") != baseline_hash:
@@ -308,18 +386,28 @@ def verify_tail_criterion(record: Mapping, baseline_hash: Optional[str] = None) 
 
 
 def format_tail_criterion(record: Mapping) -> str:
-    """Three lines for a log: what was measured on the baseline and which rule follows."""
+    """A few lines for a log: what was measured on the baseline, where it rises in depth, which rules follow."""
     ra, de = record["radial"], record["depth"]
     at = ra["baseline_max_at"]
-    return "\n".join([
-        f"tail criterion of [{record['label']}] (baseline {record['baseline_hash'][:16]}, record "
-        f"{record['record_hash'][:12]}); slopes of the 3-D density rho",
+    lines = [
+        f"tail criterion of [{record['label']}] ({record['reference_kind']}, baseline {record['baseline_hash'][:16]}, "
+        f"record {record['record_hash'][:12]}); slopes of the 3-D density rho",
         f"  radial, r in [{record['r_nodes_mm'][0]:.0f}, {record['r_nodes_mm'][-1]:.0f}] mm: largest d ln rho / d ln r"
         f" = {ra['baseline_max']:.3f} at p = {at['p_GeV']:g} GeV, z' = {at['z_mm']:.0f} mm, r = {at['r_mm']:.0f} mm; "
         f"<= {record['slope_limit']:g} everywhere: {ra['baseline_satisfies_limit']}; monotone: "
         f"{ra['baseline_monotone']}  ->  rule \"{record['criterion']['radial']}\"",
-        f"  depth beyond z_90: largest d ln rho / d z' = {de['baseline_max']:.3g} / mm; <= 0 everywhere: "
-        f"{de['baseline_satisfies']}  ->  rule \"{record['criterion']['depth']}\""])
+        f"  depth beyond z_90: rule \"{record['criterion']['depth']}\" (model slope <= max(0, reference slope)); the "
+        f"reference itself rises in {de['n_rising_cells']} cells:"]
+    for reg in de["rising_regions"]:
+        if not reg["n_cells"]:
+            continue
+        att = reg.get("attribution", {})
+        lines.append(
+            f"    p = {reg['p_GeV']:g} GeV: z' {reg['z_range_mm'][0]:.0f}-{reg['z_range_mm'][1]:.0f} mm, r "
+            f"{reg['r_range_mm'][0]:.0f}-{reg['r_range_mm'][1]:.0f} mm, {reg['n_cells']} cells "
+            f"({100 * reg['share_of_cells_beyond_z90']:.1f} %), up to {reg['max_slope_per_100mm']:+.3f} nat / 100 mm"
+            + (f"; removed by leaving out: {att['removed_by']}" if att.get("removed_by") is not None else ""))
+    return "\n".join(lines)
 
 
 # ----------------------------------------------------------------------------------------------------------------------

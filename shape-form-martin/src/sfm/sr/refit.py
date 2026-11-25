@@ -77,7 +77,7 @@ import common as C  # noqa: E402
 __all__ = ["CorrectedModel", "expression_correction", "PolyControl", "c2_monomials", "c2_tree", "control_c1",
            "control_c2", "audit_control", "audit_verdict", "c2_report", "C2_GOVERNING_LABEL", "C2_DIAGNOSTIC_LABEL",
            "ClipMonitor", "clip_statistics", "constants_inside_sqa", "CLIP_DEFINITIONS", "cusp_hover_statistics",
-           "extended_ring_grid",
+           "CUSP_EPS_REL", "HOVER_STAGNATION", "extended_ring_grid",
            "continued_log_density", "tail_criterion_for_baseline", "STAGE_BEFORE", "STAGE_TRANSLATION",
            "STAGE_AFTER",
            "SubstitutedProvider", "fit_candidate", "check_gradients", "register_refit", "refit_summary",
@@ -554,58 +554,153 @@ def constants_inside_sqa(e) -> List[bool]:
     return out
 
 
-def cusp_hover_statistics(expr, const_history, zt, rh, x_values=(-1.0, -0.5, 0.0, 0.5, 1.0),
-                          tail_fraction: float = PERSIST_TAIL_FRACTION, near: float = 3.0) -> dict:
-    """SUPPLEMENTARY to the clip log, and independent of the clip norm: does a constant hover at a cusp of ``sqa``?
+CUSP_EPS_REL = 1e-3          # "near zero": 0 < |u| < 1e-3 * (90th percentile of |u| over the grid)
+HOVER_STAGNATION = 0.5       # a constant stagnates if |net change| <= 0.5 * path length over the final quarter
+HOVER_NEAR_SHARE = 0.5       # ... and "near" means: in at least half of the steps of that window
+HOVER_MIN_FLIPS = 2          # late-step sign-flipping: u changes sign at least twice in one cell
 
-    On a grid the likelihood has a kink wherever the argument of an ``sqa`` node vanishes in a cell. For every
-    ``sqa`` node the argument is evaluated in all grid cells (``zt``, ``rh`` broadcastable arrays; ``x_values``)
-    with the constants of each step of the final quarter of the run (``const_history`` (n, k), order of
-    ``translate.constants``). Reported per node: the number of cells in which the argument changed sign during
-    that window (the cusp was crossed), the smallest |argument| reached, and that distance in units of the
-    argument's own excursion in the same cell. ``suspect`` = a crossing, or a distance of at most ``near`` (3)
-    excursions: the constant's jitter is comparable to its distance from a cusp.
-    This is NOT the user's definition of a cusp-stalled run (persistent clipping, ``clip_statistics``): at the
-    harness's default clip norm a constant can hover at a cusp without a single clipped step, because the
-    gradient at a V-shaped kink is bounded. For a constant unrelated to any cusp the chance of ``suspect`` is
-    roughly (6 excursions) / (grid spacing of the argument)."""
+
+def _sqa_nodes_with_constants(expr) -> List[Tuple[int, List[int]]]:
+    """[(position of the sqa node among the sqa nodes, indices of the free constants inside its argument)], the
+    constants numbered as in ``translate.constants``."""
+    out: List[Tuple[int, List[int]]] = []
+    counter = [0]
+
+    def rec(n, sinks):
+        if n.kind == "const":
+            if not n.fixed:
+                for sk in sinks:
+                    sk.append(counter[0])
+                counter[0] += 1
+            return
+        mine = sinks
+        if n.kind == "op" and n.name == "sqa":
+            inside: List[int] = []
+            out.append((len(out), inside))
+            mine = sinks + [inside]
+        for a_ in n.args:
+            rec(a_, mine)
+    rec(expr, [])
+    return out
+
+
+def cusp_hover_statistics(expr, const_history, zt, rh, x_values=(-1.0, -0.5, 0.0, 0.5, 1.0), start_values=None,
+                          tail_fraction: float = PERSIST_TAIL_FRACTION, eps_rel: float = CUSP_EPS_REL) -> dict:
+    """Clip-independent part of the cusp-stall flag (user decision of 25 Nov 2026): for every ``sqa(u)`` node, where
+    and how the argument u comes near zero during the final quarter of the run, and whether that is a property
+    of the geometry or of the optimisation.
+
+    u is evaluated in all grid cells (``zt``, ``rh`` broadcastable arrays of cell centres, times ``x_values``)
+    with the constants of every step of the window (``const_history`` (n, k), order of ``translate.constants``).
+    Reported per node, over all those evaluations (cells x steps):
+      fraction_exact_zero     share with u == 0 exactly (there the gradient through sqa is defined as 0)
+      fraction_near_zero      share with 0 < |u| < eps,  eps = ``eps_rel`` (1e-3) x the 90th percentile of |u|
+      zero_locus              how u vanishes on the grid: "none", "exact zeros", or "contour" (u changes sign
+                              between cells)
+      classification
+        "no zero"                 nothing of the above
+        "structural-spatial"      the near-zeros are a fixed spatial locus given the constants - sqa(rho) towards
+                                  r = 0, or the zero contour of sqa(zeta - c) passing between cells - and no
+                                  constant is stalling there. Reported, never flagged.
+        "optimisation-stalling"   at least one of
+                                  (i)  late-step sign-flipping: in some cell u changes sign at least twice within
+                                       the window (the contour is driven back and forth across that cell);
+                                  (ii) stagnation near u = 0: a constant inside the argument has |net change| <=
+                                       0.5 x path length over the window while min over cells of |u| < eps in at
+                                       least half of the window's steps;
+                                  (iii) parked exactly on u = 0: a cell has u == 0 in at least half of the
+                                       window's steps although u there depends on a constant (which then gets
+                                       no gradient from that cell).
+                                  This raises the flag.
+    A node whose argument contains no trainable constant can only be "no zero" or "structural-spatial".
+    Chance level of (ii) for a constant that merely converged close to a cell: about 2 eps / (spacing of u between
+    neighbouring cells) - for a depth contour on the 128-row grid roughly one in six. The flag asks for a look at
+    the run; it does not prove a stall."""
     hist = np.asarray(const_history, dtype=np.float64)
     n = len(hist)
-    nodes = [nd for nd in T.walk(expr) if nd.kind == "op" and nd.name == "sqa"]
-    out = {"n_steps_window": 0, "nodes": [], "suspect": False,
-           "definition": "supplementary, clip-independent: a sign change of an sqa argument in a grid cell during "
-                         "the final quarter, or its smallest |value| within 3 of its own excursions there"}
+    nodes = _sqa_nodes_with_constants(expr)
+    out = {"n_steps_window": 0, "nodes": [], "stalling": False, "suspect": False, "eps_rel": float(eps_rel),
+           "definition": "per sqa(u): exact-zero and near-zero (0 < |u| < eps_rel * p90|u|) fractions over cells x "
+                         "steps of the final quarter; optimisation-stalling = late-step sign flips of u in a cell, "
+                         "or a stagnating constant with u near 0, or a constant parked exactly on u = 0"}
     if not nodes or n < 8:
         return out
     n_tail = max(int(math.ceil(tail_fraction * n)), 2)
     zt, rh = np.asarray(zt, dtype=np.float64), np.asarray(rh, dtype=np.float64)
     xv = np.asarray(x_values, dtype=np.float64)
     env = {"zt": zt[..., None], "rh": rh[..., None], "x": xv.reshape((1,) * zt.ndim + (-1,))}
+    full = np.broadcast_shapes(env["zt"].shape, env["rh"].shape, env["x"].shape)
     out["n_steps_window"] = n_tail
-    for which in range(len(nodes)):
-        vals = []
-        for cvec in hist[n - n_tail:]:
-            tree = T.with_constants(expr, cvec)
-            arg = [nd for nd in T.walk(tree) if nd.kind == "op" and nd.name == "sqa"][which].args[0]
-            used = {v: env[v] for v in T.variables(arg)}
-            a = np.asarray(T.evaluate(arg, used), dtype=np.float64)
-            vals.append(np.broadcast_to(a, np.broadcast_shapes(a.shape, *[u.shape for u in used.values()]) if used
-                                        else a.shape).reshape(-1))
-        v = np.stack(vals)
-        lo, hi = v.min(0), v.max(0)
-        crossed = int(np.sum((lo < 0) & (hi > 0)))
-        dist = np.abs(v).min(0)
-        exc = hi - lo
-        with np.errstate(all="ignore"):
-            rel = np.where(exc > 0, dist / exc, np.inf)
-        rec = {"node": T.to_string(nodes[which])[:120], "cells_crossed": crossed,
-               "min_abs_argument": float(dist.min()),
-               "min_distance_in_excursions": float(rel.min()) if np.isfinite(rel).any() else None,
-               "argument_depends_on_constants": bool(np.any(exc > 0))}
-        rec["suspect"] = bool(crossed > 0 or (rec["min_distance_in_excursions"] is not None
-                                              and rec["min_distance_in_excursions"] <= near))
-        out["nodes"].append(rec)
-    out["suspect"] = any(r["suspect"] for r in out["nodes"])
+    win = hist[n - n_tail:]
+    before = hist[n - n_tail - 1] if n > n_tail else (np.asarray(start_values, dtype=np.float64)
+                                                    if start_values is not None else win[0])
+
+    def arg_values(cvec, which):
+        tree = T.with_constants(expr, cvec)
+        arg = [nd for nd in T.walk(tree) if nd.kind == "op" and nd.name == "sqa"][which].args[0]
+        used = {v: env[v] for v in T.variables(arg)}
+        a_ = np.asarray(T.evaluate(arg, used), dtype=np.float64)
+        return np.broadcast_to(a_, full).reshape(-1), T.to_string(arg), sorted(used)
+
+    for which, inside in nodes:
+        vals = [arg_values(cvec, which) for cvec in win]
+        U = np.stack([v[0] for v in vals])                                      # (steps, cells)
+        text, uvars = vals[-1][1], vals[-1][2]
+        absu = np.abs(U)
+        scale = float(np.quantile(absu, 0.9))
+        eps = eps_rel * scale
+        exact = U == 0.0
+        near = (absu > 0) & (absu < eps)
+        last = U[-1]
+        srt = np.unique(last)
+        gap = float(np.median(np.diff(srt))) if len(srt) > 1 else 0.0
+        locus = "exact zeros" if exact[-1].any() else ("contour" if (last.min() < 0 < last.max()) else "none")
+        step_min = absu.min(1)
+        near_steps = float(np.mean(step_min < eps)) if eps > 0 else float(np.mean(step_min == 0))
+        sg = np.sign(U)
+        flips = np.zeros(U.shape[1], dtype=np.int64)
+        for c_ in np.flatnonzero((U.min(0) < 0) & (U.max(0) > 0)):
+            v = sg[:, c_][sg[:, c_] != 0]
+            flips[c_] = int(np.sum(v[1:] != v[:-1]))
+        n_flip = int(np.sum(flips >= HOVER_MIN_FLIPS))
+        consts = []
+        for i in inside:
+            traj = np.concatenate([[before[i]], win[:, i]])
+            path = float(np.abs(np.diff(traj)).sum())
+            ratio = float(abs(traj[-1] - traj[0]) / path) if path > 0 else 0.0
+            consts.append({"index": int(i), "value_end": float(win[-1, i]), "net_over_path": ratio,
+                           "path": path, "stagnating": bool(ratio <= HOVER_STAGNATION)})
+        parked = 0
+        if inside and exact.any():
+            cand = np.flatnonzero(exact.mean(0) >= HOVER_NEAR_SHARE)
+            if len(cand):
+                bumped = win[-1].copy()
+                bumped[inside] = bumped[inside] + 1e-6 * np.maximum(1.0, np.abs(bumped[inside]))
+                parked = int(np.sum(arg_values(bumped, which)[0][cand] != 0.0))
+        reasons = []
+        if inside and n_flip:
+            reasons.append(f"late-step sign-flipping: u changed sign at least {HOVER_MIN_FLIPS} times in {n_flip} cell(s)")
+        if inside and near_steps >= HOVER_NEAR_SHARE and any(c_["stagnating"] for c_ in consts):
+            reasons.append("stagnation near u = 0: constant(s) " +
+                           str([c_["index"] for c_ in consts if c_["stagnating"]]) +
+                           f" stagnate while min |u| < eps in {100 * near_steps:.0f} % of the window's steps")
+        if parked:
+            reasons.append(f"parked exactly on u = 0 in {parked} cell(s) whose u depends on a constant")
+        any_zero = bool(exact.any() or near.any() or locus != "none")
+        cls = "optimisation-stalling" if reasons else ("structural-spatial" if any_zero else "no zero")
+        if cls == "structural-spatial":
+            reasons.append("fixed spatial locus, no trainable constant inside the argument" if not inside else
+                           "zero locus between or at cells; no constant inside the argument stalls there")
+        out["nodes"].append({
+            "node": f"sqa({text})"[:140], "argument_variables": uvars, "constants_inside": [int(i) for i in inside],
+            "scale_p90_abs_u": scale, "eps": eps, "fraction_exact_zero": float(exact.mean()),
+            "fraction_near_zero": float(near.mean()), "min_abs_u": float(step_min.min()),
+            "min_abs_u_in_cell_gaps": (float(step_min.min() / gap) if gap > 0 else None),
+            "median_gap_between_cell_values": gap, "zero_locus": locus, "share_of_steps_near_zero": near_steps,
+            "cells_sign_flipping": n_flip, "cells_parked_exactly": parked, "constants": consts,
+            "classification": cls, "reasons": reasons, "stalling": cls == "optimisation-stalling"})
+    out["stalling"] = any(r["stalling"] for r in out["nodes"])
+    out["suspect"] = out["stalling"]
     return out
 
 
@@ -730,29 +825,108 @@ def continued_log_density(model_std: nn.Module, model_ext: nn.Module, lnp: torch
             "log_p_std": core.double().cpu().numpy(), "match_error": err}
 
 
+def _component_log_mass(model_std: nn.Module, model_ext: nn.Module, lnp: torch.Tensor):
+    """Per component: ln (weight x mass per cell), continued to the extended rings in the baseline's own
+    normalisation (the matching of ``continued_log_density``); plus the mixture and the mismatch."""
+    with torch.no_grad():
+        lw, cs = model_std.components(lnp)
+        _, ce = model_ext.components(lnp)
+        core = model_std.core_map(lnp)
+        nr = model_std.grid.N_R
+        cont = {}
+        for name in cs:
+            d = cs[name] - ce[name][:, :, :nr]
+            ok = torch.isfinite(d) & (cs[name] > -600.0)
+            cnt = ok.sum(2, keepdim=True)
+            tot = torch.where(ok, d, torch.zeros_like(d)).sum(2, keepdim=True)
+            off = torch.where(cnt > 0, tot / torch.where(cnt > 0, cnt, torch.ones_like(cnt)), torch.zeros_like(tot))
+            cont[name] = lw[name][:, None, None] + ce[name] + off
+        rec = torch.logsumexp(torch.stack(list(cont.values()), 0), 0)
+        sel = core > -40.0
+        err = float((rec[:, :, :nr] - core)[sel].abs().max()) if bool(sel.any()) else 0.0
+    return {k: v.double().cpu().numpy() for k, v in cont.items()}, rec.double().cpu().numpy(), \
+        core.double().cpu().numpy(), err
+
+
 def tail_criterion_for_baseline(model_std: nn.Module, model_ext: nn.Module, *, baseline_hash: str, label: str,
+                                reference_kind: str = "track_a_finalist",
                                 momenta_gev: Sequence[float] = (0.05, 0.1, 1.0, 5.0, 20.0, 30.0, 50.0),
                                 max_match_error: float = 1e-6, **kw) -> dict:
-    """The tail-criterion record (``checks.decide_tail_criterion``) of a closed-form baseline, decided from the
-    baseline alone: its density is continued to r = 1500 mm (``continued_log_density``) and evaluated at the
-    pre-registered momenta and at every depth row of the grid; z_90 comes from the baseline's own map.
-    On the H200 this is run ONCE for the refitted Track A finalist, with the SHA-256 of its checkpoint as
-    ``baseline_hash``; every finalist is then certified against that record."""
+    """The tail-criterion record (``checks.decide_tail_criterion``) of a closed-form baseline, from the baseline
+    alone: its density is continued to r = 1500 mm (``continued_log_density``) and evaluated at the pre-registered
+    momenta and at every depth row of the grid; z_90 comes from the baseline's own map (before the acceptance
+    template, truncated grid).
+
+    ``reference_kind="track_a_finalist"`` (default): run ONCE for the Track A finalist as it is before any PySR
+    refit, with the SHA-256 of its checkpoint as ``baseline_hash`` - the reference of record; every finalist is
+    certified against that record. ``"c1_refit_only"``: the same for the refit-only control. ``"refitted_baseline"``:
+    the slope table of a jointly refitted baseline, for the model side of ``audit.tail_check`` only.
+
+    Where the baseline itself rises in depth beyond z_90, the record says which component does it
+    (``depth.rising_regions[*].attribution``): the share of each component in the density of the rising cells,
+    each component's own slope at the steepest cell, the largest slope that remains in those cells when one
+    component is left out, and the components whose removal removes the rise there ("removed_by") - so that a
+    reviewer can tell a physical feature (the
+    Bragg rise of a track component, an end blob) from drift of the parameter functions outside their range."""
     from . import checks as K
 
     mom = torch.tensor(list(momenta_gev), dtype=model_ext.grid.zc.dtype)
-    cd = continued_log_density(model_std, model_ext, torch.log(mom).to(model_ext.grid.zc.device))
-    if cd["match_error"] > max_match_error:
-        raise ValueError(f"the extended model does not continue the baseline (mismatch {cd['match_error']:.3g} on "
-                         "the shared rings): build it with the same parameters on extended_ring_grid(model.grid)")
-    P = np.exp(cd["log_p_std"])
-    z90 = [float(np.interp(0.9, np.concatenate([[0.0], np.cumsum(P[j].sum(1)) / P[j].sum()]), cd["z_edges_mm"]))
+    lnp = torch.log(mom).to(model_ext.grid.zc.device)
+    comp, mix, core, err = _component_log_mass(model_std, model_ext, lnp)
+    if err > max_match_error:
+        raise ValueError(f"the extended model does not continue the baseline (mismatch {err:.3g} on the shared "
+                         "rings): build it with the same parameters on extended_ring_grid(model.grid)")
+    z = model_ext.grid.zc.double().cpu().numpy()
+    r = model_ext.grid.rc.double().cpu().numpy()
+    ze = model_std.grid.z_edges.double().cpu().numpy()
+    logvol = model_ext.grid.log_vol.double().cpu().numpy()
+    nr_std = model_std.grid.N_R
+    P = np.exp(core)
+    z90 = [float(np.interp(0.9, np.concatenate([[0.0], np.cumsum(P[j].sum(1)) / P[j].sum()]), ze))
            for j in range(len(mom))]
+    lrho = mix - logvol[None]
+    dzg = np.diff(z)
+    ann: Dict[int, dict] = {}
+    names = list(comp)
+    scal = {}
+    if hasattr(model_std, "range_mm") and hasattr(model_std, "theta"):
+        try:
+            with torch.no_grad():
+                scal["track_range_mm"] = model_std.range_mm(model_std.theta(lnp)).reshape(-1).double().cpu().numpy()
+        except Exception:                                   # noqa: BLE001  the annotation is optional
+            scal = {}
+    for j in range(len(mom)):
+        k = np.flatnonzero(z[:-1] > z90[j])
+        d = np.diff(lrho[j], axis=0)[k] / dzg[k, None]
+        pos = np.isfinite(d) & (d > 0)
+        if not pos.any():
+            continue
+        mass = np.exp(mix[j])
+        cell = 0.5 * (mass[k] + mass[k + 1])
+        wk, wr = np.unravel_index(int(np.argmax(np.where(pos, d, -np.inf))), d.shape)
+        loo, own, share = {}, {}, {}
+        for nme in names:
+            others = [comp[q][j] for q in names if q != nme]
+            if others:                                      # the same cells, the mixture without this component
+                d2 = np.diff(np.logaddexp.reduce(np.stack(others), axis=0) - logvol, axis=0)[k] / dzg[k, None]
+                loo[nme] = float(np.max(np.where(pos & np.isfinite(d2), d2, -np.inf)) * 100.0)
+            cdz = np.diff(comp[nme][j] - logvol, axis=0)[k] / dzg[k, None]
+            own[nme] = float(cdz[wk, wr] * 100.0) if np.isfinite(cdz[wk, wr]) else None
+            cm = 0.5 * (np.exp(comp[nme][j][k]) + np.exp(comp[nme][j][k + 1]))
+            share[nme] = float((cm * pos).sum() / (cell * pos).sum())
+        ann[j] = {"energy_in_rising_cells_inside_grid": float((cell * pos)[:, :nr_std].sum()),
+                  "energy_in_rising_cells_in_continuation": float((cell * pos)[:, nr_std:].sum()),
+                  "energy_beyond_z90_inside_grid": float(cell[:, :nr_std].sum()),
+                  "component_share_of_rising_density": share,
+                  "component_own_slope_at_steepest_cell_per_100mm": own,
+                  "largest_slope_in_the_rising_cells_without_component_per_100mm": loo,
+                  "removed_by": [nme for nme in names if nme in loo and loo[nme] <= 0.0],
+                  **{key: float(v[j]) for key, v in scal.items()}}
     note = kw.pop("note", "")
-    return K.decide_tail_criterion(cd["log_rho"], cd["z_mm"], cd["r_mm"], list(momenta_gev), z90,
-                                   baseline_hash=baseline_hash, label=label,
+    return K.decide_tail_criterion(lrho, z, r, list(momenta_gev), z90, baseline_hash=baseline_hash, label=label,
+                                   reference_kind=reference_kind, rising_annotations=ann,
                                    note=(note + " | " if note else "") + "density before the acceptance template; "
-                                   f"continuation mismatch on the shared rings {cd['match_error']:.2e}", **kw)
+                                   f"continuation mismatch on the shared rings {err:.2e}", **kw)
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -762,7 +936,8 @@ def fit_candidate(model: nn.Module, train, val, config, *, label: str, synthetic
                   audit_box: Optional[Mapping] = None, audit_kw: Optional[dict] = None, log=print,
                   role: str = "candidate", finalist: bool = False, tail_criterion: Optional[Mapping] = None,
                   baseline_hash: Optional[str] = None, measured_tail: Optional[Mapping] = None,
-                  pre_refit_audit: Optional[Mapping] = None, baseline_tail: Optional[Mapping] = None) -> dict:
+                  pre_refit_audit: Optional[Mapping] = None, baseline_tail: Optional[Mapping] = None,
+                  tail_table_fn=None, stage2: bool = False) -> dict:
     """Likelihood refit through the existing harness ``sfm.train.fit`` (all trainable constants, training hits, the
     metric's fold, no clamps), followed by the mandatory audit of the REFITTED equation.
 
@@ -775,9 +950,14 @@ def fit_candidate(model: nn.Module, train, val, config, *, label: str, synthetic
                "diagnostic": a non-governing row, e.g. the plain polynomial ``control_c2(base, k, bounded=False)``;
                its audit verdict is returned to be printed beside it; it never enters Delta(SR) - Delta(C2).
     finalist   True: after the refit ``audit.certify_finalist`` is run on the refitted constants - domain safe,
-               magnitude bound PROVEN, numerics proven, and the tail check under ``tail_criterion`` (the record of
-               ``checks.decide_tail_criterion`` for the baseline of record, bound to ``baseline_hash``;
-               ``measured_tail``: the slopes of the jointly refitted baseline in the same format, optional).
+               magnitude bound PROVEN, numerics proven, and the tail check against ``tail_criterion``: the record of
+               ``checks.decide_tail_criterion`` for the FIXED reference baseline (the Track A finalist before any
+               PySR refit; or C1), bound to ``baseline_hash``. The bound never comes from the refitted model.
+               If the baseline was refitted jointly (``freeze_base=False``) the model side needs the slope table
+               of the refitted baseline: pass ``measured_tail`` (``reference_kind="refitted_baseline"``) or
+               ``tail_table_fn(refitted_base_model) -> that record`` (e.g. a closure around
+               ``tail_criterion_for_baseline``); without it a jointly refitted finalist is not certified.
+               ``stage2=True`` also enforces sign_changes(model) <= sign_changes(reference) per profile.
                The result is ``finalist_certified``; a finalist without it must not enter LOCK.json.
     pre_refit_audit   the JSON of the audit made before the refit (laptop): its stripped gauge terms are carried
                into the record, and compared with what was stripped before translation.
@@ -786,10 +966,11 @@ def fit_candidate(model: nn.Module, train, val, config, *, label: str, synthetic
     ("before refit" from ``pre_refit_audit``, "before translation" from ``expression_correction``, "after refit"
     from the post-refit audit); none of their constants is trained or counted (``k_equation``); ``k_as_written``
     is the count including them.
-    Clip log (S5): ``clip_log`` = ``clip_statistics`` of the run (per constant and per step; definitions inside),
-    ``cusp_stalled`` = its flag (persistent clipping driven by a constant inside an sqa argument, without net
-    movement). ``cusp_hover`` / ``cusp_hover_suspect``: the supplementary, clip-independent indicator of
-    ``cusp_hover_statistics`` - reported, not part of the flag.
+    Cusp-stall flag (S5 and the user's decision of 25 Nov 2026): ``cusp_stalled`` = ``cusp_stalled_by_clipping``
+    (``clip_log`` = ``clip_statistics`` of the run: persistent clipping driven by a constant inside an sqa
+    argument, without net movement) OR ``cusp_stalled_by_hover`` (``cusp_hover`` = ``cusp_hover_statistics``: an
+    sqa argument classified "optimisation-stalling"; independent of the clip norm). Structural near-zeros
+    (sqa(rho) towards r = 0, a zero contour between cells) are reported in ``cusp_hover`` and never flagged.
 
     Returns {"label", "role", "governing", "control_label", "fit", "k", "k_equation", "k_as_written", "expr_start",
              "expr_refit", "expr_refit_dict", "dropped_gauge_terms", "stripped_gauge_terms", "audit_refit",
@@ -836,15 +1017,17 @@ def fit_candidate(model: nn.Module, train, val, config, *, label: str, synthetic
     if start is not None and isinstance(corr, nn.Module) and hasattr(model, "zt") and len(mon.c_val) and \
             len(mon.in_cusp) == T.n_constants(start):
         hover = cusp_hover_statistics(start, np.array(mon.c_val), model.zt[0].detach().cpu().numpy(),
-                                      model.rh[0].detach().cpu().numpy())
-    if clip_log["flags"]["cusp_stalled"]:
+                                      model.rh[0].detach().cpu().numpy(), start_values=mon.start)
+    by_clip = bool(clip_log["flags"]["cusp_stalled"])
+    by_hover = bool(hover is not None and hover["stalling"])
+    if by_clip:
         warn.append("cusp-stalled: a constant inside an sqa argument drives persistent gradient clipping without "
                     "net movement (see clip_log)")
     elif clip_log["flags"]["persistent_clipping"]:
         warn.append("persistent gradient clipping (see clip_log)")
-    if hover is not None and hover["suspect"] and not clip_log["flags"]["cusp_stalled"]:
-        warn.append("supplementary indicator: a constant hovers at a cusp of sqa without persistent clipping "
-                    "(see cusp_hover)")
+    if by_hover:
+        warn.append("cusp-stalled: " + "; ".join(f"{r['node']}: {'; '.join(r['reasons'])}" for r in hover["nodes"]
+                                                  if r["stalling"]) + " (see cusp_hover)")
     out = {"label": label, "role": role, "governing": role == "control", "synthetic": bool(synthetic),
            "control_label": getattr(corr, "label", None) if role != "candidate" else None, "fit": res.summary(),
            "k": int(model.n_params()) if hasattr(model, "n_params") else None,
@@ -854,9 +1037,9 @@ def fit_candidate(model: nn.Module, train, val, config, *, label: str, synthetic
            "expr_refit_dict": None, "dropped_gauge_terms": list(getattr(corr, "dropped_gauge_terms", [])),
            "stripped_gauge_terms": carried, "audit_refit": None, "audit_passed": None, "audit_certified": None,
            "audit_verdict": None, "finalist": None, "finalist_certified": None, "clip_log": clip_log,
-           "cusp_stalled": bool(clip_log["flags"]["cusp_stalled"]), "cusp_hover": hover,
-           "cusp_hover_suspect": None if hover is None else bool(hover["suspect"]), "warnings": warn,
-           "registered": False}
+           "cusp_stalled": bool(by_clip or by_hover), "cusp_stalled_by_clipping": by_clip,
+           "cusp_stalled_by_hover": by_hover, "cusp_hover": hover,
+           "cusp_hover_suspect": None if hover is None else by_hover, "warnings": warn, "registered": False}
     refit = model.current_expr() if hasattr(model, "current_expr") else None
     if refit is not None:
         rep = A.audit(refit, audit_box, stage=STAGE_AFTER, carried_stripped=carried, **(audit_kw or {}))
@@ -869,8 +1052,12 @@ def fit_candidate(model: nn.Module, train, val, config, *, label: str, synthetic
         if finalist:
             kw = {k: v for k, v in (audit_kw or {}).items() if k in ("limit", "gauge", "gauge_vars", "domain_kw",
                                                                      "magnitude_kw")}
+            frozen = getattr(model, "freeze_base", None)
+            if measured_tail is None and tail_table_fn is not None and frozen is False:
+                measured_tail = tail_table_fn(model.base)
             cert = A.certify_finalist(refit, audit_box, tail_criterion=tail_criterion, baseline_hash=baseline_hash,
-                                      measured_tail=measured_tail, carried_stripped=carried, **kw)
+                                      measured_tail=measured_tail, baseline_frozen=frozen, stage2=stage2,
+                                      carried_stripped=carried, **kw)
             out.update(finalist=cert, finalist_certified=bool(cert["certified"]))
             if log is not None:
                 log(f"[{label}] finalist certificate on the refitted constants: "

@@ -149,6 +149,7 @@ def baseline(kind):
 
 
 def record(kind, **kw):
+    kw.setdefault("reference_kind", "synthetic")
     return K.decide_tail_criterion(baseline(kind), Z, RN, MOM, Z90, baseline_hash=f"hash-of-{kind}",
                                    label=f"synthetic {kind} baseline", **kw)
 
@@ -162,20 +163,26 @@ def test_tail_criterion_is_decided_from_the_baseline_alone():
     assert -1.6 < halo["radial"]["baseline_max"] < -1.0                    # the halo exp(-r/R)/(r + 1 cm) is flatter
     assert 0.3 < halo["radial"]["fraction_above_limit"] <= 1.0
     for rec in (steep, halo):
-        assert rec["criterion"]["depth"] == "dz_le_0_beyond_z90" and rec["depth"]["baseline_satisfies"]
-        assert rec["depth"]["baseline_max"] == pytest.approx(-1 / 250.0)
+        assert rec["schema"] == "sfm.sr.tail_criterion/2" and rec["reference_kind"] == "synthetic"
+        assert rec["criterion"]["depth"] == "inherit_reference" and rec["depth"]["baseline_falls_everywhere"]
+        assert rec["depth"]["baseline_max"] == pytest.approx(-1 / 250.0) and rec["depth"]["n_rising_cells"] == 0
+        assert rec["depth"]["rising_cells"] == [] and all(g["n_cells"] == 0 for g in rec["depth"]["rising_regions"])
         assert rec["momenta_GeV"] == list(K.CHECK_MOMENTA_GEV) and rec["slope_limit"] == -2.0
         assert rec["r_nodes_mm"][0] < 200.0 < rec["r_nodes_mm"][1] and rec["r_nodes_mm"][-1] == pytest.approx(1500.0)
         assert rec["covers_r_max"] and rec["n_depths"] == 128 and "not of the ring mass" in rec["density"]
-        assert np.array(rec["radial"]["max_loglog_slope"]).shape == (7, 8, len(rec["r_nodes_mm"]) - 1)
-        assert np.array(rec["depth"]["max_dz_per_mm"]).shape == (7, 4, 41)
+        assert np.array(rec["radial"]["loglog_slope"]).shape == (7, 128, len(rec["r_nodes_mm"]) - 1)   # full tables
+        assert np.array(rec["depth"]["dz_per_mm"]).shape == (7, 127, 41) and len(rec["z_nodes_mm"]) == 128
+        assert [Z[k] > z90 >= Z[k - 1] for k, z90 in zip(rec["depth"]["k0"], Z90)] == [True] * 7
+        assert np.array(rec["depth"]["sign_changes"]).shape == (7, 41) and np.array(rec["radial"]["sign_changes"]).shape == (7, 128)
+        assert np.sum(rec["depth"]["sign_changes"]) == 0 and np.sum(rec["radial"]["sign_changes"]) == 0
         assert "not selectable per equation" in rec["criterion"]["decided_from"]
-        json_bytes = len(__import__("json").dumps(rec))
-        assert json_bytes < 200_000
+        assert len(__import__("json").dumps(rec)) < 2_000_000
     txt = K.format_tail_criterion(halo)
     assert "3-D density" in txt and "monotone_and_no_flattening" in txt and "hash-of-halo"[:16] in txt
     short = K.decide_tail_criterion(baseline("steep")[:, :, :20], Z, RN[:20], MOM, Z90, baseline_hash="h", label="map")
-    assert not short["covers_r_max"]                                        # a grid map that ends before 1500 mm
+    assert not short["covers_r_max"] and short["reference_kind"] == "track_a_finalist"     # the default reference
+    with pytest.raises(ValueError, match="reference_kind"):
+        record("steep", reference_kind="whatever")
 
 
 def test_density_not_ring_mass():
@@ -205,6 +212,10 @@ def test_tail_record_is_bound_to_its_baseline_and_cannot_be_edited():
     forged["record_hash"] = K._tail_record_hash(forged)                     # even with a fresh hash
     with pytest.raises(ValueError, match="does not follow"):
         K.verify_tail_criterion(forged)
+    bent = copy.deepcopy(halo)                                               # raising one stored slope: the bound moves
+    bent["depth"]["dz_per_mm"][3][100][5] = 0.01
+    with pytest.raises(ValueError, match="altered"):
+        K.verify_tail_criterion(bent)
     moved = copy.deepcopy(halo)
     moved["baseline_hash"] = "hash-of-steep"
     with pytest.raises(ValueError, match="altered"):
@@ -215,23 +226,66 @@ def test_tail_record_is_bound_to_its_baseline_and_cannot_be_edited():
         K.decide_tail_criterion(baseline("steep"), Z, RN, MOM, np.full(7, 5000.0), baseline_hash="h", label="x")
 
 
-def test_depth_rule_when_the_baseline_itself_fails():
-    """Not covered by the user's decision S4: the accepted rule stays in force and the record says that the
-    baseline fails it; the analogue of the radial alternative exists but is off unless explicitly allowed."""
-    rec = record("rising")
-    assert not rec["depth"]["baseline_satisfies"]
-    assert rec["depth"]["baseline_max"] == pytest.approx(1.5 / 240.0 - 1 / 250.0, rel=0.02)   # +0.0022 / mm
-    assert rec["depth"]["baseline_max_at"]["z_band_mm"][0] > 1000.0 and rec["criterion"]["depth"] == "dz_le_0_beyond_z90"
+def test_a_refitted_baseline_can_never_be_the_reference():
+    """The user's anchoring rule: the bound comes from the fixed non-SR baseline, so a joint refit cannot bend it."""
+    refit_table = record("rising", reference_kind=K.MEASURED_KIND)
+    assert refit_table["reference_kind"] == "refitted_baseline"
+    K.verify_tail_criterion(refit_table, as_reference=False)                # fine on the model side
+    with pytest.raises(ValueError, match="cannot be the reference"):
+        K.verify_tail_criterion(refit_table)
+    with pytest.raises(ValueError, match="cannot be the reference"):
+        K.verify_tail_criterion(refit_table, "hash-of-rising")
+    for kind in K.REFERENCE_KINDS:
+        K.verify_tail_criterion(record("halo", reference_kind=kind))
+    assert K.REFERENCE_KINDS[:2] == ("track_a_finalist", "c1_refit_only")
+
+
+def test_where_the_reference_rises_is_logged():
+    """Every cell in which the reference itself rises beyond z_90 is in the record, with its size, and summarised
+    per momentum; annotations (which component) are stored with the region."""
+    rec = record("rising", rising_annotations={2: {"removed_by": ["track"], "comment": "Bragg"}})
+    de = rec["depth"]
+    assert not de["baseline_falls_everywhere"] and de["n_rising_cells"] == len(de["rising_cells"]) > 0
+    assert de["baseline_max"] == pytest.approx(1.5 / 240.0 - 1 / 250.0, rel=0.02)   # +0.0022 / mm
+    dz = np.array(de["dz_per_mm"], dtype=float)
+    for j, k, q, v in de["rising_cells"][:50] + de["rising_cells"][-50:]:
+        assert v > 0 and v == pytest.approx(dz[j, k, q], rel=1e-8) and k >= de["k0"][j]
+    beyond = np.zeros(dz.shape, bool)
+    for j in range(7):
+        beyond[j, de["k0"][j]:] = True
+    assert de["n_rising_cells"] == int(np.sum(beyond & (dz > 0)))           # complete
+    for reg in de["rising_regions"]:
+        assert reg["n_cells"] > 0 and 1100.0 < reg["z_range_mm"][0] < 1200.0 < reg["z_range_mm"][1] < 1300.0
+        assert reg["r_range_mm"] == [pytest.approx(RN[0]), pytest.approx(RN[-1])] and 0.2 < reg["max_slope_per_100mm"] < 0.23
+        assert 1100.0 < reg["max_at"]["z_mm"][0] < 1300.0 and reg["total_rise_at_that_radius_nat"] > 0.1
+    assert de["rising_regions"][2]["attribution"] == {"removed_by": ["track"], "comment": "Bragg"}
+    assert "attribution" not in de["rising_regions"][0]
+    assert np.all(np.array(de["sign_changes"]) == 2)                         # one bump per depth profile: - + -
     assert rec["radial"]["baseline_monotone"] and not record("bump")["radial"]["baseline_monotone"]
-    assert len(rec["depth"]["baseline_max_per_momentum"]) == 7
-    alt = record("rising", allow_depth_alternative=True)
-    assert alt["criterion"]["depth"] == "no_depth_flattening" and alt["depth"]["alternative_allowed"]
-    ok = record("halo", allow_depth_alternative=True)                        # allowed, but the baseline passes
-    assert ok["criterion"]["depth"] == "dz_le_0_beyond_z90"
-    K.verify_tail_criterion(alt)
-    import copy
-    forged = copy.deepcopy(rec)
-    forged["criterion"]["depth"] = "no_depth_flattening"
-    forged["record_hash"] = K._tail_record_hash(forged)
-    with pytest.raises(ValueError, match="depth rule"):
-        K.verify_tail_criterion(forged)
+    assert np.all(np.array(record("bump")["radial"]["sign_changes"]) == 2)
+    txt = K.format_tail_criterion(rec)
+    assert "the reference itself rises in" in txt and "removed by leaving out: ['track']" in txt
+    K.verify_tail_criterion(rec)
+
+
+def test_profile_sign_changes_are_reproducible():
+    """Counting rule of the Stage-2 condition: fixed grid, lobes below the tolerance dropped, zeros skipped."""
+    x = np.linspace(0, 4 * np.pi, 400)
+    assert K.profile_sign_changes(np.sin(x)[1:-1], 1e-3) == 3
+    assert K.profile_sign_changes(-np.ones(50), 1e-3) == 0
+    ripple = -1.0 + 1e-4 * np.sin(40 * x)                                   # never changes sign
+    assert K.profile_sign_changes(ripple, 1e-3) == 0
+    tiny = 1e-4 * np.sin(x)                                                 # all lobes below the tolerance
+    assert K.profile_sign_changes(tiny, 1e-3) == 0 and K.profile_sign_changes(tiny, 1e-5) == 3
+    v = np.array([-1.0, 0.0, np.nan, 2e-4, -1.0, 1.0, 0.0, 1.0, -1.0])      # the 2e-4 lobe is dropped at tol 1e-3
+    assert K.profile_sign_changes(v, 1e-3) == 2 and K.profile_sign_changes(v, 1e-5) == 4
+    arr = np.stack([np.sin(x), -np.ones_like(x), np.cos(x)])
+    assert K.profile_sign_changes(arr, 1e-3).tolist() == [3, 0, 4]
+    assert K.SIGN_TOL_DEPTH_PER_MM == 1e-5 and K.SIGN_TOL_RADIAL == 1e-3
+    # rising stretches: the same lobes, counting the positive ones - no edge effect at the start of a profile
+    assert K.profile_rising_lobes(np.sin(x)[1:-1], 1e-3) == 2 and K.profile_rising_lobes(-np.ones(50), 1e-3) == 0
+    assert K.profile_rising_lobes(np.array([1.0, 1.0, -1.0, -1.0]), 1e-3) == 1       # + -   : one sign change
+    assert K.profile_rising_lobes(np.array([-1.0, 1.0, -1.0, -1.0]), 1e-3) == 1      # - + - : two sign changes
+    assert K.profile_sign_changes(np.array([1.0, 1.0, -1.0, -1.0]), 1e-3) == 1
+    assert K.profile_sign_changes(np.array([-1.0, 1.0, -1.0, -1.0]), 1e-3) == 2
+    assert K.profile_rising_lobes(tiny, 1e-3) == 0 and K.profile_rising_lobes(arr, 1e-3).tolist() == [2, 0, 3]

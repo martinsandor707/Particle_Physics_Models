@@ -1965,3 +1965,20 @@ Both workers can be continued from their status files.
 - From §17.13: which fixed baseline anchors the depth rule (the Track A finalist before any PySR refit, or the C1
   refit-only control) — the worker's recommendation is pending; and that `sign_changes(model) ≤
   sign_changes(baseline)` is evaluated per profile (the orchestrator's reading).
+
+**Addendum to the checkpoint (22:25 UTC).** The PySR mathematics worker finished the decisions T1 and T2 of §17.13
+and its work is committed with this note (all PySR tests pass); only the Track A worker's fixes may still be
+uncommitted. Detail: `src/sfm/sr/STATUS.md` section 15. Three further points for the user came out of it:
+- *Tolerance.* The two comparisons with the fixed reference allow 10⁻⁵ per mm in depth (0.001 nat per 100 mm) and
+  10⁻³ in the log-log slope, the tolerances of the sign-change count. Without them a correction with an exponentially
+  small rising tail (tanh, erf) fails for a slope of 10⁻⁸ per mm inside a cell where the reference rises.
+- *Per-profile sign changes.* On the legacy preview a correction that only falls has fewer sign changes than the
+  reference in total (80 against 102) but more in 6 of 392 depth profiles: where a profile begins inside a rising
+  stretch of the reference, a falling correction turns "+ −" into "− + −". As specified this fails Stage 2. Counting
+  rising stretches per profile has no such edge effect (54 against 74, none exceeding) and still catches an
+  oscillation; it is reported, not enforced.
+- *Cusp flag.* For a depth contour on the 128-row grid, a constant unrelated to any cusp is flagged in roughly 15 %
+  of cases: the flag asks for a look, it does not prove a stall.
+- The worker recommends the **Track A finalist before any PySR refit** as the fixed reference of the depth rule (one
+  object, one hash, existing before any equation is seen; C1 is itself a refit and is instead tested against the same
+  record with a zero correction). The radial alternative is anchored the same way.

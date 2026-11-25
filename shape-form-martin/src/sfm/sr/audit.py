@@ -73,11 +73,14 @@ Screening and finalists (user's confirmation 2). ``audit().passed`` is the scree
     bound passes. A finalist needs ``certified`` - (a) safe, (b) and (c) PROVEN - together with the tail check, on
     the constants after the joint refit: ``certify_finalist``.
 
-Tail check (PLAN 17.11, S4; ``tail_check``). Slopes are those of the 3-D density rho, not of the ring mass
-    2 pi r rho. The radial rule is decided once per baseline from the baseline alone (delta = 0) by
-    ``checks.decide_tail_criterion``: "d ln rho / d ln r <= -2 on r in [200, 1500] mm" if the baseline satisfies it,
-    otherwise "d_r ln rho < 0 and d_r delta <= 0 for r > 200 mm". Depth: d ln rho / d z' <= 0 beyond z_90. The
-    record carries the measured baseline slopes and is bound to the baseline's hash.
+Tail check (PLAN 17.11, S4, and the user's decision on the depth rule; ``tail_check``). Slopes are those of the 3-D
+    density rho, not of the ring mass 2 pi r rho. Every bound comes from the record of the FIXED reference baseline
+    (``checks.decide_tail_criterion``; the Track A finalist before any PySR refit, or the refit-only control C1),
+    never from a jointly refitted baseline: a joint refit cannot bend its own bound. Radial: "d ln rho / d ln r <=
+    -2 on r in [200, 1500] mm" if the reference satisfies it, otherwise "not flatter than the reference" (which is
+    monotone). Depth: beyond z_90, d ln rho_model / d z' <= max(0, d ln rho_reference / d z'), point by point.
+    Stage 2 adds sign_changes(model) <= sign_changes(reference) per profile. The record carries the reference's
+    slope tables and the cells where it rises itself, and is bound to the baseline's hash.
 
 Limits of the statement: real arithmetic with the constants as parsed; library functions assumed accurate to 64 ulp;
 the float32 allowance tau is heuristic; the rounding-error bound is first order (derivative enclosures on sub-boxes,
@@ -1450,175 +1453,285 @@ FLAT_SLACK = 1e-9            # numerical slack of "<= 0" for a slope enclosure (
 RADIAL_CRITERIA = ("loglog_slope_le_limit", "monotone_and_no_flattening")
 
 
-def tail_check(expr: Union[str, T.Expr], criterion: Mapping, box: Optional[Mapping] = None, *,
-               measured: Optional[Mapping] = None) -> dict:
-    """The tail part of a finalist's certificate, for a criterion record made by ``checks.decide_tail_criterion``
-    (PLAN 17.11, S4). All slopes are those of the 3-D density rho(z', r) - ln rho_model = ln rho_base + f - ln Z(x)
-    - never of the ring mass 2 pi r rho; the equation contributes d f / d ln r and d f / d z', enclosed rigorously
-    by forward-mode interval derivatives.
+def _table(a) -> np.ndarray:
+    """A slope table of a tail-criterion record (nested lists, None = no finite slope) as a float array with NaN."""
+    return np.array(a, dtype=np.float64)                   # None -> NaN
 
-    Radial, r in [200 mm, 1500 mm]. Which rule applies was decided ONCE from the baseline alone and is read from
-    the record, never chosen here:
-      "loglog_slope_le_limit"        baseline slope + d f / d ln r <= -2, checked for every pre-registered
-                                     momentum, depth band and radial interval of the record: the stored maximum of
-                                     the baseline's d ln rho / d ln r there plus the supremum of d f / d ln r on
-                                     the same box (x at that momentum);
-      "monotone_and_no_flattening"   the baseline's d ln rho / d r is < 0 wherever it was evaluated (stored in the
-                                     record) and d f / d r <= 0 for ALL r > 200 mm, z' and x of the audit box (a
-                                     statement about the equation alone, on the continuum); together they give
-                                     d ln rho_model / d r < 0. Used when the baseline itself is flatter than -2
-                                     (the legacy far halo), so that a correction is not rejected for the halo it
-                                     inherits.
-    Depth, z' > z_90(p). Accepted rule "dz_le_0_beyond_z90": baseline d ln rho / d z' + d f / d z' <= 0 for every
-    pre-registered momentum, radius and depth band beyond z_90 of the record. If the record carries the rule
-    "no_depth_flattening" (only possible when the baseline itself fails the accepted rule AND the record was made
-    with ``allow_depth_alternative=True``, i.e. after a user decision): d f / d z' <= 0 beyond z_90 at the
-    registered momenta. Both verdicts are always reported (``literal_rule_passed``, ``no_flattening_passed``);
-    ``passed`` follows the record's rule.
-    ``measured``: slopes of the jointly REFITTED baseline in the same format (optional). The rule still comes
-    from ``criterion``; without it the stored slopes of the baseline of record are used (and that is stated).
-    Returns {"passed", "radial": {...}, "depth": {...}, "reasons"}."""
+
+def _sup_chunks(prog: _Prog, lo: np.ndarray, hi: np.ndarray, j: int, kind: str, need: np.ndarray,
+                levels: Sequence[int]) -> np.ndarray:
+    out = np.empty(len(lo))
+    for s0 in range(0, len(lo), 16384):
+        out[s0:s0 + 16384] = _grad_sup_refined(prog, lo[s0:s0 + 16384], hi[s0:s0 + 16384], j, kind,
+                                               need[s0:s0 + 16384], levels)
+    return out
+
+
+def tail_check(expr: Union[str, T.Expr], criterion: Mapping, box: Optional[Mapping] = None, *,
+               measured: Optional[Mapping] = None, baseline_frozen: Optional[bool] = None,
+               enforce_sign_changes: bool = False) -> dict:
+    """The tail part of a finalist's certificate (PLAN 17.11, S4, and the user's decision on the depth rule).
+
+    ``criterion`` is the record of ``checks.decide_tail_criterion`` for the FIXED reference baseline (the Track A
+    finalist before any PySR refit, or the refit-only control C1): it supplies the rules and every bound.
+    ``measured`` is the same kind of record for the jointly REFITTED baseline (``reference_kind =
+    "refitted_baseline"``): it supplies the model side. The model is
+
+        ln rho_model = ln rho_refitted_baseline + f - ln Z(x),
+
+    so a slope of the model between two neighbouring nodes of the record's grid is the refitted baseline's
+    finite-difference slope there plus the mean of the correction's derivative on the segment, which is bounded
+    by the supremum of d f / d z' (or d f / d ln r) on it - enclosed rigorously by forward-mode interval
+    derivatives, refined where the bound leaves little room. All slopes are of the 3-D density rho, never of the
+    ring mass. Without ``measured`` the reference table stands in for the model side, which is correct only for a
+    frozen baseline: with ``baseline_frozen=False`` and no ``measured`` the check does not pass.
+
+    CERTIFIED, at every pre-registered momentum p, every depth interval beyond the reference's z_90(p) and every
+    radius of the record ("depth"), and at every depth row and every radial interval overlapping [200, 1500] mm
+    ("radial"), with x = x(p):
+      depth    "inherit_reference":  slope_model <= max(0, slope_reference)        - the model may not rise where
+               the fixed reference falls, and may not rise faster where it rises;
+      radial   "loglog_slope_le_limit":       slope_model <= -2;
+               "monotone_and_no_flattening":  slope_model <= slope_reference (< 0) - not flatter than the fixed
+               reference; with a frozen baseline also d f / d ln r <= 0 on the whole audit box beyond 200 mm (all
+               z', all x: the continuum statement of S4).
+    Tolerances of the two comparisons WITH THE REFERENCE: 1e-5 / mm in depth (0.001 nat per 100 mm) and 1e-3 in
+    the log-log slope - the record's ``sign_change_tolerance``, i.e. what the sign-change count treats as no
+    slope. Without them a correction with an exponentially small tail (tanh, erf) inside a cell where the
+    reference rises would fail for a slope of 1e-8 / mm. The absolute rule "<= -2" and the continuum statement
+    keep the rounding slack 1e-9.
+    The certificate holds for the model's finite-difference slopes on the record's grid, at those momenta; the
+    baselines enter numerically (their tables), not as enclosures.
+
+    EVALUATED, not certified - sign changes (Stage 2, PLAN section 7): the model's finite-difference slopes on the
+    record's grid (refitted baseline's table plus the correction evaluated at the nodes) are counted per profile
+    with ``checks.profile_sign_changes`` - d ln rho / d z' beyond z_90 along depth at each (momentum, radius),
+    d ln rho / d ln r for r > 200 mm along r at each (momentum, depth row) - and compared, PROFILE BY PROFILE,
+    with the reference's counts: sign_changes(model) <= sign_changes(reference). The grid and the tolerances
+    belong to the record, so the count cannot be changed by choosing a resolution. Reported always (side by
+    side); a pass condition with ``enforce_sign_changes=True`` (Stage 2).
+    Returns {"passed", "radial", "depth", "sign_changes", "reference", "reasons"}."""
+    from . import checks as _checks                        # NumPy only; imported here to avoid a module cycle
+
     e = T.parse(expr) if isinstance(expr, str) else expr
     box = dict(O.extended_box() if box is None else box)
-    src = criterion if measured is None else measured
     rad_rule = criterion["criterion"]["radial"]
     if rad_rule not in RADIAL_CRITERIA:
         raise ValueError(f"unknown radial criterion {rad_rule!r}")
+    mside = criterion if measured is None else measured
+    if measured is not None:
+        pairs = [(key, measured[key], criterion[key]) for key in ("momenta_GeV", "z_nodes_mm", "r_nodes_mm")]
+        pairs.append(("depth radii", measured["depth"]["r_nodes_mm"], criterion["depth"]["r_nodes_mm"]))
+        for key, a_, b_ in pairs:
+            if len(a_) != len(b_) or not np.allclose(a_, b_, rtol=1e-9, atol=1e-9):
+                raise ValueError(f"the measured table and the reference differ in {key}: both must be made on the "
+                                 "same grid and momenta")
     limit = float(criterion["slope_limit"])
-    mom = np.asarray(src["momenta_GeV"], dtype=np.float64)
+    mom = np.asarray(criterion["momenta_GeV"], dtype=np.float64)
     xs = O.x_of_p(mom)
-    r_nodes = np.asarray(src["r_nodes_mm"], dtype=np.float64)
-    zb = np.asarray(src["radial"]["z_band_edges_mm"], dtype=np.float64)
-    M = np.asarray(src["radial"]["max_loglog_slope"], dtype=np.float64)          # (P, bands, intervals)
-    M = np.where(M > -1e299, M, -_INF)                                            # no finite baseline slope there
+    z = np.asarray(criterion["z_nodes_mm"], dtype=np.float64)
+    rn = np.asarray(criterion["r_nodes_mm"], dtype=np.float64)
+    rd = np.asarray(criterion["depth"]["r_nodes_mm"], dtype=np.float64)
+    k0 = list(criterion["depth"]["k0"])
     used = T.variables(e)
     names = [n for n in ("zt", "rh", "x") if n in used]
     prog = _Prog(e, names) if names else None
     reasons: List[str] = []
-    out: dict = {"criterion": dict(criterion["criterion"]), "baseline_hash": criterion.get("baseline_hash"),
-                 "slopes_from": "criterion record (baseline of record)" if measured is None else
-                 "measured record (jointly refitted baseline)", "density": "3-D density rho, not ring mass"}
+    joint_blind = measured is None and baseline_frozen is False
+    out: dict = {"criterion": dict(criterion["criterion"]),
+                 "reference": {"kind": criterion.get("reference_kind"), "label": criterion.get("label"),
+                               "baseline_hash": criterion.get("baseline_hash"),
+                               "record_hash": criterion.get("record_hash")},
+                 "model_side": "reference table (baseline frozen)" if measured is None else
+                 f"table of the refitted baseline ({measured.get('label')}, record {measured.get('record_hash')})",
+                 "density": "3-D density rho, not ring mass"}
+    if joint_blind:
+        reasons.append("the baseline was refitted jointly and no slope table of the refitted baseline was given: "
+                       "the model's slopes are unknown (pass measured=decide_tail_criterion(..., reference_kind="
+                       "'refitted_baseline'))")
 
     def boxes(zlo, zhi, rlo, rhi, x):
         lo = np.zeros((len(zlo), len(names)))
         hi = np.zeros((len(zlo), len(names)))
         for k, n in enumerate(names):
-            a, b_ = {"zt": (zlo / O.ZETA_SCALE_MM, zhi / O.ZETA_SCALE_MM),
-                     "rh": (rlo / O.RHO_SCALE_MM, rhi / O.RHO_SCALE_MM), "x": (x, x)}[n]
-            lo[:, k], hi[:, k] = a, b_
+            a_, b_ = {"zt": (zlo / O.ZETA_SCALE_MM, zhi / O.ZETA_SCALE_MM),
+                      "rh": (rlo / O.RHO_SCALE_MM, rhi / O.RHO_SCALE_MM), "x": (x, x)}[n]
+            lo[:, k], hi[:, k] = a_, b_
         return lo, hi
 
-    # ---- radial ---------------------------------------------------------------------------------------------------
-    P, nb, ni = M.shape
-    jj, bb, ii = np.meshgrid(np.arange(P), np.arange(nb), np.arange(ni), indexing="ij")
-    jj, bb, ii = jj.ravel(), bb.ravel(), ii.ravel()
-    if "rh" in names:
-        lo, hi = boxes(zb[bb], zb[bb + 1], r_nodes[ii], r_nodes[ii + 1], xs[jj])
-        need = (limit - M).ravel() if rad_rule == "loglog_slope_le_limit" else np.full(len(jj), _INF)
-        S = _grad_sup_refined(prog, lo, hi, names.index("rh"), "dlnr", need).reshape(P, nb, ni)
+    def f_at(zz, rr, xx):                                  # the correction at grid nodes (actual evaluations)
+        env = {"zt": zz / O.ZETA_SCALE_MM, "rh": rr / O.RHO_SCALE_MM, "x": xx}
+        shape = np.broadcast_shapes(zz.shape, rr.shape, xx.shape)
+        return np.broadcast_to(np.asarray(T.evaluate(e, {n: env[n] for n in used}), dtype=np.float64), shape) \
+            if used else np.full(shape, float(T.evaluate(e, {})))
+
+    # ---- depth beyond z_90 of the reference: slope_model <= max(0, slope_reference) ---------------------------------
+    Dref, Dm = _table(criterion["depth"]["dz_per_mm"]), _table(mside["depth"]["dz_per_mm"])
+    P, nk, nr = Dref.shape
+    beyond = np.zeros(Dref.shape, bool)
+    for j in range(P):
+        beyond[j, k0[j]:, :] = True
+    ok = beyond & np.isfinite(Dref) & np.isfinite(Dm)
+    jj, kk, qq = np.nonzero(ok)
+    bound = np.maximum(Dref[ok], 0.0)
+    slack_z = float(criterion["sign_change_tolerance"]["depth_per_mm"])     # 1e-5 / mm: what counts as "no slope"
+    if "zt" in names and len(jj):
+        lo, hi = boxes(z[kk], z[kk + 1], rd[qq], rd[qq], xs[jj])
+        Sz = _sup_chunks(prog, lo, hi, names.index("zt"), "dz", bound - Dm[ok], (4, 16, 64, 256))
     else:
-        S = np.zeros((P, nb, ni))
-    rad: dict = {"rule": rad_rule, "slope_limit": limit, "equation_sup_dlnr_at_registered_momenta": float(S.max()),
-                 "r_range_mm": [float(r_nodes[0]), float(r_nodes[-1])]}
-    if rad_rule == "loglog_slope_le_limit":
-        tot = M + S
-        w = np.unravel_index(int(np.argmax(tot)), tot.shape)
-        ok = bool(tot.max() <= limit + FLAT_SLACK)
-        rad.update(passed=ok, model_max_loglog_slope=float(tot.max()),
-                   worst={"p_GeV": float(mom[w[0]]), "z_band_mm": [float(zb[w[1]]), float(zb[w[1] + 1])],
-                          "r_interval_mm": [float(r_nodes[w[2]]), float(r_nodes[w[2] + 1])],
-                          "baseline": float(M[w]), "equation_sup": float(S[w])})
-        if not ok:
-            reasons.append(f"radial tail: d ln rho / d ln r can reach {tot.max():.4g} (needs <= {limit:g}) at "
-                           f"p = {mom[w[0]]:g} GeV, r in [{r_nodes[w[2]]:.0f}, {r_nodes[w[2] + 1]:.0f}] mm")
+        Sz = np.zeros(len(jj))
+    tot = Dm[ok] + Sz
+    exc = tot - bound
+    w = int(np.argmax(exc)) if len(exc) else 0
+    okz = bool(len(exc) == 0 or exc.max() <= slack_z)
+    out["depth"] = {
+        "rule": criterion["criterion"]["depth"], "passed": bool(okz and not joint_blind),
+        "tolerance_per_mm": slack_z, "n_points": int(len(jj)), "n_violations": int(np.sum(exc > slack_z)),
+        "n_reference_rising": int(np.sum(Dref[ok] > 0)), "n_skipped_nonfinite": int((beyond & ~ok).sum()),
+        "largest_excess_per_mm": float(exc.max()) if len(exc) else 0.0,
+        "model_max_dz_per_mm": float(tot.max()) if len(tot) else 0.0,
+        "equation_sup_dz_per_mm": float(Sz.max()) if len(Sz) else 0.0,
+        "would_pass_absolute_rule": bool(len(tot) == 0 or tot.max() <= slack_z),
+        "z90_mm": list(criterion["depth"]["z90_mm"]), "z_max_mm": float(z[-1]),
+        "worst": None if not len(exc) else {
+            "p_GeV": float(mom[jj[w]]), "z_mm": [float(z[kk[w]]), float(z[kk[w] + 1])], "r_mm": float(rd[qq[w]]),
+            "reference": float(Dref[ok][w]), "bound": float(bound[w]), "refitted_baseline": float(Dm[ok][w]),
+            "equation_sup": float(Sz[w]), "model": float(tot[w])}}
+    if not okz:
+        ww = out["depth"]["worst"]
+        reasons.append(f"depth tail: beyond z_90 the model's d ln rho / d z' can reach {ww['model']:.4g} / mm where "
+                       f"the reference allows {ww['bound']:.4g} (reference slope {ww['reference']:.4g}) at p = "
+                       f"{ww['p_GeV']:g} GeV, z' = {ww['z_mm'][0]:.0f}-{ww['z_mm'][1]:.0f} mm, r = {ww['r_mm']:.0f} mm; "
+                       f"{out['depth']['n_violations']} of {len(jj)} points")
+    # ---- radial, r in [200, 1500] mm -----------------------------------------------------------------------------
+    Rref, Rm = _table(criterion["radial"]["loglog_slope"]), _table(mside["radial"]["loglog_slope"])
+    okr = np.isfinite(Rref) & np.isfinite(Rm)
+    jj, kk, ii = np.nonzero(okr)
+    rbound = np.full(len(jj), limit) if rad_rule == "loglog_slope_le_limit" else Rref[okr]
+    if "rh" in names and len(jj):
+        lo, hi = boxes(z[kk], z[kk], rn[ii], rn[ii + 1], xs[jj])
+        Sr = _sup_chunks(prog, lo, hi, names.index("rh"), "dlnr", rbound - Rm[okr], (4, 16, 64))
     else:
-        base_mono = bool(src["radial"]["baseline_monotone"])
-        tb = dict(box)
-        cont = tail_slopes(e, tb, r_from_mm=float(criterion["r_min_mm"]), z_from_mm=1e30)["dlnr"]
-        flat_ok = bool(cont["sup"] <= FLAT_SLACK)
-        rad.update(passed=bool(base_mono and flat_ok), baseline_monotone=base_mono,
-                   equation_sup_dlnr_continuum=float(cont["sup"]),
-                   equation_sup_dlnr_sampled=float(cont["sup_sampled"]), enclosure_converged=cont.get("converged"),
-                   region="r > %g mm, all z' and x of the audit box" % float(criterion["r_min_mm"]))
+        Sr = np.zeros(len(jj))
+    rtot = Rm[okr] + Sr
+    rexc = rtot - rbound
+    w = int(np.argmax(rexc)) if len(rexc) else 0
+    slack_r = FLAT_SLACK if rad_rule == "loglog_slope_le_limit" else \
+        float(criterion["sign_change_tolerance"]["radial_loglog"])          # 1e-3 against the reference's own slope
+    rok = bool(len(rexc) == 0 or rexc.max() <= slack_r)
+    rad: dict = {"rule": rad_rule, "slope_limit": limit, "tolerance": slack_r, "n_points": int(len(jj)),
+                 "n_violations": int(np.sum(rexc > slack_r)), "r_range_mm": [float(rn[0]), float(rn[-1])],
+                 "model_max_loglog_slope": float(rtot.max()) if len(rtot) else None,
+                 "equation_sup_dlnr_at_registered_momenta": float(Sr.max()) if len(Sr) else 0.0,
+                 "worst": None if not len(rexc) else {
+                     "p_GeV": float(mom[jj[w]]), "z_mm": float(z[kk[w]]),
+                     "r_interval_mm": [float(rn[ii[w]]), float(rn[ii[w] + 1])], "reference": float(Rref[okr][w]),
+                     "bound": float(rbound[w]), "refitted_baseline": float(Rm[okr][w]), "equation_sup": float(Sr[w]),
+                     "model": float(rtot[w])}}
+    if not rok:
+        ww = rad["worst"]
+        reasons.append((f"radial tail: d ln rho / d ln r can reach {ww['model']:.4g} (needs <= {limit:g})"
+                        if rad_rule == "loglog_slope_le_limit" else
+                        f"radial tail: the model is flatter than the fixed reference, d ln rho / d ln r can reach "
+                        f"{ww['model']:.4g} where the reference has {ww['reference']:.4g}") +
+                       f" at p = {ww['p_GeV']:g} GeV, z' = {ww['z_mm']:.0f} mm, r in [{ww['r_interval_mm'][0]:.0f}, "
+                       f"{ww['r_interval_mm'][1]:.0f}] mm; {rad['n_violations']} of {len(jj)} points")
+    if rad_rule == "monotone_and_no_flattening":
+        base_mono = bool(criterion["radial"]["baseline_monotone"])
+        rad["reference_monotone"] = base_mono
         if not base_mono:
-            reasons.append("radial tail: the baseline itself is not monotone in r beyond 200 mm (d_r ln rho < 0 "
-                           "fails for delta = 0): to be reported, no correction can be certified under this rule")
-        if not flat_ok:
+            rok = False
+            reasons.append("radial tail: the reference baseline itself is not monotone in r beyond 200 mm (d_r ln rho "
+                           "< 0 fails for delta = 0): to be reported, no correction can be certified under this rule")
+        cont = tail_slopes(e, dict(box), r_from_mm=float(criterion["r_min_mm"]), z_from_mm=1e30)["dlnr"]
+        rad.update(equation_sup_dlnr_continuum=float(cont["sup"]), equation_sup_dlnr_sampled=float(cont["sup_sampled"]),
+                   enclosure_converged=cont.get("converged"),
+                   continuum_region="r > %g mm, all z' and x of the audit box" % float(criterion["r_min_mm"]),
+                   continuum_required=bool(measured is None))
+        if measured is None and cont["sup"] > FLAT_SLACK:
+            rok = False
             reasons.append(f"radial tail: the correction flattens the profile, d delta / d ln r can reach "
                            f"{cont['sup']:.4g} > 0 for r > {float(criterion['r_min_mm']):g} mm")
+    rad["passed"] = bool(rok and not joint_blind)
     out["radial"] = rad
-    # ---- depth beyond z_90 ---------------------------------------------------------------------------------------
-    dsrc = src["depth"]
-    D = np.asarray(dsrc["max_dz_per_mm"], dtype=np.float64)                      # (P, bands, radii)
-    dbe = np.asarray(dsrc["z_band_edges_mm"], dtype=np.float64)                   # (P, bands + 1)
-    dr = np.asarray(dsrc["r_nodes_mm"], dtype=np.float64)
-    P, nb, nr = D.shape
-    jj, bb, kk = np.meshgrid(np.arange(P), np.arange(nb), np.arange(nr), indexing="ij")
-    jj, bb, kk = jj.ravel(), bb.ravel(), kk.ravel()
-    if "zt" in names:
-        lo, hi = boxes(dbe[jj, bb], dbe[jj, bb + 1], dr[kk], dr[kk], xs[jj])
-        Sz = _grad_sup_refined(prog, lo, hi, names.index("zt"), "dz", (-np.where(D > -1e299, D, -_INF)).ravel(),
-                               levels=(4, 16, 64, 256)).reshape(P, nb, nr)
-    else:
-        Sz = np.zeros((P, nb, nr))
-    valid = D > -1e299
-    totz = np.where(valid, D + Sz, -_INF)
-    w = np.unravel_index(int(np.argmax(totz)), totz.shape)
-    lit_ok = bool(totz.max() <= FLAT_SLACK / O.ZETA_SCALE_MM)
-    # the analogue of the radial alternative: no flattening in depth, d f / d z' <= 0 beyond z_90 at the registered
-    # momenta, all radii of the box, up to the end of the box (equation alone, continuum in z' and r)
-    alt_sup = -_INF
-    if "zt" in used:
-        for j in range(P):
-            bj = dict(box)
-            if "x" in bj:
-                bj["x"] = (float(xs[j]), float(xs[j]))
-            alt_sup = max(alt_sup, tail_slopes(e, bj, r_from_mm=1e30, z_from_mm=float(dsrc["z90_mm"][j]))
-                          ["dz_per_mm"]["sup"])
-    else:
-        alt_sup = 0.0
-    alt_ok = bool(alt_sup <= FLAT_SLACK / O.ZETA_SCALE_MM)
-    dep_rule = criterion["criterion"]["depth"]
-    okz = alt_ok if dep_rule == "no_depth_flattening" else lit_ok
-    out["depth"] = {"rule": dep_rule, "passed": okz, "baseline_satisfies": bool(dsrc["baseline_satisfies"]),
-                    "literal_rule_passed": lit_ok, "model_max_dz_per_mm": float(totz.max()),
-                    "no_flattening_passed": alt_ok, "equation_sup_dz_per_mm_beyond_z90": float(alt_sup),
-                    "z90_mm": list(dsrc["z90_mm"]), "z_max_mm": float(dbe.max()),
-                    "worst": {"p_GeV": float(mom[w[0]]), "z_band_mm": [float(dbe[w[0], w[1]]), float(dbe[w[0], w[1] + 1])],
-                              "r_mm": float(dr[w[2]]), "baseline": float(D[w]), "equation_sup": float(Sz[w])}}
-    if not okz and dep_rule == "dz_le_0_beyond_z90":
-        reasons.append(f"depth tail: d ln rho / d z' can reach {totz.max():.4g} / mm (needs <= 0) beyond z_90 at "
-                       f"p = {mom[w[0]]:g} GeV, r = {dr[w[2]]:.0f} mm" +
-                       ("" if dsrc["baseline_satisfies"] else " - the baseline alone (delta = 0) already "
-                        "violates this rule there: no correction can pass it; to be decided by the user"))
-    if not okz and dep_rule == "no_depth_flattening":
-        reasons.append(f"depth tail: the correction flattens the depth profile, d delta / d z' can reach "
-                       f"{alt_sup:.4g} / mm > 0 beyond z_90")
-    out["passed"] = bool(rad["passed"] and okz)
+    # ---- sign changes per profile (evaluated on the record's grid) ----------------------------------------------------
+    tol = criterion["sign_change_tolerance"]
+    Fz = f_at(z[None, :, None], rd[None, None, :], xs[:, None, None])                 # (P, NZ, nr)
+    mdz = Dm + np.diff(Fz, axis=1) / np.diff(z)[None, :, None]
+    Fr = f_at(z[None, :, None], rn[None, None, :], xs[:, None, None])                 # (P, NZ, ni + 1)
+    mdr = Rm + np.diff(Fr, axis=2) / np.diff(np.log(rn))[None, None, :]
+    sc: dict = {"tolerance": dict(tol), "enforced": bool(enforce_sign_changes), "quantity": {
+        "depth": "d ln rho / d z' beyond z_90, along depth at each (momentum, radius)",
+        "radial": "d ln rho / d ln r for r > 200 mm, along r at each (momentum, depth row)"}}
+    cm = np.stack([_checks.profile_sign_changes(np.where(beyond[j], mdz[j], np.nan).T, tol["depth_per_mm"])
+                   for j in range(P)])
+    cr = np.stack([_checks.profile_sign_changes(np.where(beyond[j], Dref[j], np.nan).T, tol["depth_per_mm"])
+                   for j in range(P)])
+    cmr = _checks.profile_sign_changes(mdr, tol["radial_loglog"])
+    crr = _checks.profile_sign_changes(Rref, tol["radial_loglog"])
+    for key, m_, r_, axis_names, coords in (("depth", cm, cr, ("p_GeV", "r_mm"), (mom, rd)),
+                                            ("radial", cmr, crr, ("p_GeV", "z_mm"), (mom, z))):
+        more = m_ > r_
+        wi = np.unravel_index(int(np.argmax(m_ - r_)), m_.shape)
+        sc[key] = {"model_total": int(m_.sum()), "reference_total": int(r_.sum()), "n_profiles": int(m_.size),
+                   "n_profiles_exceeding": int(more.sum()), "passed": bool(not more.any()),
+                   "model_per_momentum": m_.sum(1).tolist(), "reference_per_momentum": r_.sum(1).tolist(),
+                   "worst_profile": {axis_names[0]: float(coords[0][wi[0]]), axis_names[1]: float(coords[1][wi[1]]),
+                                     "model": int(m_[wi]), "reference": int(r_[wi])}}
+    # reported beside it, not enforced: the number of rising stretches per depth profile, which - unlike the number
+    # of sign changes - does not change when a profile merely begins inside a rising stretch of the reference
+    lm = np.stack([_checks.profile_rising_lobes(np.where(beyond[j], mdz[j], np.nan).T, tol["depth_per_mm"])
+                   for j in range(P)])
+    lr_ = np.stack([_checks.profile_rising_lobes(np.where(beyond[j], Dref[j], np.nan).T, tol["depth_per_mm"])
+                    for j in range(P)])
+    sc["depth_rising_stretches"] = {"model_total": int(lm.sum()), "reference_total": int(lr_.sum()),
+                                    "n_profiles_exceeding": int((lm > lr_).sum()), "enforced": False}
+    sc["passed"] = bool(sc["depth"]["passed"] and sc["radial"]["passed"])
+    sc["text"] = "\n".join(
+        ["sign changes, model | reference (per profile: model <= reference required" +
+         (")" if enforce_sign_changes else "; reported, not enforced)")] +
+        [f"  {key:6s} total {sc[key]['model_total']:5d} | {sc[key]['reference_total']:5d}   profiles exceeding "
+         f"{sc[key]['n_profiles_exceeding']} of {sc[key]['n_profiles']}   per momentum {sc[key]['model_per_momentum']} | "
+         f"{sc[key]['reference_per_momentum']}" for key in ("depth", "radial")] +
+        [f"  rising stretches in depth (reported): {sc['depth_rising_stretches']['model_total']} | "
+         f"{sc['depth_rising_stretches']['reference_total']}   profiles exceeding "
+         f"{sc['depth_rising_stretches']['n_profiles_exceeding']}"])
+    out["sign_changes"] = sc
+    if enforce_sign_changes and not sc["passed"]:
+        for key in ("depth", "radial"):
+            if not sc[key]["passed"]:
+                wp = sc[key]["worst_profile"]
+                reasons.append(f"sign changes ({key}): {sc[key]['n_profiles_exceeding']} profile(s) have more sign "
+                               f"changes than the reference (worst: {wp['model']} against {wp['reference']} at {wp})")
+    out["passed"] = bool(out["depth"]["passed"] and rad["passed"] and (sc["passed"] or not enforce_sign_changes))
     out["reasons"] = reasons
     return out
 
 
 def certify_finalist(expr: Union[str, T.Expr], box: Optional[Mapping[str, Tuple[float, float]]] = None, *,
                      tail_criterion: Optional[Mapping] = None, baseline_hash: Optional[str] = None,
-                     measured_tail: Optional[Mapping] = None, limit: float = LIMIT_NAT,
-                     gauge: str = "oscillation", gauge_vars: Sequence[str] = ("x",),
-                     domain_kw: Optional[dict] = None, magnitude_kw: Optional[dict] = None,
-                     carried_stripped: Optional[Sequence[Mapping]] = None,
+                     measured_tail: Optional[Mapping] = None, baseline_frozen: Optional[bool] = None,
+                     stage2: bool = False, limit: float = LIMIT_NAT, gauge: str = "oscillation",
+                     gauge_vars: Sequence[str] = ("x",), domain_kw: Optional[dict] = None,
+                     magnitude_kw: Optional[dict] = None, carried_stripped: Optional[Sequence[Mapping]] = None,
                      baseline_tail: Optional[Mapping] = None) -> dict:
     """The certificate a FINALIST needs. Call it on the equation WITH THE CONSTANTS AFTER THE JOINT REFIT
     (``refit.fit_candidate(..., finalist=True)`` does); a certificate of the pre-refit constants says nothing.
 
       1. ``audit(..., require_certified=True, stage="after refit")``: domain safe, magnitude bound PROVEN (status
          "certified", not merely "not_refuted"), raw magnitude proven, rounding within tolerance;
-      2. tail check (``tail_check``) under the criterion record of the baseline, ``tail_criterion`` =
-         ``checks.decide_tail_criterion(...)``. The record fixes which radial rule applies; it is bound to the
-         baseline by ``baseline_hash``: the hash given here must equal the one in the record, and the record's own
-         hash must be intact - otherwise ``ValueError``. The rule can therefore not be picked per equation.
+      2. tail check (``tail_check``) against the record of the FIXED reference baseline, ``tail_criterion`` =
+         ``checks.decide_tail_criterion(...)``, bound to it by ``baseline_hash`` (the hash given here must equal
+         the one in the record, and the record's own hash must be intact - otherwise ``ValueError``). A table of a
+         jointly refitted baseline is refused as the reference; it belongs in ``measured_tail``, where it supplies
+         the model side. ``baseline_frozen``: True if the baseline was not refitted (then no table is needed).
+      3. ``stage2=True``: the sign-change condition of the Stage-2 gate is enforced as well -
+         sign_changes(model) <= sign_changes(reference), profile by profile.
 
     Returns {"certified", "audit_certified", "tail", "reasons", "audit", "equation", "hash", "baseline_hash",
-    "tail_criterion_hash"}. Without ``tail_criterion`` the tail check cannot be evaluated and ``certified`` is
-    False (reason given). ``baseline_tail`` (the two-number form of an earlier version) is refused."""
+    "tail_criterion_hash", "reference"}. Without ``tail_criterion`` the tail check cannot be evaluated and
+    ``certified`` is False (reason given). ``baseline_tail`` (the two-number form of an earlier version) is
+    refused."""
     if baseline_tail is not None:
         raise ValueError("baseline_tail is superseded (PLAN 17.11, S4): pass tail_criterion = "
                          "checks.decide_tail_criterion(...) and baseline_hash")
@@ -1628,9 +1741,9 @@ def certify_finalist(expr: Union[str, T.Expr], box: Optional[Mapping[str, Tuple[
         if not baseline_hash:
             raise ValueError("baseline_hash is required with tail_criterion: the criterion is bound to one baseline "
                              "and must be checked against the baseline in hand")
-        _checks.verify_tail_criterion(tail_criterion, baseline_hash)
+        _checks.verify_tail_criterion(tail_criterion, baseline_hash, as_reference=True)
         if measured_tail is not None:
-            _checks.verify_tail_criterion(measured_tail)
+            _checks.verify_tail_criterion(measured_tail, as_reference=False)
     rep = audit(e, box, limit=limit, gauge=gauge, gauge_vars=gauge_vars, domain_kw=domain_kw,
                 magnitude_kw=magnitude_kw, require_certified=True, stage="after refit",
                 carried_stripped=carried_stripped)
@@ -1645,15 +1758,20 @@ def certify_finalist(expr: Union[str, T.Expr], box: Optional[Mapping[str, Tuple[
     tail: dict = {"evaluated": False, "passed": False}
     if rep.domain["safe"]:
         if tail_criterion is None:
-            reasons.append("tail check not evaluated: the criterion record of the baseline is needed "
+            reasons.append("tail check not evaluated: the criterion record of the reference baseline is needed "
                            "(checks.decide_tail_criterion on the machine that holds the baseline)")
         else:
-            tail = dict(tail_check(e, tail_criterion, box, measured=measured_tail), evaluated=True)
+            tail = dict(tail_check(e, tail_criterion, box, measured=measured_tail, baseline_frozen=baseline_frozen,
+                                   enforce_sign_changes=stage2), evaluated=True)
             reasons += tail["reasons"]
     return {"certified": bool(rep.passed and tail.get("passed", False)), "audit_certified": bool(rep.passed),
             "tail": tail, "reasons": reasons, "audit": rep.to_json(), "equation": T.to_string(e),
-            "hash": T.expr_hash(e), "baseline_hash": baseline_hash,
-            "tail_criterion_hash": None if tail_criterion is None else tail_criterion.get("record_hash")}
+            "hash": T.expr_hash(e), "baseline_hash": baseline_hash, "stage2": bool(stage2),
+            "tail_criterion_hash": None if tail_criterion is None else tail_criterion.get("record_hash"),
+            "reference": None if tail_criterion is None else {
+                "kind": tail_criterion.get("reference_kind"), "label": tail_criterion.get("label"),
+                "baseline_hash": tail_criterion.get("baseline_hash"),
+                "measured_table": None if measured_tail is None else measured_tail.get("record_hash")}}
 
 
 def audit_trajectory(expr: Union[str, T.Expr], x_range: Tuple[float, float] = O.TRAJECTORY_BOX,

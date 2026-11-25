@@ -1,10 +1,12 @@
-# `sfm.sr` — status of the math-author modules (25 Nov 2026; updated after the user's decisions S1–S5)
+# `sfm.sr` — status of the math-author modules (25 Nov 2026; updated after the user's decisions on the depth rule and the cusp flag)
 
 Written for whoever continues. All six modules are implemented; each section says what the code does, what was
 verified and what was not. Section 8 holds the decisions and the plan rules they touch (**all eight accepted by
 the user on 25 Nov 2026**); section 12 answers the user's four confirmations; **section 13 builds in the user's
-decisions S1–S5 (PLAN §17.11) and holds the tail-criterion preview for the legacy formula**; **section 14 explains
-why the legacy formula fails the depth rule and recommends a form of the rule**; section 10 holds
+decisions S1–S5 (PLAN §17.11) and holds the tail-criterion preview for the legacy formula**; section 14 explains
+why the legacy formula fails the absolute depth rule; **section 15 implements the user's decisions on it (inheriting
+depth rule anchored to the fixed reference, Stage-2 sign changes, cusp-stall flag) and is in force where it differs
+from sections 12–14**; section 10 holds
 the interfaces for the runner. Where sections 12 and 13 differ, 13 is in force. **Numbers are measured only where they say so.**
 
 ## 1. Status per module
@@ -13,13 +15,13 @@ the interfaces for the runner. Where sections 12 and 13 differ, 13 is in force. 
 |---|---|---|---|
 | `operators.py` | done (first session); `UNCONFIRMED` emptied, `CONFIRMED_WITH_JULIA` added; torch `sqa` / `softplus` gradients fixed (§12.1) | 70 pass | every item of `UNCONFIRMED` is now confirmed against Julia, see §9 |
 | `translate.py` | **done** | 91 pass (`tests/test_sr_translate.py`, 1.3 s) | torch only on demand; checked against real PySR strings, predictions and losses |
-| `audit.py` | **done** | 81 pass (`tests/test_sr_audit.py`, 10 s) | NumPy only; (a) domain, (b) magnitude, (c) numerics; stripped-term log; `tail_check`, `certify_finalist` |
-| `checks.py` | **done** | 13 pass (`tests/test_sr_checks.py`) | NumPy only; tolerances are arguments with stated defaults |
+| `audit.py` | **done** | 82 pass (`tests/test_sr_audit.py`, 15 s) | NumPy only; (a) domain, (b) magnitude, (c) numerics; stripped-term log; `tail_check`, `certify_finalist` |
+| `checks.py` | **done** | 15 pass (`tests/test_sr_checks.py`) | NumPy only; tolerances are arguments with stated defaults |
 | `targets.py` | **done**, not yet run on real data | 18 pass (`tests/test_sr_targets.py`) | constructions tested on synthetic maps; event-level estimators on synthetic showers (CPU child process) |
-| `refit.py` | **done except registration** (stub, by instruction) | 15 pass (`tests/test_sr_refit.py`, CPU child process) | constants recovered on synthetic showers; no real refit run |
+| `refit.py` | **done except registration** (stub, by instruction) | 17 pass (`tests/test_sr_refit.py`, CPU child process) | constants recovered on synthetic showers; no real refit run |
 | `__init__.py` | empty, as `test_sr_package_init_is_empty` requires | | |
 
-Run: `uv run pytest shape-form-martin/tests -q -k "sr_ and not search"` → 292 passed (about 23 s): 288 in the six
+Run: `uv run pytest shape-form-martin/tests -q -k "sr_ and not search"` → 297 passed (about 30 s): 293 in the six
 files of this table plus the 4 of another worker's `tests/test_sr_post.py`, which the same filter selects.
 
 Nothing outside the write set was touched; no git state changed; the test split was not opened; no `*.csv` was
@@ -546,7 +548,7 @@ Nothing to change: `RAW_LIMIT_NAT = 16`, `ROUNDING_TOL_NAT = 1e-6` and the float
 - **Not guaranteed:** only top-level summands are recognised as gauge terms (a hidden one is caught by the raw
   limit, not stripped).
 
-### 13.4 S4 — tail criterion: decided once per baseline, from the baseline alone
+### 13.4 S4 — tail criterion: decided once per baseline, from the baseline alone (depth rule and record format superseded by §15.1)
 
 **(a) Which quantity.** Every slope is of the **3-D density ρ(z′, r)** — probability per volume, `log P − log(cell
 volume)` or the density functional — never of the ring mass 2πrρ (whose log-log slope is larger by one; a test
@@ -618,7 +620,7 @@ bound. The measured slopes of the *jointly refitted* baseline have to be supplie
 rule to be exact after a joint refit; under the alternative only its monotonicity enters. Enclosures that stay
 loose cost false refusals.
 
-### 13.5 S5 — gradient-clip log
+### 13.5 S5 — gradient-clip log (the flag now also includes the clip-independent part, §15.3)
 
 - `refit.ClipMonitor` (tensor hooks; no change to `sfm.train`) records at every step the gradient norm **before**
   clipping over all trainable parameters and the raw gradient and value of every constant of the correction;
@@ -721,8 +723,8 @@ the density still falls). Compared with the two forms that exist in the code: th
 baseline, and with it every correction that does not happen to cancel the baseline's own rises; the global relative form (`allow_depth_alternative=True`: ∂_z′ δ ≤ 0 everywhere
 beyond z_90) passes δ = 0 but forbids every correction that rises with depth, even where the baseline falls by
 0.2–0.5 nat / 100 mm. Not recommended: restricting the region (the 1 GeV rise is inside the data region) or using
-the r-integrated profile only (it rises too). **The inheriting form is not implemented** — it is a change of about
-ten lines in `audit.tail_check` and one rule name in `checks.decide_tail_criterion`, to be made once decided.
+the r-integrated profile only (it rises too). (Accepted by the user and implemented since: §15.1, anchored to the
+fixed reference baseline.)
 - **Stage-2 sin/cos check** (PLAN §7, "no sign change of ∂_z′ ln ρ beyond z_90" — the same statement): the baseline
   itself has sign changes (two at 1 GeV, one at 5 GeV), so in absolute form no Stage-2 result could pass either. The
   same inheriting rule applies unchanged — the modulation may not create a rise the baseline does not have — with
@@ -731,3 +733,137 @@ ten lines in `audit.tail_check` and one rule name in `checks.decide_tail_criteri
 - **Not verified:** the Track A finalist may differ (it is refitted, and several rungs change the track and halo
   forms); the data comparison is unfolded (hit centres against cell probabilities) and bin-averaged; the three
   momentum bins are the only ones looked at.
+
+## 15. The user's decisions on the depth rule and the cusp flag (25 Nov 2026, late) — implemented
+
+### 15.1 Inheriting depth rule, anchored to the fixed non-SR baseline
+
+**Rule.** Beyond z_90: `∂_z′ ln ρ_model ≤ max(0, ∂_z′ ln ρ_reference)`, point by point. *Model* = the full refitted
+density (jointly refitted baseline plus correction). *Reference* = a fixed non-SR baseline, an explicit, hashed
+argument: `checks.decide_tail_criterion(…, reference_kind="track_a_finalist")` (default: the Track A finalist as it
+is before any PySR refit) or `"c1_refit_only"`. The record (`sfm.sr.tail_criterion/2`, about 1.3 MB of JSON for
+the legacy preview) now holds the reference's **full slope tables** — depth slopes at every momentum × depth
+interval × radius, radial log-log slopes at every momentum × depth row × radial interval — its z_90, its
+sign-change counts per profile, and:
+- `depth.rising_cells`: every cell beyond z_90 in which the reference itself rises (momentum index, depth interval,
+  radius index, slope) — the cells where the bound is above zero;
+- `depth.rising_regions`: per momentum the depth and radius range, the number and share of cells, the steepest
+  slope and where, the total rise at that radius; and, from `refit.tail_criterion_for_baseline`, the
+  **attribution**: each component's share of the density in the rising cells, each component's own slope at the
+  steepest cell, the largest slope left in those cells when one component is removed, `removed_by`, the energy
+  in the rising cells inside the grid and in the continuation, and the track range.
+`verify_tail_criterion` refuses an edited record (changing one stored slope changes the hash) and **refuses a table
+of a jointly refitted baseline as the reference** (`reference_kind="refitted_baseline"`): that table can only be
+passed as `measured_tail`, where it supplies the model side. z_90 is the reference's.
+
+**How it is checked** (`audit.tail_check`). On each segment between neighbouring nodes of the record's grid the
+model's finite-difference slope equals the refitted baseline's slope (its table) plus the mean of the
+correction's derivative on the segment, which is bounded by an interval enclosure of `∂f/∂z′` (or `∂f/∂ln r`),
+refined where the bound leaves little room.
+- **Certified:** for the legacy record 26,432 depth points (7 momenta × depth intervals beyond z_90 × 56 radii) and
+  36,736 radial points (7 momenta × 128 depth rows × 41 radial intervals), 0.2–0.6 s per equation — the
+  correction's contribution on every segment.
+- **Evaluated, not enclosed:** the baselines' own slopes (finite differences of their numerical maps and of the
+  continuation beyond the grid), and the sign-change counts.
+- **Not covered:** momenta between the seven registered ones; depths beyond the last grid row (1444 mm).
+- A jointly refitted baseline without its table is not certified (`baseline_frozen=False`, no `measured_tail`);
+  `fit_candidate(…, tail_table_fn=)` obtains the table from the refitted baseline model.
+
+**Radial rule, anchored the same way.** A joint refit could bend the baseline radially too (flatten its halo while
+the correction itself has `∂_r δ ≤ 0`). Under the alternative of S4 the check is therefore
+`∂ ln ρ_model/∂ ln r ≤ ∂ ln ρ_reference/∂ ln r` at every point, with the reference monotone; with a frozen
+baseline the continuum statement of S4 (`∂f/∂ln r ≤ 0` for all z′ and x beyond 200 mm) is required as before.
+Under "≤ −2" the refitted baseline's own slopes enter the absolute bound.
+
+**A numerical tolerance I had to add (new choice, needs the user's view).** The two comparisons *with the
+reference* allow 1e-5 /mm in depth (0.001 nat per 100 mm) and 1e-3 in the log-log slope — the tolerances of the
+sign-change count. Without them every correction with an exponentially small rising tail (tanh, erf) inside a
+cell where the reference rises fails for a slope of 1e-8 /mm. The absolute rule "≤ −2" and the continuum
+statement keep the rounding slack 1e-9.
+
+**Tests.** A correction may rise where the reference falls as long as the model does not; on a reference that
+rises itself, δ without a z-part and a falling δ are certified (the absolute rule could not pass them), a rising δ
+fails with the worst point inside the reference's rising stretch; a refitted baseline that has learnt to rise
+fails with a harmless correction, its table is refused as a reference, and without the table there is no
+certificate; a refitted baseline that became 0.3 flatter in r fails "not flatter than the reference", one that
+became 0.3 steeper leaves room for a correction that flattens by 0.1; tables on different grids are refused.
+Legacy preview record (840 rising cells): `removed_by` = track at 1 GeV (z′ 722–760 mm, range 755 mm), end blob at
+5 GeV (last row), shower at 20, 30, 50 GeV (r > 610 mm); `−0.3·tanh(ζ − 2) − 0.1·l1p(ϱ)` is certified on it.
+
+**Reference of record — recommendation: the Track A finalist before any PySR refit.**
+1. It exists before any equation is seen and is one object with one hash, so "decided once per baseline" stays
+   single-valued; C1 is one run per schedule and seed and exists only after a refit.
+2. The purpose is that a refit cannot move the bound. C1 is itself a refit: if more training alone bends the
+   baseline upward, anchoring to C1 would let the SR model inherit that bend.
+3. It is the baseline S4 named for the radial decision.
+C1 should instead be *tested* against the same record (its table as `measured_tail` with a zero correction): if C1
+itself violates the rule, the schedule is responsible, not the equation, and that belongs beside the SR verdict.
+If the user prefers C1 as the reference, it is `reference_kind="c1_refit_only"` and nothing else changes.
+
+### 15.2 Stage-2 sign-change condition
+
+- **Quantities:** `∂_z′ ln ρ` beyond z_90 along depth, one profile per (momentum, radius); `∂ ln ρ/∂ ln r` for
+  r > 200 mm along r, one profile per (momentum, depth row); the seven registered momenta.
+- **Grid:** the record's own (depth rows, radius nodes) — fixed with the reference, not an argument.
+- **Counting** (`checks.profile_sign_changes`): finite-difference slopes; non-finite and zero entries skipped; a lobe
+  is a maximal run of one sign; lobes whose largest |slope| is below the tolerance (1e-5 /mm in depth, 1e-3 in the
+  log-log slope) are dropped; the count is the number of sign alternations between the remaining lobes. The model's
+  slopes are the refitted baseline's table plus the correction evaluated at the nodes.
+- **Condition:** `sign_changes(model) ≤ sign_changes(reference)` **per profile**, against the fixed reference;
+  enforced with `tail_check(…, enforce_sign_changes=True)` / `certify_finalist(…, stage2=True)` /
+  `fit_candidate(…, stage2=True)`, reported (side-by-side text, totals and per momentum) in every tail check.
+  The modulation cap of `checks.modulation_amplitude` (≤ 4 inside the data range, 0 outside) is unchanged.
+- **Tests:** `−0.78·ζ − 0.0195·sin(40ζ)` (its `∂_ζ` never positive) passes the certified slope rule on a reference
+  with one rising stretch and fails the sign-change condition; a ripple of 2e-6 /mm is not counted; a radial
+  oscillation on a monotone reference fails.
+- **A consequence to know (legacy preview).** `−0.3·tanh(ζ − 2) − 0.1·l1p(ϱ)`, which only falls, has *fewer* sign
+  changes than the reference in total (80 against 102) and still more in 6 of 392 depth profiles (2 against 1 at
+  20 GeV, r = 947 mm): where a profile begins inside a rising stretch of the reference, a falling correction turns
+  `+ −` into `− + −`. Per profile, as implemented, this fails Stage 2. The number of *rising stretches* per profile
+  (`checks.profile_rising_lobes`, reported beside the counts, not enforced) has no such edge effect — 54 against
+  74, no profile exceeding — and still catches an oscillation inside a rising stretch. Whether the Stage-2
+  condition should count rising stretches instead is a question for the user.
+
+### 15.3 Cusp-stall flag
+
+`cusp_stalled` = `cusp_stalled_by_clipping` (§13.5) **or** `cusp_stalled_by_hover`; the second comes from
+`refit.cusp_hover_statistics`, which for every `sqa(u)` node evaluates u in all grid cells (× five x values) with
+the constants of each step of the final quarter of the run and reports:
+- `fraction_exact_zero` (u == 0) and `fraction_near_zero` (0 < |u| < eps), separately; **eps = 1e-3 × the 90th
+  percentile of |u| over the grid**; also the smallest |u|, in units of the gap between neighbouring cell values;
+- `zero_locus`: none / exact zeros / contour;
+- `classification`:
+  - **structural-spatial** — a fixed spatial locus given the constants, no constant stalling there: `sqa(ϱ)`
+    towards r = 0 (no constant inside the argument at all), or the zero contour of `sqa(ζ − c)` between cells.
+    Reported, never flagged.
+  - **optimisation-stalling** (raises the flag) — (i) late-step sign-flipping: u changes sign at least twice in
+    one cell within the window; (ii) stagnation near u = 0: a constant inside the argument has
+    |net change| ≤ 0.5 × path length over the window while min |u| < eps in at least half of its steps;
+    (iii) parked exactly on u = 0 in a cell whose u depends on a constant (which then gets no gradient from it).
+- **Tests.** Real harness, default clip norm 5: a constant parked 0.04 row spacings above a grid row (truth on the
+  row) — 0 clipped steps, near zero in 98 % of the window, net/path 0.30 → **flagged**; the same model with the
+  optimum mid-way between rows → structural-spatial contour, not flagged; `sqa(ζ + 2)` → no zero; a fit with
+  `sqa(ϱ)` → not flagged. Constructed histories: `sqa(ϱ)` evaluated at r = 0 (exact-zero fraction 1/32,
+  structural); back-and-forth across a row (i); exactly on a row (iii); a contour sweeping steadily through cells
+  (structural, every cell crossed once); jitter 0.05 spacings from a row (ii) against the same jitter between rows
+  (structural); `sqa(0·ζ)` (u ≡ 0, dead constant, flagged).
+- **What the synthetic runs showed.** The parked constant sits at a *stationary point* about 0.003 (in ζ) above a
+  grid row, with a mean gradient compatible with zero: a local minimum that the kink creates, not a pull that
+  Adam fails to follow. One run started far away and stopped next to a row although the true optimum lay mid-way
+  between rows.
+- **Not guaranteed.** (ii) cannot tell a constant trapped next to a cusp from one whose optimum happens to lie
+  that close: for a depth contour on the 128-row grid eps is 0.074 row spacings, so a constant unrelated to any
+  cusp is flagged in roughly 15 % of cases. The flag asks for a look, it does not prove a stall. The window is
+  the final quarter; thresholds (1e-3, 0.5, half of the steps, two flips) are mine. After a resume the monitor
+  covers the steps of that process only.
+
+### 15.4 Interface changes of this round
+
+- `checks`: record schema `/2`; `decide_tail_criterion(…, reference_kind=, rising_annotations=)` (the
+  `allow_depth_alternative` switch of §13.4 is gone: the depth rule is always `inherit_reference`);
+  `verify_tail_criterion(…, as_reference=)`; `profile_sign_changes`, `profile_rising_lobes`.
+- `audit`: `tail_check(…, measured=, baseline_frozen=, enforce_sign_changes=)`;
+  `certify_finalist(…, baseline_frozen=, stage2=)`; the certificate names the reference (kind, label, hashes).
+- `refit`: `tail_criterion_for_baseline(…, reference_kind=)` with attribution; `fit_candidate(…, tail_table_fn=,
+  stage2=)`; result keys `cusp_stalled_by_clipping`, `cusp_stalled_by_hover`; `cusp_hover` has the new fields.
+- Nothing used by `scripts/sr_post.py` or the search runner changed.

@@ -102,14 +102,27 @@ def _cpu_suite(out_json: str, tmp: str) -> None:
     except R.RefitNotAllowed as err:
         refused = str(err)
     import test_sr_checks as TC
-    # tail-criterion record of a synthetic baseline r^-3.2 exp(-z/100 mm): rule "<= -2", depth slope -0.01 / mm
+    # reference record of a synthetic baseline r^-3.2 exp(-z/100 mm): rule "<= -2", depth slope -0.01 / mm. The
+    # model's baseline is refitted jointly by default (freeze_base=False), so the model side needs its own table.
     zz, rr = np.meshgrid(TC.Z, TC.RN, indexing="ij")
-    steep = TC.K.decide_tail_criterion(np.stack([-3.2 * np.log(rr) - zz / 100.0] * 7), TC.Z, TC.RN, TC.MOM, TC.Z90,
-                                       baseline_hash="hash-of-steep", label="synthetic baseline, fast depth decay")
+    lrho = np.stack([-3.2 * np.log(rr) - zz / 100.0] * 7)
+    steep = TC.K.decide_tail_criterion(lrho, TC.Z, TC.RN, TC.MOM, TC.Z90, baseline_hash="hash-of-steep",
+                                       label="synthetic reference, fast depth decay")
+    calls = []
+
+    def table_of_refitted_baseline(base_model):
+        calls.append(type(base_model).__name__)
+        return TC.K.decide_tail_criterion(lrho, TC.Z, TC.RN, TC.MOM, TC.Z90, baseline_hash="refitted",
+                                          label="refitted baseline", reference_kind=TC.K.MEASURED_KIND)
     out = R.fit_candidate(m, tr, va, cfg, label="synthetic recovery", synthetic=True, log=None, finalist=True,
-                          tail_criterion=steep, baseline_hash="hash-of-steep")
-    # the same refitted equation on a baseline that decays more slowly in depth (-0.004 / mm): its rise wins
-    slow = A.certify_finalist(m.current_expr(), tail_criterion=TC.record("steep"), baseline_hash="hash-of-steep")
+                          tail_criterion=steep, baseline_hash="hash-of-steep",
+                          tail_table_fn=table_of_refitted_baseline)
+    # the same refitted equation: without a table of the jointly refitted baseline; and against a reference that
+    # decays more slowly in depth (-0.004 / mm), where the equation's rise makes the model rise
+    blind = A.certify_finalist(m.current_expr(), tail_criterion=steep, baseline_hash="hash-of-steep",
+                               baseline_frozen=m.freeze_base)
+    slow = A.certify_finalist(m.current_expr(), tail_criterion=TC.record("steep"), baseline_hash="hash-of-steep",
+                              baseline_frozen=True)
     old_arg = None
     try:
         R.fit_candidate(m, tr, va, cfg, label="x", synthetic=True, log=None, baseline_tail={"dlnr": -3.0})
@@ -118,11 +131,13 @@ def _cpu_suite(out_json: str, tmp: str) -> None:
     rep["recovery"] = {"refused_without_flag": refused, "c": m.correction.c.tolist(), "nll0": nll0,
                        "nll_true": nll_true, "nll_fit": float(np.mean(train.val_nll(m, va, 1))),
                        "out": {k: v for k, v in out.items() if k not in ("audit_refit", "finalist")},
-                       "old_arg": old_arg, "steep_hash": steep["record_hash"],
+                       "old_arg": old_arg, "steep_hash": steep["record_hash"], "table_calls": calls,
+                       "blind": {"certified": blind["certified"], "reasons": blind["reasons"]},
                        "slow": {"certified": slow["certified"], "audit_certified": slow["audit_certified"],
                                 "reasons": slow["reasons"], "depth": slow["tail"]["depth"]},
                        "finalist": {"certified": out["finalist"]["certified"], "reasons": out["finalist"]["reasons"],
                                     "tail": out["finalist"]["tail"], "baseline_hash": out["finalist"]["baseline_hash"],
+                                    "reference": out["finalist"]["reference"],
                                     "tail_criterion_hash": out["finalist"]["tail_criterion_hash"],
                                     "status": out["finalist"]["audit"]["magnitude"]["status"],
                                     "stage": out["finalist"]["audit"]["stage"],
@@ -304,14 +319,20 @@ def _cpu_suite(out_json: str, tmp: str) -> None:
     rep["inside_sqa"] = [R.constants_inside_sqa(T.parse(s)) for s in
                          ("0.6 * sqa(zt - 1.2)", "0.5 * tanh((zt * 1.0) + -1.0)", "sqa((rh * 0.3) + x) * 2.0 + 1.5 * zt")]
     zk = float(C.ZZ.double()[40, 0] / 260.0)                 # a grid row: the likelihood has a kink at c = zk
+    dzt = float((C.ZZ.double()[41, 0] - C.ZZ.double()[40, 0]) / 260.0)
     cusp_truth = R.CorrectedModel(BaseMap(), R.expression_correction(f"0.6 * sqa(zt - {zk!r})"))
     ctr, cva = sample_showers(cusp_truth, 400, 300, 11), sample_showers(cusp_truth, 80, 300, 12)
+    mid_truth = R.CorrectedModel(BaseMap(), R.expression_correction(f"0.6 * sqa(zt - {zk + dzt / 2!r})"))
+    mtr, mva = sample_showers(mid_truth, 400, 300, 11), sample_showers(mid_truth, 80, 300, 12)
     cusp = {}
-    for name, clip, eq in (("tight_clip", 1e-4, f"0.6 * sqa(zt - {zk + 0.004!r})"),
-                           ("default_clip", 5.0, f"0.6 * sqa(zt - {zk + 0.004!r})"),
-                           ("no_cusp_in_grid", 5.0, "0.5 * sqa(zt + 2.0)")):
+    for name, clip, eq, dtr, dva in (
+            ("tight_clip", 1e-4, f"0.6 * sqa(zt - {zk + 0.004!r})", ctr, cva),
+            ("default_clip", 5.0, f"0.6 * sqa(zt - {zk + 0.004!r})", ctr, cva),          # parks 0.003 above the row
+            ("contour_between_rows", 5.0, f"0.6 * sqa(zt - {zk + dzt / 2 + 0.004!r})", mtr, mva),   # optimum mid-row
+            ("no_cusp_in_grid", 5.0, "0.5 * sqa(zt + 2.0)", ctr, cva),
+            ("sqa_of_rh", 5.0, "0.05 * sqa(rh) + 0.4 * tanh(zt - 1.0)", ctr, cva)):      # no constant inside
         cm = R.CorrectedModel(BaseMap(), R.expression_correction(eq))
-        co = R.fit_candidate(cm, ctr, cva, train.FitConfig(steps=160, lr=0.004, lr_end=0.0004, batch=64, k_train=1,
+        co = R.fit_candidate(cm, dtr, dva, train.FitConfig(steps=160, lr=0.004, lr_end=0.0004, batch=64, k_train=1,
                                                            k_val=1, eval_every=80, clip=clip, name=name,
                                                            out_dir=str(tmp / name)),
                              label=name, synthetic=True, log=None)
@@ -319,13 +340,35 @@ def _cpu_suite(out_json: str, tmp: str) -> None:
         cusp[name] = {"flags": co["clip_log"]["flags"], "n_clipped": co["clip_log"]["n_clipped"],
                       "n_steps": co["clip_log"]["n_steps"], "max_norm": co["clip_log"]["max_norm"],
                       "per_constant": co["clip_log"]["per_constant"], "cusp_stalled": co["cusp_stalled"],
-                      "hover": co["cusp_hover"], "hover_suspect": co["cusp_hover_suspect"], "warnings": co["warnings"],
-                      "c": cm.correction.c.tolist(), "zk": zk, "summary": R.refit_summary(co),
+                      "by_clipping": co["cusp_stalled_by_clipping"], "by_hover": co["cusp_stalled_by_hover"],
+                      "hover": co["cusp_hover"], "warnings": co["warnings"],
+                      "c": cm.correction.c.tolist(), "zk": zk, "dzt": dzt, "summary": R.refit_summary(co),
                       "per_step_clipped_sum": int(sum(co["clip_log"]["per_step"]["clipped"]))}
     rep["cusp"] = cusp
     rep["recovery_clip"] = {"flags": out["clip_log"]["flags"], "n_clipped": out["clip_log"]["n_clipped"],
                             "n_steps": out["clip_log"]["n_steps"], "hover": out["cusp_hover"],
                             "cusp_stalled": out["cusp_stalled"]}
+    # the classification on constructed histories (40 steps; the window is the last 10)
+    rows = (C.ZZ.double()[:, :1] / 260.0).numpy()            # (128, 1) depth rows
+    rings0 = np.concatenate([[0.0], (C.RR.double()[0, 1:] / 21.9).numpy()])[None, :]      # r = 0 on the axis
+    one = np.ones(40)
+    hov = {}
+    e1 = T.parse("0.3 * sqa(rh) + 0.2 * tanh(zt * 1.0)")
+    hov["sqa_rh_at_r0"] = R.cusp_hover_statistics(e1, np.stack([0.3 * one, 0.2 * one, one], 1), rows, rings0)
+    e2 = T.parse(f"0.6 * sqa(zt - {zk!r})")
+    flip = zk + 1e-3 * np.where(np.arange(40) % 2 == 0, 1.0, -1.0)           # back and forth across the row
+    hov["sign_flipping"] = R.cusp_hover_statistics(e2, np.stack([0.6 * one, flip], 1), rows, rings0)
+    hov["parked_exactly"] = R.cusp_hover_statistics(e2, np.stack([0.6 * one, zk * one], 1), rows, rings0)
+    sweep = zk + dzt * np.linspace(-1.6, 1.6, 40)                            # a contour moving steadily through cells
+    hov["contour_sweeping"] = R.cusp_hover_statistics(e2, np.stack([0.6 * one, sweep], 1), rows, rings0)
+    jitter = zk + 0.0025 + 2e-4 * np.sin(np.arange(40) * 2.1)                # stagnating 0.05 row spacings from a row
+    hov["stagnating_near_zero"] = R.cusp_hover_statistics(e2, np.stack([0.6 * one, jitter], 1), rows, rings0)
+    far = zk + dzt / 2 + 2e-4 * np.sin(np.arange(40) * 2.1)                  # the same jitter, mid-way between rows
+    hov["stagnating_between_rows"] = R.cusp_hover_statistics(e2, np.stack([0.6 * one, far], 1), rows, rings0)
+    hov["dead_zero"] = R.cusp_hover_statistics(T.parse("0.6 * sqa(zt * 0.0)"), np.stack([0.6 * one, 0.0 * one], 1),
+                                               rows, rings0)
+    rep["hover_unit"] = hov
+    rep["hover_constants"] = [R.CUSP_EPS_REL, R.HOVER_STAGNATION]
 
     # S4: the tail criterion of a closed-form baseline; PREVIEW on the legacy formula (not the baseline of record) ------
     rep["legacy"] = None
@@ -339,7 +382,7 @@ def _cpu_suite(out_json: str, tmp: str) -> None:
                             grid=R.extended_ring_grid(std.grid))
         h = hashlib.sha256(ck.read_bytes()).hexdigest()
         label = "LEGACY component formula (preview) - not the refitted baseline of record"
-        rec = R.tail_criterion_for_baseline(std, ext, baseline_hash=h, label=label)
+        rec = R.tail_criterion_for_baseline(std, ext, baseline_hash=h, label=label, reference_kind="legacy_preview")
         cd = R.continued_log_density(std, ext, torch.log(torch.tensor([1.0, 20.0], dtype=torch.float64)))
         wrong = None
         try:
@@ -350,32 +393,41 @@ def _cpu_suite(out_json: str, tmp: str) -> None:
             R.tail_criterion_for_baseline(std, other_model, baseline_hash=h, label=label)
         except ValueError as err:
             wrong = str(err)
-        Pz = np.exp(cd["log_p_std"]).sum(2)                                  # r-integrated depth profile, 1 and 20 GeV
         (tmp / "legacy_tail_criterion.json").write_text(json.dumps(rec))
         import os as _os
         if _os.environ.get("SFM_SR_PREVIEW_OUT"):
             Path(_os.environ["SFM_SR_PREVIEW_OUT"]).write_text(json.dumps(rec))
         from sfm.sr import checks as K
+        K.verify_tail_criterion(rec, h)
+        certs = {eq: A.certify_finalist(eq, tail_criterion=rec, baseline_hash=h, baseline_frozen=True)
+                 for eq in ("-0.3 * tanh(zt - 2.0) - 0.1 * l1p(rh)", "-0.3 * tanh(zt - 2.0) + 0.1 * l1p(rh)",
+                            "0.3 * tanh((zt - 2.8) * 3.0) - 0.1 * l1p(rh)")}
         rep["legacy"] = {"record": {k: rec[k] for k in ("label", "baseline_hash", "criterion", "record_hash",
                                                          "covers_r_max", "note", "momenta_GeV", "density", "n_depths",
-                                                         "z_range_mm")},
+                                                         "z_range_mm", "reference_kind", "schema")},
+                         "bytes": len(json.dumps(rec)),
                          "r_range": [rec["r_nodes_mm"][0], rec["r_nodes_mm"][-1]], "n_r": len(rec["r_nodes_mm"]),
                          "radial": {k: rec["radial"][k] for k in ("baseline_max", "baseline_max_at",
                                                                   "baseline_max_per_momentum", "fraction_above_limit",
                                                                   "baseline_satisfies_limit", "baseline_monotone")},
+                         "radial_sign_changes_per_momentum": np.array(rec["radial"]["sign_changes"]).sum(1).tolist(),
+                         "depth_sign_changes_per_momentum": np.array(rec["depth"]["sign_changes"]).sum(1).tolist(),
                          "depth": {k: rec["depth"][k] for k in ("z90_mm", "baseline_max", "baseline_max_at",
-                                                                 "baseline_satisfies", "baseline_max_per_momentum")},
+                                                                 "baseline_falls_everywhere", "n_rising_cells",
+                                                                 "baseline_max_per_momentum", "rising_regions")},
                          "match_error": cd["match_error"], "shape": list(cd["log_rho"].shape),
                          "r_max": float(cd["r_mm"][-1]), "wrong_model": wrong, "text": K.format_tail_criterion(rec),
-                         "integrated_profile_max_dz_beyond_z90": [
-                             float(np.max(np.diff(np.log(Pz[i]))[cd["z_mm"][:-1] > z90] / np.diff(cd["z_mm"])[cd["z_mm"][:-1] > z90]))
-                             for i, z90 in ((0, rec["depth"]["z90_mm"][2]), (1, rec["depth"]["z90_mm"][4]))],
                          "certify": {eq: {"certified": c["certified"], "reasons": c["reasons"],
                                           "radial": c["tail"]["radial"]["passed"], "depth": c["tail"]["depth"]["passed"],
-                                          "depth_no_flattening": c["tail"]["depth"]["no_flattening_passed"]}
-                                     for eq, c in ((eq, A.certify_finalist(eq, tail_criterion=rec, baseline_hash=h))
-                                                   for eq in ("-0.3 * tanh(zt - 2.0) - 0.1 * l1p(rh)",
-                                                              "-0.3 * tanh(zt - 2.0) + 0.1 * l1p(rh)"))}}
+                                          "depth_absolute": c["tail"]["depth"]["would_pass_absolute_rule"],
+                                          "sign": c["tail"]["sign_changes"]["passed"],
+                                          "sign_depth": c["tail"]["sign_changes"]["depth"],
+                                          "rising_stretches": c["tail"]["sign_changes"]["depth_rising_stretches"],
+                                          "sign_text": c["tail"]["sign_changes"]["text"]}
+                                     for eq, c in certs.items()},
+                         "stage2_falls": A.certify_finalist("-0.3 * tanh(zt - 2.0) - 0.1 * l1p(rh)", tail_criterion=rec,
+                                                            baseline_hash=h, baseline_frozen=True,
+                                                            stage2=True)["reasons"]}
 
     # trajectory substitution -------------------------------------------------------------------------------------
     prov = PolyProvider(["a", "b"], {"a": 3, "b": 1}, init={"a": [0.1, 0.2, 0.3, 0.4], "b": [1.0, -0.5]})
@@ -500,16 +552,24 @@ def test_finalist_certificate_is_computed_on_the_refitted_constants(suite):
     assert f["status"] == "certified" and f["require_certified"] is True and f["stage"] == "after refit"
     assert f["tail"]["evaluated"] and f["tail"]["passed"] and f["tail"]["radial"]["passed"] and f["tail"]["depth"]["passed"]
     assert f["tail"]["radial"]["rule"] == "loglog_slope_le_limit" and f["baseline_hash"] == "hash-of-steep"
+    assert f["tail"]["depth"]["rule"] == "inherit_reference" and f["tail"]["sign_changes"]["enforced"] is False
     assert f["tail_criterion_hash"] == r["steep_hash"] and "superseded" in r["old_arg"]
+    # the baseline was refitted jointly: the model side came from the table of the refitted baseline, the bound
+    # from the fixed reference
+    assert r["table_calls"] == ["BaseMap"] and "table of the refitted baseline" in f["tail"]["model_side"]
+    assert f["reference"]["kind"] == "track_a_finalist" and f["reference"]["measured_table"] is not None
+    assert not r["blind"]["certified"] and "no slope table of the refitted baseline" in " ".join(r["blind"]["reasons"])
     assert r["out"]["audit_certified"] is True and r["out"]["audit_verdict"]["certified"] is True
     from sfm.sr import translate as T
     e = T.from_dict(r["out"]["expr_refit_dict"])                        # the certificate is of THESE constants
     assert T.constants(e) == pytest.approx(r["c"]) and T.constants(e) != [0.5, 1.0, -1.0]
     assert "finalist_certified=True" in r["summary"] and "certified=True" in r["summary"]
-    # the same refitted constants against a baseline that falls more slowly in depth: the correction's rise
-    # (0.8 * 1.5 / 260 = 0.0046 / mm at z' = 263 mm, beyond z_90 at low momentum) beats -0.004 / mm -> no certificate
+    # the same refitted constants against a reference that falls more slowly in depth: the correction's rise
+    # (0.8 * 1.5 / 260 = 0.0046 / mm at z' = 263 mm, beyond z_90 at low momentum) beats -0.004 / mm, so the model
+    # rises where the reference falls -> no certificate
     s = r["slow"]
     assert not s["certified"] and s["audit_certified"] and "depth tail" in s["reasons"][0]
+    assert s["depth"]["worst"]["bound"] == 0.0 and s["depth"]["worst"]["reference"] == pytest.approx(-0.004)
     assert s["depth"]["model_max_dz_per_mm"] == pytest.approx(-0.004 + r["c"][0] * r["c"][1] / 260.0, abs=2e-4)
 
 
@@ -569,52 +629,120 @@ def test_clip_counts_per_constant_and_per_step(suite):
     assert suite["inside_sqa"] == [[False, True], [False, False, False], [True, False, False]]
 
 
-def test_constant_sitting_on_a_cusp_is_flagged(suite):
-    """A fit whose optimum lies on a kink of the gridded likelihood (truth 0.6 sqa(zt - z_k), z_k a grid row)."""
+def test_constant_parked_on_a_cusp_is_flagged_at_the_default_clip_norm(suite):
+    """A fit whose optimum lies next to a kink of the gridded likelihood (truth 0.6 sqa(zt - z_k), z_k a grid row).
+    The flag = persistent clipping OR the clip-independent classification "optimisation-stalling"."""
     c = suite["cusp"]
+    d = c["default_clip"]                                                # the harness's clip norm 5: never clipped
+    assert d["n_clipped"] == 0 and d["max_norm"] < 1.0 and not d["by_clipping"]
+    assert d["by_hover"] is True and d["cusp_stalled"] is True           # ... and flagged all the same
+    node = d["hover"]["nodes"][0]
+    assert node["classification"] == "optimisation-stalling" and node["constants_inside"] == [1]
+    assert "stagnation near u = 0" in node["reasons"][0] and node["share_of_steps_near_zero"] >= 0.5
+    assert node["constants"][0]["stagnating"] and node["constants"][0]["net_over_path"] <= 0.5
+    assert 0.0 < node["min_abs_u"] < node["eps"] == pytest.approx(1e-3 * node["scale_p90_abs_u"])
+    assert node["min_abs_u_in_cell_gaps"] < 0.1 and node["median_gap_between_cell_values"] == pytest.approx(d["dzt"], rel=1e-6)
+    assert node["fraction_exact_zero"] == 0.0 and 0.0 < node["fraction_near_zero"] < 0.02     # reported separately
+    assert node["zero_locus"] == "contour" and node["cells_sign_flipping"] == 0
+    assert abs(d["c"][1] - d["zk"]) < 0.01 and "cusp-stalled" in d["warnings"][0] and "cusp_stalled=True" in d["summary"]
     t = c["tight_clip"]                                                  # clip norm inside the range of the gradients
-    assert t["n_clipped"] == t["n_steps"] == t["per_step_clipped_sum"] == 160
+    assert t["n_clipped"] == t["n_steps"] == t["per_step_clipped_sum"] == 160 and t["by_clipping"] and t["cusp_stalled"]
     a_, c_ = t["per_constant"]
     assert c_["inside_sqa_argument"] and not a_["inside_sqa_argument"]
     assert c_["persistent"] and c_["stalled"] and c_["n_driven"] > 80 and c_["net_over_path"] < 0.25
-    assert t["flags"]["cusp_stalled"] and t["cusp_stalled"] is True and "cusp-stalled" in t["warnings"][0]
-    assert abs(t["c"][1] - t["zk"]) < 0.01 and "cusp_stalled=True" in t["summary"]
-    # with the harness's default clip norm (5) the same run is never clipped: the clip count alone cannot flag it
-    d = c["default_clip"]
-    assert d["n_clipped"] == 0 and d["max_norm"] < 1.0 and d["cusp_stalled"] is False and abs(d["c"][1] - d["zk"]) < 0.01
-    assert d["flags"] == {"persistent_clipping": False, "stalled": False, "cusp_stalled": False}
-    # the supplementary, clip-independent indicator does
-    assert d["hover_suspect"] is True and d["hover"]["nodes"][0]["min_distance_in_excursions"] <= 3.0
-    assert "supplementary indicator" in d["warnings"][0] and t["hover_suspect"] is True
-    n = c["no_cusp_in_grid"]                                             # sqa(zt + 2): no zero of the argument in the grid
-    assert n["hover_suspect"] is False and n["cusp_stalled"] is False and n["n_clipped"] == 0 and n["warnings"] == []
-    assert n["hover"]["nodes"][0]["min_abs_argument"] > 1.0
-    r = suite["recovery_clip"]                                           # the smooth recovery run: nothing to flag
+
+
+def test_structural_zeros_are_reported_not_flagged(suite):
+    """sqa(rho) towards r = 0, a zero contour of sqa(zeta - c) between rows, an argument without a zero."""
+    c = suite["cusp"]
+    m = c["contour_between_rows"]                                        # the optimum lies mid-way between two rows
+    node = m["hover"]["nodes"][0]
+    assert m["cusp_stalled"] is False and not m["by_hover"] and m["warnings"] == []
+    assert node["classification"] == "structural-spatial" and node["zero_locus"] == "contour"
+    assert node["min_abs_u_in_cell_gaps"] > 0.3 and node["fraction_near_zero"] == 0.0 and node["min_abs_u"] > node["eps"]
+    assert "no constant inside the argument stalls there" in node["reasons"][0]
+    n = c["no_cusp_in_grid"]                                             # sqa(zt + 2): positive on the whole grid
+    assert n["hover"]["nodes"][0]["classification"] == "no zero" and n["cusp_stalled"] is False and n["n_clipped"] == 0
+    assert n["hover"]["nodes"][0]["min_abs_u"] > 1.0
+    s = c["sqa_of_rh"]                                                   # a real fit with sqa(rh): nothing to flag
+    assert s["cusp_stalled"] is False and s["hover"]["nodes"][0]["constants_inside"] == []
+    assert s["hover"]["nodes"][0]["classification"] in ("no zero", "structural-spatial")
+    r = suite["recovery_clip"]                                           # the smooth recovery run: no sqa at all
     assert r["n_steps"] == 300 and r["n_clipped"] == 0 and r["cusp_stalled"] is False and r["hover"]["nodes"] == []
-    assert r["flags"] == {"persistent_clipping": False, "stalled": False, "cusp_stalled": False}
+
+
+def test_cusp_classification_on_constructed_histories(suite):
+    h = suite["hover_unit"]
+    assert suite["hover_constants"] == [1e-3, 0.5]
+    a = h["sqa_rh_at_r0"]["nodes"][0]                                    # sqa(rho) evaluated AT r = 0
+    assert a["fraction_exact_zero"] == pytest.approx(1 / 32) and a["zero_locus"] == "exact zeros"
+    assert a["classification"] == "structural-spatial" and not h["sqa_rh_at_r0"]["stalling"]
+    assert a["constants_inside"] == [] and "no trainable constant inside" in a["reasons"][0]
+    f = h["sign_flipping"]["nodes"][0]                                   # the contour driven back and forth
+    assert f["classification"] == "optimisation-stalling" and f["cells_sign_flipping"] == 32 * 5
+    assert "late-step sign-flipping" in f["reasons"][0] and h["sign_flipping"]["stalling"]
+    p_ = h["parked_exactly"]["nodes"][0]                                 # the constant exactly on a row value
+    assert p_["classification"] == "optimisation-stalling" and p_["cells_parked_exactly"] == 32 * 5
+    assert p_["fraction_exact_zero"] == pytest.approx(1 / 128) and "parked exactly on u = 0" in " ".join(p_["reasons"])
+    s = h["contour_sweeping"]["nodes"][0]                                # moving steadily: every cell crossed once
+    assert s["classification"] == "structural-spatial" and s["cells_sign_flipping"] == 0
+    assert s["constants"][0]["net_over_path"] == pytest.approx(1.0) and not h["contour_sweeping"]["stalling"]
+    g = h["stagnating_near_zero"]["nodes"][0]                            # jitter 0.05 row spacings from a row
+    assert g["classification"] == "optimisation-stalling" and "stagnation near u = 0" in g["reasons"][0]
+    assert g["fraction_exact_zero"] == 0.0 and g["fraction_near_zero"] == pytest.approx(1 / 128)
+    b = h["stagnating_between_rows"]["nodes"][0]                         # the same jitter half a spacing away
+    assert b["classification"] == "structural-spatial" and b["fraction_near_zero"] == 0.0
+    z = h["dead_zero"]["nodes"][0]                                       # sqa(0 * zt): u = 0 everywhere, dead constant
+    assert z["fraction_exact_zero"] == 1.0 and z["classification"] == "optimisation-stalling"
 
 
 def test_tail_criterion_of_the_legacy_formula_preview(suite):
-    """PREVIEW ONLY (decision S4, part d): the criterion is decided of record on the H200 for the refitted Track A
-    finalist. Here the machinery is run on the legacy component formula, read-only, to see which branch to expect."""
+    """PREVIEW ONLY: the reference of record is the Track A finalist on the H200. Here the machinery is run on the
+    legacy component formula, read-only: which rules follow, where the formula itself rises in depth beyond z_90,
+    and which component does it."""
     r = suite["legacy"]
     if r is None:
         pytest.skip("legacy formula checkpoint not present")
     rec = r["record"]
-    assert "LEGACY" in rec["label"] and "not the refitted baseline of record" in rec["label"]
+    assert "LEGACY" in rec["label"] and rec["reference_kind"] == "legacy_preview" and rec["schema"].endswith("/2")
     assert len(rec["baseline_hash"]) == 64 and rec["covers_r_max"] and rec["momenta_GeV"] == [0.05, 0.1, 1.0, 5.0, 20.0, 30.0, 50.0]
     assert r["match_error"] < 1e-9 and "before the acceptance template" in rec["note"]   # exact continuation
     assert r["shape"] == [2, 128, 56] and 1400.0 < r["r_max"] < 1500.0 and r["r_range"][0] < 200.0 < r["r_range"][1]
-    assert "does not continue the baseline" in r["wrong_model"]         # another model is not accepted as continuation
+    assert "does not continue the baseline" in r["wrong_model"] and r["bytes"] < 3_000_000
     ra = r["radial"]
     assert not ra["baseline_satisfies_limit"] and ra["baseline_monotone"] and -2.0 < ra["baseline_max"] < 0.0
-    assert rec["criterion"]["radial"] == "monotone_and_no_flattening"   # the far halo: flatter than -2
-    assert all(-2.0 < v < 0.0 for v in ra["baseline_max_per_momentum"])
-    assert rec["criterion"]["depth"] == "dz_le_0_beyond_z90" and len(r["depth"]["z90_mm"]) == 7
-    assert "3-D density" in r["text"]
+    assert rec["criterion"] == {"radial": "monotone_and_no_flattening", "depth": "inherit_reference",
+                                "decided_from": rec["criterion"]["decided_from"]}
+    de = r["depth"]
+    assert not de["baseline_falls_everywhere"] and de["n_rising_cells"] > 100 and len(de["z90_mm"]) == 7
+    reg = {g["p_GeV"]: g for g in de["rising_regions"]}
+    assert reg[0.05]["n_cells"] == 0 and reg[0.1]["n_cells"] == 0
+    # which component, checkable against the physics: the track's Bragg rise before its range end at 1 GeV, the
+    # end blob in the last row at 5 GeV, the widening shower beyond the grid radius at 20 GeV and above
+    assert reg[1.0]["attribution"]["removed_by"] == ["track"] and 700.0 < reg[1.0]["z_range_mm"][0] < 770.0
+    assert 700.0 < reg[1.0]["attribution"]["track_range_mm"] < 800.0 and reg[1.0]["r_range_mm"][1] < 250.0
+    assert reg[5.0]["attribution"]["removed_by"] == ["end"] and reg[5.0]["z_range_mm"][0] > 1400.0
+    for pm in (20.0, 30.0, 50.0):
+        assert reg[pm]["attribution"]["removed_by"] == ["shower"] and reg[pm]["r_range_mm"][0] > 600.0
+        assert reg[pm]["max_slope_per_100mm"] < 0.05
+    assert reg[1.0]["attribution"]["energy_in_rising_cells_inside_grid"] < 2e-3
+    assert "removed by leaving out: ['track']" in r["text"] and "3-D density" in r["text"]
     cert = r["certify"]
-    falls, flat = cert["-0.3 * tanh(zt - 2.0) - 0.1 * l1p(rh)"], cert["-0.3 * tanh(zt - 2.0) + 0.1 * l1p(rh)"]
-    assert falls["radial"] and falls["depth_no_flattening"] and not flat["radial"]
+    falls, flat, rises = (cert[k] for k in ("-0.3 * tanh(zt - 2.0) - 0.1 * l1p(rh)",
+                                              "-0.3 * tanh(zt - 2.0) + 0.1 * l1p(rh)",
+                                              "0.3 * tanh((zt - 2.8) * 3.0) - 0.1 * l1p(rh)"))
+    assert falls["certified"] and falls["radial"] and falls["depth"]     # inherits both tails
+    assert not falls["depth_absolute"]                                   # which the absolute rule could never pass
+    assert not flat["certified"] and not flat["radial"] and flat["depth"]
+    assert not rises["certified"] and not rises["depth"]                 # rises where the reference falls or less
+    assert "model | reference" in falls["sign_text"] and "rising stretches" in falls["sign_text"]
+    # Stage-2 condition, as specified (per profile): this monotonically falling correction has FEWER sign changes
+    # in total than the reference, and still more in a few profiles - where it turns the start of a rising
+    # stretch of the reference into a fall. The count of rising stretches does not have that edge effect.
+    sd = falls["sign_depth"]
+    assert sd["model_total"] < sd["reference_total"] and 0 < sd["n_profiles_exceeding"] < 20 and not falls["sign"]
+    assert falls["rising_stretches"]["n_profiles_exceeding"] == 0
+    assert any("sign changes (depth)" in x for x in r["stage2_falls"])
 
 
 def test_gauge_terms_are_stripped_and_float64_is_enforced(suite):

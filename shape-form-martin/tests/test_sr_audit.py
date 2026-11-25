@@ -570,8 +570,8 @@ SMALL_BUDGET = {"max_boxes": 2000}
 
 
 def _records():
-    """Tail-criterion records of two synthetic baselines (tests/test_sr_checks.py): "steep" (rule <= -2) and "halo"
-    (far halo flatter than -2: rule "monotone and no flattening"), each bound to its own baseline hash."""
+    """Tail-criterion records of two synthetic reference baselines (tests/test_sr_checks.py): "steep" (rule <= -2)
+    and "halo" (far halo flatter than -2: rule "not flatter than the reference"), each bound to its own hash."""
     import test_sr_checks as TC
     return TC.record("steep"), TC.record("halo"), TC
 
@@ -594,12 +594,13 @@ def test_undecided_passes_screening_but_not_the_finalist_rule_before_and_after_a
 
 def test_refit_that_moves_the_equation_outside_the_bound_loses_its_certificate():
     steep, _, _ = _records()
-    kw = dict(tail_criterion=steep, baseline_hash="hash-of-steep")
+    kw = dict(tail_criterion=steep, baseline_hash="hash-of-steep", baseline_frozen=True)
     e = T.with_constants(T.parse(UNDECIDED), [0.9, 3.0, 3.0, 5.0])
     c0 = A.certify_finalist(e, **kw)
     assert c0["certified"] and c0["audit_certified"] and c0["reasons"] == [] and c0["tail"]["evaluated"]
     assert c0["audit"]["magnitude"]["status"] == "certified" and c0["audit"]["certified"] is True
     assert c0["baseline_hash"] == "hash-of-steep" and c0["tail_criterion_hash"] == steep["record_hash"]
+    assert c0["reference"]["kind"] == "synthetic" and c0["reference"]["measured_table"] is None
     moved = T.with_constants(e, [1.3, 3.0, 3.0, 5.0])                                # after the refit
     c1 = A.certify_finalist(moved, **kw)
     assert not c1["certified"] and c1["audit"]["magnitude"]["status"] == "failed"
@@ -623,28 +624,30 @@ def test_tail_slopes_enclose_the_slopes_of_the_correction():
     assert wide["dlnr"]["sup"] >= -0.1 * (200 / 21.9) / (1 + 200 / 21.9) - 1e-12 and wide["r_from_mm"] == 200.0
 
 
-def test_radial_rule_follows_the_baseline_not_the_equation():
-    """S4. An equation that only inherits the baseline's far halo (d_r delta <= 0) passes under the alternative and
-    would fail "<= -2"; an equation that flattens the profile fails the alternative and would pass "<= -2" on a
-    steep baseline. Which rule applies is read from the record of the baseline in hand."""
+def test_radial_rule_follows_the_reference_not_the_equation():
+    """S4. An equation that only inherits the reference's far halo passes "not flatter than the reference" and would
+    fail "<= -2"; an equation that flattens the profile fails it and would pass "<= -2" on a steep reference. Which
+    rule applies is read from the record of the reference in hand."""
     steep, halo, TC = _records()
     inherits = "0.3 * tanh(zt - 2.0) * 0.0 - 0.1 * l1p(rh)"                 # d f / d ln r = -0.1 rh / (1 + rh) < 0
     flattens = "0.1 * l1p(rh)"                                              # d f / d ln r up to +0.1
-    c = A.certify_finalist(inherits, tail_criterion=halo, baseline_hash="hash-of-halo")
+    c = A.certify_finalist(inherits, tail_criterion=halo, baseline_hash="hash-of-halo", baseline_frozen=True)
     rad = c["tail"]["radial"]
-    assert c["certified"] and rad["rule"] == "monotone_and_no_flattening" and rad["baseline_monotone"]
-    assert rad["equation_sup_dlnr_continuum"] <= 0.0 and "r > 200 mm" in rad["region"]
+    assert c["certified"] and rad["rule"] == "monotone_and_no_flattening" and rad["reference_monotone"]
+    assert rad["n_violations"] == 0 and rad["n_points"] == 7 * 128 * (len(halo["r_nodes_mm"]) - 1)   # point by point
+    assert rad["equation_sup_dlnr_continuum"] <= 0.0 and "r > 200 mm" in rad["continuum_region"] and rad["continuum_required"]
     assert c["tail"]["density"] == "3-D density rho, not ring mass"
-    assert halo["radial"]["baseline_max"] + rad["equation_sup_dlnr_at_registered_momenta"] > -2.0   # fails "<= -2"
+    assert rad["model_max_loglog_slope"] > -2.0                              # ... it would fail "<= -2"
     forged = dict(halo, criterion=dict(halo["criterion"], radial="loglog_slope_le_limit"))
     lit = A.tail_check(inherits, forged)                                     # what "<= -2" would have said
     assert not lit["radial"]["passed"] and lit["radial"]["model_max_loglog_slope"] > -2.0
     with pytest.raises(ValueError, match="altered"):                         # ... but that record cannot be used
         A.certify_finalist(inherits, tail_criterion=forged, baseline_hash="hash-of-halo")
-    bad = A.certify_finalist(flattens, tail_criterion=halo, baseline_hash="hash-of-halo")
-    assert not bad["certified"] and bad["audit_certified"] and "flattens the profile" in bad["reasons"][0]
+    bad = A.certify_finalist(flattens, tail_criterion=halo, baseline_hash="hash-of-halo", baseline_frozen=True)
+    assert not bad["certified"] and bad["audit_certified"] and "flatter than the fixed reference" in bad["reasons"][0]
+    assert "flattens the profile" in " ".join(bad["reasons"]) and bad["tail"]["radial"]["n_violations"] > 0
     assert bad["tail"]["radial"]["equation_sup_dlnr_continuum"] == pytest.approx(0.1 * BOX["rh"][1] / (1 + BOX["rh"][1]), abs=0.01)
-    ok = A.certify_finalist(flattens, tail_criterion=steep, baseline_hash="hash-of-steep")
+    ok = A.certify_finalist(flattens, tail_criterion=steep, baseline_hash="hash-of-steep", baseline_frozen=True)
     assert ok["certified"] and ok["tail"]["radial"]["rule"] == "loglog_slope_le_limit"
     assert ok["tail"]["radial"]["model_max_loglog_slope"] == pytest.approx(-3.2 + 0.0986, abs=0.01)
     too_flat = A.certify_finalist("1.5 * l1p(rh) * 0.9", tail_criterion=steep, baseline_hash="hash-of-steep",
@@ -654,9 +657,9 @@ def test_radial_rule_follows_the_baseline_not_the_equation():
         A.certify_finalist(flattens, tail_criterion=steep, baseline_hash="hash-of-halo")
     with pytest.raises(ValueError, match="baseline_hash is required"):
         A.certify_finalist(flattens, tail_criterion=steep)                  # no hash given: not bound, refused
-    bump = TC.record("bump")                                                 # a baseline that is not monotone itself
+    bump = TC.record("bump")                                                 # a reference that is not monotone itself
     nb = A.certify_finalist(inherits, tail_criterion=bump, baseline_hash="hash-of-bump")
-    assert not nb["certified"] and "baseline itself is not monotone" in nb["reasons"][0]
+    assert not nb["certified"] and "reference baseline itself is not monotone" in " ".join(nb["reasons"])
     with pytest.raises(ValueError, match="superseded"):
         A.certify_finalist(flattens, baseline_tail={"dlnr": -3.0, "dz_per_mm": -0.004})
     none = A.certify_finalist(inherits)                                      # no criterion: not a certificate
@@ -664,41 +667,123 @@ def test_radial_rule_follows_the_baseline_not_the_equation():
     assert "tail check not evaluated" in none["reasons"][0]
 
 
-def test_depth_rule_beyond_z90():
+def test_inheriting_depth_rule():
+    """Beyond z_90: d ln rho_model / d z' <= max(0, d ln rho_reference / d z'), point by point."""
     steep, halo, TC = _records()
     rise = "0.3 * tanh(zt - 4.0)"                                           # d f / d z' up to 0.3 / 260 = 0.00115 / mm
-    c = A.certify_finalist(rise, tail_criterion=steep, baseline_hash="hash-of-steep")
+    c = A.certify_finalist(rise, tail_criterion=steep, baseline_hash="hash-of-steep", baseline_frozen=True)
     d = c["tail"]["depth"]
-    assert c["certified"] and d["rule"] == "dz_le_0_beyond_z90" and d["literal_rule_passed"]
-    assert d["model_max_dz_per_mm"] == pytest.approx(-1 / 250.0 + 0.3 / 260.0, abs=1e-5) and not d["no_flattening_passed"]
-    assert d["equation_sup_dz_per_mm_beyond_z90"] == pytest.approx(0.3 / 260.0, rel=1e-6)
+    assert c["certified"] and d["rule"] == "inherit_reference" and d["n_violations"] == 0 and d["n_reference_rising"] == 0
+    assert d["n_points"] == sum((127 - k) * 41 for k in steep["depth"]["k0"])      # every momentum, depth, radius
+    assert d["model_max_dz_per_mm"] == pytest.approx(-1 / 250.0 + 0.3 / 260.0, abs=1e-5) and d["would_pass_absolute_rule"]
+    assert d["equation_sup_dz_per_mm"] == pytest.approx(0.3 / 260.0, rel=1e-3)
     steeper = A.certify_finalist("1.2 * tanh(zt - 4.0) * 0.95", tail_criterion=steep, baseline_hash="hash-of-steep",
                                  limit=2.0)
-    assert not steeper["certified"] and "depth tail: d ln rho / d z' can reach" in steeper["reasons"][0]
-    # the baseline itself violates the accepted rule: nothing can be certified, and the reason says why
+    assert not steeper["certified"] and "depth tail: beyond z_90 the model's d ln rho / d z' can reach" in steeper["reasons"][0]
+    # a reference that rises itself (+0.22 nat / 100 mm around z' = 1200 mm): inherited, not held against the equation
     rising = TC.record("rising")
-    falls = "-0.3 * tanh(zt - 4.0)"
-    c = A.certify_finalist(falls, tail_criterion=rising, baseline_hash="hash-of-rising")
-    assert not c["certified"] and not c["tail"]["depth"]["baseline_satisfies"]
-    assert "the baseline alone (delta = 0) already violates" in " ".join(c["reasons"])
-    assert c["tail"]["depth"]["no_flattening_passed"] and not c["tail"]["depth"]["literal_rule_passed"]
-    # only a record made with the alternative explicitly allowed changes that
-    alt = TC.record("rising", allow_depth_alternative=True)
-    assert A.certify_finalist(falls, tail_criterion=alt, baseline_hash="hash-of-rising")["certified"]
-    c = A.certify_finalist(rise, tail_criterion=alt, baseline_hash="hash-of-rising")
-    assert not c["certified"] and "flattens the depth profile" in " ".join(c["reasons"])
+    kw = dict(tail_criterion=rising, baseline_hash="hash-of-rising", baseline_frozen=True)
+    for eq in ("-0.1 * l1p(rh)", "-0.3 * tanh(zt - 4.0) - 0.1 * l1p(rh)"):   # delta without, and with a falling, z-part
+        c = A.certify_finalist(eq, **kw)
+        d = c["tail"]["depth"]
+        assert c["certified"] and d["passed"] and d["n_reference_rising"] > 0 and not d["would_pass_absolute_rule"]
+        assert d["largest_excess_per_mm"] <= 1e-11
+    c = A.certify_finalist(rise, **kw)                                       # rises faster where the reference rises
+    d = c["tail"]["depth"]
+    assert not c["certified"] and d["n_violations"] > 0 and d["worst"]["reference"] > 0 and d["worst"]["equation_sup"] > 0
+    assert 1100.0 < d["worst"]["z_mm"][0] < 1300.0 and d["worst"]["model"] > d["worst"]["bound"] == d["worst"]["reference"]
+    # where the reference falls, a correction may still rise as long as the model does not
+    late = A.certify_finalist("0.2 * tanh((zt - 1.5) * 2.0)", **kw)          # rises around z' = 390 mm only
+    assert late["tail"]["depth"]["passed"] and late["tail"]["depth"]["equation_sup_dz_per_mm"] > 1e-3
 
 
-def test_measured_slopes_of_the_refitted_baseline_keep_the_rule_of_the_record():
+def test_a_joint_refit_cannot_bend_the_baseline_to_pass():
+    """The user's anchoring rule. The bound comes from the FIXED reference; the model side is the jointly refitted
+    baseline plus the correction. A refitted baseline that has learnt to rise, or to flatten, fails even with a
+    harmless correction - and its own table is refused as a reference."""
     steep, halo, TC = _records()
-    refit_slopes = TC.K.decide_tail_criterion(TC.baseline("steep") * 1.0 + 0.6 * np.log(TC.RN)[None, None, :], TC.Z, TC.RN,
-                                              TC.MOM, TC.Z90, baseline_hash="jointly-refitted", label="refitted")
-    assert refit_slopes["radial"]["baseline_max"] == pytest.approx(-2.6)
+    harmless = "-0.1 * l1p(rh)"
+    assert A.certify_finalist(harmless, tail_criterion=halo, baseline_hash="hash-of-halo", baseline_frozen=True)["certified"]
+    bent = TC.record("rising", reference_kind=TC.K.MEASURED_KIND)            # the refit made the baseline rise in depth
+    c = A.certify_finalist(harmless, tail_criterion=halo, baseline_hash="hash-of-halo", measured_tail=bent,
+                           baseline_frozen=False)
+    d = c["tail"]["depth"]
+    assert not c["certified"] and c["audit_certified"] and d["n_violations"] > 0
+    assert d["worst"]["reference"] < 0 and d["worst"]["bound"] == 0.0 and d["worst"]["refitted_baseline"] > 0
+    assert d["worst"]["equation_sup"] == 0.0 and "table of the refitted baseline" in c["tail"]["model_side"]
+    assert c["reference"]["measured_table"] == bent["record_hash"] and c["reference"]["kind"] == "synthetic"
+    with pytest.raises(ValueError, match="cannot be the reference"):         # and it cannot serve as its own bound
+        A.certify_finalist(harmless, tail_criterion=bent, baseline_hash="hash-of-rising")
+    # a jointly refitted baseline without its table: the model's slopes are unknown, no certificate
+    blind = A.certify_finalist(harmless, tail_criterion=halo, baseline_hash="hash-of-halo", baseline_frozen=False)
+    assert not blind["certified"] and "no slope table of the refitted baseline" in " ".join(blind["reasons"])
+    # the same anchoring for the radial alternative: a refitted baseline that became flatter fails "not flatter"
+    flatter = TC.K.decide_tail_criterion(TC.baseline("halo") + 0.3 * np.log(TC.RN)[None, None, :], TC.Z, TC.RN, TC.MOM,
+                                         TC.Z90, baseline_hash="refit", label="refitted, flatter halo",
+                                         reference_kind=TC.K.MEASURED_KIND)
+    c = A.certify_finalist(harmless, tail_criterion=halo, baseline_hash="hash-of-halo", measured_tail=flatter,
+                           baseline_frozen=False)
+    rad = c["tail"]["radial"]
+    assert not c["certified"] and rad["n_violations"] > 0 and "flatter than the fixed reference" in " ".join(c["reasons"])
+    assert rad["worst"]["refitted_baseline"] == pytest.approx(rad["worst"]["reference"] + 0.3, abs=1e-6)
+    assert rad["continuum_required"] is False                                # with a refitted baseline the anchored
+    # pointwise rule governs: a steeper refitted baseline leaves room for a correction that flattens a little
+    steeper = TC.K.decide_tail_criterion(TC.baseline("halo") - 0.3 * np.log(TC.RN)[None, None, :], TC.Z, TC.RN, TC.MOM,
+                                         TC.Z90, baseline_hash="refit2", label="refitted, steeper halo",
+                                         reference_kind=TC.K.MEASURED_KIND)
+    c = A.certify_finalist("0.1 * l1p(rh)", tail_criterion=halo, baseline_hash="hash-of-halo", measured_tail=steeper,
+                           baseline_frozen=False)
+    assert c["certified"] and c["tail"]["radial"]["equation_sup_dlnr_continuum"] > 0.05
+    # under "<= -2" the refitted baseline's own slopes enter the absolute bound
+    refit_slopes = TC.K.decide_tail_criterion(TC.baseline("steep") + 0.6 * np.log(TC.RN)[None, None, :], TC.Z, TC.RN,
+                                              TC.MOM, TC.Z90, baseline_hash="jointly-refitted", label="refitted",
+                                              reference_kind=TC.K.MEASURED_KIND)
     eq = "0.7 * l1p(rh) * 0.99"                                             # adds up to +0.69 to the log-log slope
-    assert A.certify_finalist(eq, tail_criterion=steep, baseline_hash="hash-of-steep", limit=5.0)["certified"]
+    assert A.certify_finalist(eq, tail_criterion=steep, baseline_hash="hash-of-steep", limit=5.0, baseline_frozen=True)["certified"]
     c = A.certify_finalist(eq, tail_criterion=steep, baseline_hash="hash-of-steep", measured_tail=refit_slopes, limit=5.0)
     assert not c["certified"] and c["tail"]["radial"]["rule"] == "loglog_slope_le_limit"
-    assert "jointly refitted baseline" in c["tail"]["slopes_from"]
+    other_grid = TC.K.decide_tail_criterion(TC.baseline("steep")[:, ::2], TC.Z[::2], TC.RN, TC.MOM, TC.Z90,
+                                            baseline_hash="x", label="x", reference_kind=TC.K.MEASURED_KIND)
+    with pytest.raises(ValueError, match="same grid"):
+        A.tail_check(eq, steep, measured=other_grid)
+
+
+def test_stage2_sign_changes_per_profile():
+    """Stage 2: counts of model and reference side by side, and sign_changes(model) <= sign_changes(reference) as a
+    pass condition per profile - a downward oscillation inside a region where the reference rises passes the
+    slope rule (it never rises faster) and is caught here."""
+    steep, halo, TC = _records()
+    rising = TC.record("rising")                                            # each depth profile: one bump, - + -
+    quiet = "-0.3 * tanh(zt - 4.0) - 0.1 * l1p(rh)"
+    r = A.tail_check(quiet, rising, enforce_sign_changes=True)
+    sc = r["sign_changes"]
+    assert r["passed"] and sc["passed"] and sc["enforced"] and sc["depth"]["n_profiles"] == 7 * 41
+    assert sc["depth"]["reference_total"] == 2 * 7 * 41 and sc["depth"]["model_total"] <= sc["depth"]["reference_total"]
+    assert sc["radial"]["n_profiles"] == 7 * 128 and sc["radial"]["model_total"] == sc["radial"]["reference_total"] == 0
+    assert sc["tolerance"] == {"depth_per_mm": 1e-5, "radial_loglog": 1e-3,
+                               "counting": "per profile on this record's grid; lobes below the tolerance dropped"}
+    lines = sc["text"].splitlines()
+    assert "model | reference" in lines[0] and lines[1].split()[0] == "depth" and lines[2].split()[0] == "radial"
+    # d f / d zt = -0.78 (1 + cos(40 zt)) <= 0: never rises faster than the reference, but flips its slope's sign
+    wiggle = "-0.78 * zt - 0.0195 * sin(zt * 40.0)"
+    r = A.tail_check(wiggle, rising, enforce_sign_changes=True)
+    sc = r["sign_changes"]
+    assert r["depth"]["passed"] and r["radial"]["passed"]                    # the certified slope rules are met
+    assert not sc["passed"] and not r["passed"] and sc["depth"]["n_profiles_exceeding"] > 0
+    assert sc["depth"]["worst_profile"]["model"] > sc["depth"]["worst_profile"]["reference"] == 2
+    assert sc["depth"]["model_total"] > sc["depth"]["reference_total"] and "sign changes (depth)" in " ".join(r["reasons"])
+    loose = A.tail_check(wiggle, rising)                                     # Stage 1: reported, not enforced
+    assert loose["passed"] and not loose["sign_changes"]["passed"] and not loose["sign_changes"]["enforced"]
+    assert "reported, not enforced" in loose["sign_changes"]["text"]
+    # the certificate takes the condition with stage2=True
+    c1 = A.certify_finalist(quiet, tail_criterion=rising, baseline_hash="hash-of-rising", baseline_frozen=True, stage2=True)
+    assert c1["certified"] and c1["stage2"] and c1["tail"]["sign_changes"]["enforced"]
+    # a ripple below the tolerance is not counted: 2e-6 / mm against 1e-5 / mm
+    tiny = A.tail_check("-0.3 * tanh(zt - 4.0) + 0.00001 * sin(zt * 40.0)", rising, enforce_sign_changes=True)
+    assert tiny["sign_changes"]["depth"]["passed"]
+    # radial: an oscillation in r on a monotone reference adds sign changes of d ln rho / d ln r
+    rwig = A.tail_check("0.9 * sin(l1p(rh) * 12.0)", steep, enforce_sign_changes=True)
+    assert not rwig["sign_changes"]["radial"]["passed"] and rwig["sign_changes"]["radial"]["reference_total"] == 0
 
 
 # ----------------------------------------------------------------------------------------------------------------------
