@@ -1,0 +1,233 @@
+{
+ "K": 1024,
+ "n": 14950,
+ "machine": {
+  "host": "martin-Garuda",
+  "torch": "2.14.0+cu130",
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "launch_grid": 144
+ },
+ "maps": {
+  "mlp*F/abar": {
+   "delta_K1024": {
+    "mean": -0.00020668221157928772,
+    "se": 0.00013170854954684265,
+    "n": 14950
+   },
+   "delta_K64_report": {
+    "mean": -0.00020897836589494278,
+    "se": 0.0001308663691274002,
+    "n": 14950
+   },
+   "margin": -0.00010219302863181633,
+   "se_margin": 6.646051421749763e-05,
+   "z_margin": -1.5376502850607061,
+   "fraction": 0.9890124783691275,
+   "passed": true,
+   "checks": {
+    "main_is_gain": true,
+    "sign_holds": true,
+    "fraction": true
+   }
+  },
+  "formula*F/abar": {
+   "delta_K1024": {
+    "mean": -0.00037992190357833403,
+    "se": 0.00013329399989181085,
+    "n": 14950
+   },
+   "delta_K64_report": {
+    "mean": -0.0003813607716640102,
+    "se": 0.00013227990904212658,
+    "n": 14950
+   },
+   "margin": -0.0001892415177463289,
+   "se_margin": 6.73350140254619e-05,
+   "z_margin": -2.8104474393481165,
+   "fraction": 0.996227016010593,
+   "passed": true,
+   "checks": {
+    "main_is_gain": true,
+    "sign_holds": true,
+    "fraction": true
+   }
+  },
+  "mlp*FS/abar": {
+   "delta_K1024": {
+    "mean": -0.09933003116212162,
+    "se": 0.0021825464017338992,
+    "n": 14950
+   },
+   "delta_K64_report": {
+    "mean": -0.09933414376300315,
+    "se": 0.002182451620417789,
+    "n": 14950
+   },
+   "margin": -0.049662959280620055,
+   "se_margin": 0.0010914137482959001,
+   "z_margin": -45.50332938187949,
+   "fraction": 0.9999585983154862,
+   "passed": true,
+   "checks": {
+    "main_is_gain": true,
+    "sign_holds": true,
+    "fraction": true
+   }
+  },
+  "formula*FS/abar": {
+   "delta_K1024": {
+    "mean": -0.09898008735682255,
+    "se": 0.0021631126705669726,
+    "n": 14950
+   },
+   "delta_K64_report": {
+    "mean": -0.09898575179951645,
+    "se": 0.0021630709218405024,
+    "n": 14950
+   },
+   "margin": -0.04948721145706432,
+   "se_margin": 0.0010816721460925186,
+   "z_margin": -45.75065710606875,
+   "fraction": 0.9999427751712654,
+   "passed": true,
+   "checks": {
+    "main_is_gain": true,
+    "sign_holds": true,
+    "fraction": true
+   }
+  },
+  "mlp*FS": {
+   "delta_K1024": {
+    "mean": -0.08943534391779565,
+    "se": 0.0022083802265676984,
+    "n": 14950
+   },
+   "delta_K64_report": {
+    "mean": -0.08930691645695613,
+    "se": 0.0022082928952057534,
+    "n": 14950
+   },
+   "margin": -0.04478188568931758,
+   "se_margin": 0.0011043700622595904,
+   "z_margin": -40.54970993843481,
+   "fraction": 1.0014380460767718,
+   "passed": true,
+   "checks": {
+    "main_is_gain": true,
+    "sign_holds": true,
+    "fraction": true
+   }
+  },
+  "core*FS": {
+   "delta_K1024": {
+    "mean": -0.09033761295586526,
+    "se": 0.002153524276608836,
+    "n": 14950
+   },
+   "delta_K64_report": {
+    "mean": -0.09033693925991505,
+    "se": 0.0021534982116949825,
+    "n": 14950
+   },
+   "margin": -0.045169143325907726,
+   "se_margin": 0.0010768714978961907,
+   "z_margin": -41.94478488301673,
+   "fraction": 1.0000074575910556,
+   "passed": true,
+   "checks": {
+    "main_is_gain": true,
+    "sign_holds": true,
+    "fraction": true
+   }
+  },
+  "mlp*FSB/abar": {
+   "delta_K1024": {
+    "mean": -0.09937094780912367,
+    "se": 0.002201361825668015,
+    "n": 14950
+   },
+   "delta_K64_report": {
+    "mean": -0.09937309335306735,
+    "se": 0.002201218153953502,
+    "n": 14950
+   },
+   "margin": -0.04968440113259,
+   "se_margin": 0.001100856384399882,
+   "z_margin": -45.132500330344925,
+   "fraction": 0.9999784092064433,
+   "passed": true,
+   "checks": {
+    "main_is_gain": true,
+    "sign_holds": true,
+    "fraction": true
+   }
+  },
+  "formula*FSB/abar": {
+   "delta_K1024": {
+    "mean": -0.09899875366568167,
+    "se": 0.002180097909675393,
+    "n": 14950
+   },
+   "delta_K64_report": {
+    "mean": -0.09900231000970439,
+    "se": 0.002180004731762779,
+    "n": 14950
+   },
+   "margin": -0.04949759866082947,
+   "se_margin": 0.001090204171288386,
+   "z_margin": -45.402136557901805,
+   "fraction": 0.9999640781712834,
+   "passed": true,
+   "checks": {
+    "main_is_gain": true,
+    "sign_holds": true,
+    "fraction": true
+   }
+  },
+  "mlp*FSB": {
+   "delta_K1024": {
+    "mean": -0.08800744531944045,
+    "se": 0.0022185278178504554,
+    "n": 14950
+   },
+   "delta_K64_report": {
+    "mean": -0.08787643241244415,
+    "se": 0.0022184374000851458,
+    "n": 14950
+   },
+   "margin": -0.04406922911321838,
+   "se_margin": 0.0011094573632429855,
+   "z_margin": -39.721426503856236,
+   "fraction": 1.0014908764887198,
+   "passed": true,
+   "checks": {
+    "main_is_gain": true,
+    "sign_holds": true,
+    "fraction": true
+   }
+  },
+  "core*FSB": {
+   "delta_K1024": {
+    "mean": -0.08931676622218511,
+    "se": 0.0021604654596551966,
+    "n": 14950
+   },
+   "delta_K64_report": {
+    "mean": -0.08931422657791188,
+    "se": 0.002160438782474195,
+    "n": 14950
+   },
+   "margin": -0.044659652933229176,
+   "se_margin": 0.001080356365114709,
+   "z_margin": -41.33789032518668,
+   "fraction": 1.000028434935514,
+   "passed": true,
+   "checks": {
+    "main_is_gain": true,
+    "sign_holds": true,
+    "fraction": true
+   }
+  }
+ },
+ "seconds": 40.45438575744629
+}

@@ -1,0 +1,7 @@
+{
+ "written_utc": "2026-11-25T14:30:29Z",
+ "split": "train",
+ "n_events": 69783,
+ "theta_bins": 64,
+ "note": "mean of A_e over the training events of each theta bin (equal-count bins); geometry only; DIAGNOSTIC for the theta track"
+}

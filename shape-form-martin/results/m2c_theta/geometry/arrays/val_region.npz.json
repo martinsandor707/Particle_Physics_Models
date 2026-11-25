@@ -1,0 +1,16 @@
+{
+ "written_utc": "2026-11-25T14:44:06Z",
+ "split": "val",
+ "n_events": 14950,
+ "K": 64,
+ "seed": 12345,
+ "batch": 128,
+ "machine": {
+  "host": "martin-Garuda",
+  "torch": "2.14.0+cu130",
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "launch_grid": 144
+ },
+ "note": "per-event sums of the hit-side term t_i = -w_i ln(g_i[P phi]/g_i[P]) by region of the hit centre; report-metric fold points",
+ "label": "AUDIT numbers; localises the hit term only"
+}

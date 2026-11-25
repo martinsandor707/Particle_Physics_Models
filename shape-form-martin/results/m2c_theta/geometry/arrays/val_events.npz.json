@@ -1,0 +1,6 @@
+{
+ "written_utc": "2026-11-25T14:25:06Z",
+ "split": "val",
+ "n_events": 14950,
+ "note": "descriptors for the splits of g6_tables.py; mean_A columns: F, FB, FS, FSB"
+}

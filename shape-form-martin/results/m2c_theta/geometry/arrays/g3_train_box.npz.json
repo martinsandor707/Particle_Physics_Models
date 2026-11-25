@@ -1,0 +1,6 @@
+{
+ "written_utc": "2026-11-25T14:15:41Z",
+ "split": "train",
+ "n_events": 69783,
+ "note": "question (a); per-event arrays in cache order; no model, no fold points"
+}

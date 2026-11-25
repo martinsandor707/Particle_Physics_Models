@@ -1,0 +1,7 @@
+{
+ "written_utc": "2026-11-25T14:36:43Z",
+ "split": "train",
+ "n_events": 69783,
+ "rows": 34326739,
+ "note": "training rows (no cut) per (column, layer) cell [occ] and the first training-event index that hits each cell [first_event]; columns ux, uy in mm; written by g1_origins.py from the TRAINING rows of the Parquet file; no model, no fold points"
+}

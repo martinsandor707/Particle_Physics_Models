@@ -1,0 +1,35 @@
+{
+ "written_utc": "2026-11-25T14:25:05Z",
+ "split": "val",
+ "n_events": 14950,
+ "metric": "report metric (common.test_nll fold points)",
+ "K": 64,
+ "seed": 12345,
+ "batch": 128,
+ "machine": {
+  "host": "martin-Garuda",
+  "torch": "2.14.0+cu130",
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "launch_grid": 144
+ },
+ "floor": 0.001,
+ "nsub": 2,
+ "nphi": 64,
+ "parity": {
+  "mlp": {
+   "bit_identical": false,
+   "max_abs_diff": 2.6702880859375e-05,
+   "mean": 18.117856801839974,
+   "stored_mean": 18.11785678289407
+  },
+  "formula": {
+   "bit_identical": false,
+   "max_abs_diff": 2.6702880859375e-05,
+   "mean": 18.120060710332865,
+   "stored_mean": 18.120060637292255
+  }
+ },
+ "keys": "<map>|nll, |hit (sum_i w_i ln g_i), |log_mass (ln M_e), |beyond_zb, |last_ring, |outside_bulk, |total, |ln_factor_mass (ln sum_c P_c f_c before renormalisation)",
+ "maps": "base maps mlp, formula (= core x stored abar), core; X*A naive form; X*A/abar ratio form (template = arrays/abar_train.npz)",
+ "label": "AUDIT numbers on the laptop's fold points; not scores of record; inputs of the geometry maps: p, theta, phi, entry position"
+}

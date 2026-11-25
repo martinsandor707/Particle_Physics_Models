@@ -1,0 +1,44 @@
+{
+ "mlp": {
+  "g5_vs_common_deterministic": {
+   "bit_identical": true,
+   "max_abs": 0.0
+  },
+  "common_deterministic_twice_bit_identical": true,
+  "common_deterministic_vs_m0_stored": {
+   "bit_identical": false,
+   "max_abs": 2.6702880859375e-05
+  },
+  "common_plain_vs_m0_stored": {
+   "bit_identical": false,
+   "max_abs": 2.288818359375e-05
+  },
+  "g5_vs_m0_stored": {
+   "max_abs": 2.6702880859375e-05,
+   "mean_diff": 1.8945904400879954e-08
+  },
+  "mean_g5": 18.117856801839974,
+  "mean_m0": 18.11785678289407
+ },
+ "formula": {
+  "g5_vs_common_deterministic": {
+   "bit_identical": true,
+   "max_abs": 0.0
+  },
+  "common_deterministic_twice_bit_identical": true,
+  "common_deterministic_vs_m0_stored": {
+   "bit_identical": false,
+   "max_abs": 2.6702880859375e-05
+  },
+  "common_plain_vs_m0_stored": {
+   "bit_identical": false,
+   "max_abs": 2.47955322265625e-05
+  },
+  "g5_vs_m0_stored": {
+   "max_abs": 2.6702880859375e-05,
+   "mean_diff": 7.30406100046821e-08
+  },
+  "mean_g5": 18.120060710332865,
+  "mean_m0": 18.120060637292255
+ }
+}

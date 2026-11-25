@@ -1,0 +1,121 @@
+{
+ "meta": {
+  "file": "pion_s1_geometry_trainval.pt",
+  "sha256": "a82a31186d5e3964245e8ccb8b7685175f743e1a62f87c5be167ee8fe0b4220a",
+  "bytes": 3392685,
+  "units": "mm",
+  "definition": "origin = (x, y, z) - R^T (x_local, y_local, z_local), R = common.rotation(theta, phi); identical for every row of the event (no cuts)",
+  "meaning": "absolute (global-frame) position of the shower-frame origin = energy-weighted centroid of the lowest-z hit layer of the event over all rows, including deposits later than 100 ns",
+  "convention": "global = origin + R^T . local; R = common.rotation(theta, phi) (rows = shower axes)",
+  "order": "cache order of cache/pion_s1_trainval.pt (event_number stored per split)",
+  "splits": {
+   "train": {
+    "events": 69783,
+    "rows_read": 34326739,
+    "max_spread_mm": 2.5011104298755527e-12,
+    "origin_min_mm": [
+     -2596.0349121093755,
+     -2599.800048828126,
+     3662.3999023437495
+    ],
+    "origin_max_mm": [
+     2601.0349121093755,
+     2599.8000488281255,
+     4871.89990234375
+    ]
+   },
+   "val": {
+    "events": 14950,
+    "rows_read": 7365844,
+    "max_spread_mm": 2.2737367544323206e-12,
+    "origin_min_mm": [
+     -2596.034912109375,
+     -2599.800048828125,
+     3662.3999023437495
+    ],
+    "origin_max_mm": [
+     2601.034912109375,
+     2599.8000488281255,
+     4871.89990234375
+    ]
+   }
+  },
+  "contains_test_events": false,
+  "dtypes": {
+   "event_number": "int64",
+   "origin": "float64 (n, 3)",
+   "rows": "int64"
+  },
+  "source": "pion_standalone_N100000_M0_20GeV_reg_balanced_s1_v3.parquet",
+  "written_by": "results/m2c_theta/geometry/g1_origins.py",
+  "read_filter": "event_number in (train + val event numbers of cache/pion_s1_trainval.pt)"
+ },
+ "seconds": 7.177860498428345,
+ "train": {
+  "events": 69783,
+  "max_spread_mm": 2.5011104298755527e-12,
+  "transverse_distance_to_straight_line_mm": {
+   "q0.5": 23.06973977941816,
+   "q0.9": 94.50646908608994,
+   "q0.99": 464.05428425148557,
+   "q0.999": 917.348517846293,
+   "q1.0": 2251.3523689778467
+  },
+  "frac_gt_24.3": 0.4588939999713397,
+  "frac_gt_100": 0.09267300058753565,
+  "frac_gt_500": 0.008913345657251767,
+  "first_hit_layer_counts": {
+   "0": 67905,
+   "1": 1041,
+   "2": 231,
+   "3": 124,
+   "4": 65,
+   "5": 44,
+   ">=6": 373
+  }
+ },
+ "val": {
+  "events": 14950,
+  "max_spread_mm": 2.2737367544323206e-12,
+  "transverse_distance_to_straight_line_mm": {
+   "q0.5": 23.13720679252737,
+   "q0.9": 93.74955485864581,
+   "q0.99": 449.12324286955237,
+   "q0.999": 860.7226502089923,
+   "q1.0": 2010.2696608710762
+  },
+  "frac_gt_24.3": 0.462943143812709,
+  "frac_gt_100": 0.09083612040133779,
+  "frac_gt_500": 0.00842809364548495,
+  "first_hit_layer_counts": {
+   "0": 14505,
+   "1": 251,
+   "2": 61,
+   "3": 32,
+   "4": 12,
+   "5": 11,
+   ">=6": 78
+  }
+ },
+ "training_rows": {
+  "rows": 34326739,
+  "unknown_column": 0,
+  "bad_layer": 0,
+  "max_abs_x": 2601.034912109375,
+  "max_abs_y": 2599.800048828125,
+  "zmin": 3662.39990234375,
+  "zmax": 4871.89990234375,
+  "rows_outside": {
+   "stepped": 0,
+   "octagon": 0,
+   "box": 0
+  },
+  "events_with_row_outside": {
+   "stepped": 0,
+   "octagon": 0,
+   "box": 0
+  },
+  "cells_hit": 525101,
+  "cells_total": 525120
+ }
+}

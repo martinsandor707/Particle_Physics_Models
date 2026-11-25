@@ -1,0 +1,33 @@
+{
+ "written_utc": "2026-11-25T14:31:12Z",
+ "split": "val",
+ "n_events": 14950,
+ "K": 64,
+ "seed": 12345,
+ "batch": 128,
+ "machine": {
+  "host": "martin-Garuda",
+  "torch": "2.14.0+cu130",
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "launch_grid": 144
+ },
+ "floor": 0.001,
+ "metric": "report metric (keys '<map>|nll') and G-bulk on the stratum zb >= 1221 mm (keys 'bulk|<map>|nll')",
+ "label": "AUDIT numbers; controls and diagnostics; '*_theta' and '*_line' maps are NOT the geometry arm",
+ "array": "val_controls_bulk_zb1221_nll.npy",
+ "rows": [
+  "mlp",
+  "mlp*F_theta/abar",
+  "mlp*F_line/abar",
+  "mlp*FS_theta/abar",
+  "mlp*FS_line/abar",
+  "formula",
+  "formula*F_theta/abar",
+  "formula*F_line/abar",
+  "formula*FS_theta/abar",
+  "formula*FS_line/abar"
+ ],
+ "quantity": "per-event G-bulk NLL on the stratum zb >= 1221 mm (bulk-restricted)",
+ "event_index": "val_controls.npz['bulk_stratum_index']",
+ "launch_grid": 144
+}

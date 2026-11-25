@@ -1,0 +1,52 @@
+{
+ "split": "train",
+ "events": 48,
+ "points_per_cell": 256,
+ "cells": 196608,
+ "point_test": "sfm.geometry.columns_inside on explore/train_columns.npz",
+ "FS quadrature 2x64 minus MC": {
+  "mean_signed": -1.7603238423665363e-05,
+  "se_of_mean": 3.9126159070085674e-05,
+  "rms": 0.017348699636676908,
+  "rms_expected_from_binomial_noise_alone": 0.016951391064543027,
+  "max_abs": 0.2265625,
+  "cells_with_0<MC<1": 75506,
+  "cells_MC_exactly_0_or_1": 121102,
+  "max_abs_in_cells_MC_0_or_1": 0.0234375,
+  "event_mean_acceptance_max_abs_difference": 0.0008020401000976562
+ },
+ "FS quadrature 4x256 minus MC": {
+  "mean_signed": -5.190198620160421e-05,
+  "se_of_mean": 3.831550300131765e-05,
+  "rms": 0.016989321940281493,
+  "rms_expected_from_binomial_noise_alone": 0.016951391064543027,
+  "max_abs": 0.13427734375,
+  "cells_with_0<MC<1": 75506,
+  "cells_MC_exactly_0_or_1": 121102,
+  "max_abs_in_cells_MC_0_or_1": 0.016845703125,
+  "event_mean_acceptance_max_abs_difference": 0.0008521676063537598
+ },
+ "FSB quadrature 2x64 minus MC": {
+  "mean_signed": -1.6808509826660156e-05,
+  "se_of_mean": 3.979803697754504e-05,
+  "rms": 0.01764661198147501,
+  "rms_expected_from_binomial_noise_alone": 0.01717012602780376,
+  "max_abs": 0.2265625,
+  "cells_with_0<MC<1": 78598,
+  "cells_MC_exactly_0_or_1": 118010,
+  "max_abs_in_cells_MC_0_or_1": 0.0234375,
+  "event_mean_acceptance_max_abs_difference": 0.0007543563842773438
+ },
+ "FSB quadrature 4x256 minus MC": {
+  "mean_signed": -5.2535285552342735e-05,
+  "se_of_mean": 3.883608821463911e-05,
+  "rms": 0.01722015230097972,
+  "rms_expected_from_binomial_noise_alone": 0.01717012602780376,
+  "max_abs": 0.13427734375,
+  "cells_with_0<MC<1": 78598,
+  "cells_MC_exactly_0_or_1": 118010,
+  "max_abs_in_cells_MC_0_or_1": 0.0224609375,
+  "event_mean_acceptance_max_abs_difference": 0.0007177591323852539
+ },
+ "seconds": 14.3645920753479
+}

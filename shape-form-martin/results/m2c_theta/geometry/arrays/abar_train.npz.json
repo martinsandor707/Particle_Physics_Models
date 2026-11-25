@@ -1,0 +1,17 @@
+{
+ "written_utc": "2026-11-25T14:22:20Z",
+ "split": "train",
+ "n_events": 69783,
+ "nsub": 2,
+ "nphi": 64,
+ "note": "mean over all training events of the per-event acceptance A_e(z', r); pure geometry, no hits, no fit",
+ "keys": {
+  "F": "front",
+  "FB": "front+back",
+  "FS": "front+side (stepped volume, true origin)",
+  "FSB": "all faces",
+  "*_box": "audit box",
+  "*_oct": "straight-edged octagon",
+  "*_line": "stepped volume, straight-line origin"
+ }
+}

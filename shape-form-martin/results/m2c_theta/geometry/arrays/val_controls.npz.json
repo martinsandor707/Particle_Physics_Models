@@ -1,0 +1,17 @@
+{
+ "written_utc": "2026-11-25T14:31:12Z",
+ "split": "val",
+ "n_events": 14950,
+ "K": 64,
+ "seed": 12345,
+ "batch": 128,
+ "machine": {
+  "host": "martin-Garuda",
+  "torch": "2.14.0+cu130",
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "launch_grid": 144
+ },
+ "floor": 0.001,
+ "metric": "report metric (keys '<map>|nll') and G-bulk on the stratum zb >= 1221 mm (keys 'bulk|<map>|nll')",
+ "label": "AUDIT numbers; controls and diagnostics; '*_theta' and '*_line' maps are NOT the geometry arm"
+}

@@ -1,0 +1,17 @@
+{
+ "written_utc": "2026-11-25T14:25:06Z",
+ "split": "val, stratum zb >= 1221 mm",
+ "n_events": 14784,
+ "metric": "G-bulk: Bulk(z_cut=1150, drop_rings=1, renormalise=True, short='raise') on val.subset(stratum); own fold points (batches of 128 of the subset, seed 12345, K 64) as sfm.registry._guard_arrays does",
+ "K": 64,
+ "seed": 12345,
+ "batch": 128,
+ "machine": {
+  "host": "martin-Garuda",
+  "torch": "2.14.0+cu130",
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "launch_grid": 144
+ },
+ "floor": 0.001,
+ "label": "AUDIT numbers, bulk-restricted: never in a column or delta with report-metric numbers"
+}

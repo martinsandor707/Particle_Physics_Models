@@ -1,0 +1,40 @@
+{
+ "written_utc": "2026-11-25T14:26:24Z",
+ "split": "val",
+ "n_events": 14950,
+ "metric": "report-metric estimator at K = 1024 (guard G-K), chunk 64",
+ "K": 1024,
+ "seed": 12345,
+ "batch": 128,
+ "machine": {
+  "host": "martin-Garuda",
+  "torch": "2.14.0+cu130",
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "launch_grid": 144
+ },
+ "floor": 0.001,
+ "label": "AUDIT numbers on the laptop's fold points; not scores of record",
+ "array": "val_k1024_nll.npy",
+ "shape": [
+  12,
+  14950
+ ],
+ "dtype": "float64",
+ "rows": [
+  "mlp",
+  "formula",
+  "mlp*F/abar",
+  "formula*F/abar",
+  "mlp*FS/abar",
+  "formula*FS/abar",
+  "mlp*FS",
+  "core*FS",
+  "mlp*FSB/abar",
+  "formula*FSB/abar",
+  "mlp*FSB",
+  "core*FSB"
+ ],
+ "quantity": "per-event NLL [nat]: report-metric estimator at K = 1024 (guard G-K)",
+ "event_numbers": "val_k1024.npz['event_number'] (validation cache order)",
+ "launch_grid": 144
+}

@@ -1,0 +1,151 @@
+{
+ "split": "train",
+ "columns": 8752,
+ "layers": 60,
+ "rows": 34326739,
+ "saturation": {
+  "n_events": [
+   100,
+   300,
+   1000,
+   3000,
+   10000,
+   20000,
+   30000,
+   40000,
+   50000,
+   60000,
+   69783
+  ],
+  "distinct_cells": [
+   46847,
+   126563,
+   290645,
+   439798,
+   510850,
+   522469,
+   524377,
+   524868,
+   525018,
+   525080,
+   525101
+  ],
+  "distinct_columns": [
+   6748,
+   8684,
+   8752,
+   8752,
+   8752,
+   8752,
+   8752,
+   8752,
+   8752,
+   8752,
+   8752
+  ],
+  "cells_total": 525120,
+  "last_new_column_at_event_index": 725,
+  "new_cells_in_last_10000_events": 22
+ },
+ "never_hit_cells": {
+  "observed": 19,
+  "by_layer": {
+   "58": 2,
+   "59": 17
+  },
+  "expected_poisson_from_neighbours": 24.61869612458657,
+  "sd": 4.932480173009983,
+  "expected_by_layer_58_59": [
+   3.9842324680309984,
+   18.780014086890198
+  ],
+  "neighbour_mean_occupancy_of_the_empty_cells": [
+   2.75,
+   4.0,
+   4.125,
+   4.625,
+   4.625,
+   4.875,
+   5.0,
+   5.0,
+   5.375,
+   5.5,
+   5.5,
+   5.625,
+   5.875,
+   6.125,
+   6.75,
+   6.875,
+   6.875,
+   8.375,
+   8.375
+  ],
+  "min_hits_per_cell_layers_0_to_55": 1,
+  "median_hits_per_cell_by_layer": {
+   "0": 58.0,
+   "10": 117.0,
+   "30": 66.0,
+   "50": 22.0,
+   "57": 11.0,
+   "58": 9.0,
+   "59": 7.0
+  }
+ },
+ "edge_occupancy": {
+  "outer_x_edge: edge/next (median, min, max)": [
+   1.0434239398947027,
+   0.8037770612620913,
+   1.1602665820374485
+  ],
+  "outer_x_edge: next/next-but-one (median)": 1.0339570265581208,
+  "hole_edge: adjacent/next outward (median, min, max)": [
+   0.9472572038475084,
+   0.8939524838012959,
+   0.9918448313863787
+  ],
+  "hole_edge: next/next-but-one (median)": 0.971559905289533,
+  "top_bottom_row_mean / next_row_mean": [
+   1.026451245907098,
+   1.028675011970723
+  ],
+  "reading": "a coordinate clip would pile hits into the edge cells (ratio > 1 against a falling profile)"
+ },
+ "volume_models_training_hits": {
+  "n_hits": 19423809,
+  "n_events": 69783,
+  "stepped": {
+   "hit_centres_outside": 0,
+   "energy_share_centres_outside": 0.0,
+   "hits_with_part_of_fold_box_outside": 0,
+   "energy_share_of_fold_box_outside": 0.0,
+   "area_m2": 22.268908800000002,
+   "share_of_model_area_without_cells": 0.0,
+   "share_of_instrumented_area_missing_from_model": 0.0
+  },
+  "octagon": {
+   "hit_centres_outside": 0,
+   "energy_share_centres_outside": 0.0,
+   "hits_with_part_of_fold_box_outside": 109196,
+   "energy_share_of_fold_box_outside": 0.0036575438390631905,
+   "area_m2": 22.262690430000003,
+   "share_of_model_area_without_cells": 0.003513250577055255,
+   "share_of_instrumented_area_missing_from_model": 0.0037915095327886025
+  },
+  "box": {
+   "hit_centres_outside": 0,
+   "energy_share_centres_outside": 0.0,
+   "hits_with_part_of_fold_box_outside": 0,
+   "energy_share_of_fold_box_outside": 0.0,
+   "area_m2": 27.553451670000005,
+   "share_of_model_area_without_cells": 0.19182627473692482,
+   "share_of_instrumented_area_missing_from_model": 4.1902367483762834e-05
+  },
+  "instrumented_envelope_area_m2": 22.268908800000002,
+  "share_of_envelope_in_module_gaps": 0.04103780379216426,
+  "z_range_of_hit_centres": [
+   3662.3998767601665,
+   4871.899968199621
+  ]
+ },
+ "seconds": 5.148349761962891
+}

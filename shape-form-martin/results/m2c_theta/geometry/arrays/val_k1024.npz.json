@@ -1,0 +1,17 @@
+{
+ "written_utc": "2026-11-25T14:26:24Z",
+ "split": "val",
+ "n_events": 14950,
+ "metric": "report-metric estimator at K = 1024 (guard G-K), chunk 64",
+ "K": 1024,
+ "seed": 12345,
+ "batch": 128,
+ "machine": {
+  "host": "martin-Garuda",
+  "torch": "2.14.0+cu130",
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "launch_grid": 144
+ },
+ "floor": 0.001,
+ "label": "AUDIT numbers; a guard metric: never in a column or delta with K = 64 report-metric numbers"
+}

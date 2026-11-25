@@ -1,0 +1,32 @@
+{
+ "split": "val",
+ "n_events": 14950,
+ "n_stratum_zb_ge_1221": 14784,
+ "K": 64,
+ "seed": 12345,
+ "batch": 128,
+ "floor": 0.001,
+ "nsub": 2,
+ "nphi": 64,
+ "machine": {
+  "host": "martin-Garuda",
+  "torch": "2.14.0+cu130",
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "launch_grid": 144
+ },
+ "parity_with_m0_arrays": {
+  "mlp": {
+   "bit_identical": false,
+   "max_abs_diff": 2.6702880859375e-05,
+   "mean": 18.117856801839974,
+   "stored_mean": 18.11785678289407
+  },
+  "formula": {
+   "bit_identical": false,
+   "max_abs_diff": 2.6702880859375e-05,
+   "mean": 18.120060710332865,
+   "stored_mean": 18.120060637292255
+  }
+ },
+ "seconds": 70.37699127197266
+}
