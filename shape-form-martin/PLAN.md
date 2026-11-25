@@ -385,6 +385,120 @@ differences within 7.2e-8.
 | A5 | D1 "sub-100 MeV events inspected one by one" (§4) | validation has no event below 0.1747 GeV: inspect the 84 validation events below 0.3 GeV and the two training events below 0.1 GeV; every test delta is also reported without the single test event below the training momentum range (0.0734 GeV), pre-registered |
 | A6 | reference values 18.120842 / 18.118084 / 18.123459 / 18.120407 (§3, §5 A0, §12) | **numbers of record on this machine:** MLP val 18.117857, test 18.120806; formula val 18.120061, test 18.123333; formula − MLP +0.002204 ± 0.000293 (val), +0.002527 ± 0.000304 (test). Stored values are quoted as "reference machine, other fold points". All campaign deltas are paired against locally recomputed arrays (`results/m0_parity/*_nll.npy`). |
 
+**A6 revised (25 Nov 2026 — change of machine; user decision).** The H200 becomes the machine of record. Points 1–5 and
+7–10 follow from the user's decisions of 25 Nov 2026 (machine of record; no test access on the H200 before the final
+run; all three controls trained on the H200; PySR refits and scores on the H200). Point 6 and one clause of point 8 are
+marked as proposals and do not apply until the user approves them. The gate additions of point 10 are the reviewer's
+consequences of the move. Section 16 holds the transfer package and the run-book.
+
+> **A6 (revised 25 Nov 2026 — change of machine).** Replaces row A6 for everything computed from this amendment on.
+>
+> **1. Machine of record.** The H200 produces every number that enters a table, a delta, a pre-registered rule or
+> `LOCK.json`: the per-event arrays of the two benchmarks, all Track A fits, all Track B training still to run, the
+> re-scoring of the eight networks trained on the laptop, the ensembles, the θ arms, every likelihood refit and
+> every registered score of a PySR equation (controls C1 and C2 included), the zero-training scores of the geometry
+> arm, all guards, and the single final test evaluation.
+>
+> **2. What stays on the laptop** and produces no number of record: the PySR searches (CPU; they see only exported
+> targets and their own loss, and hand over equations as text), the equation audits (exact mathematics, no data),
+> the geometry audit (training and validation data only; its gains are audit numbers on the laptop's sample points
+> and decide only whether and in which form the arm is run), and the gates. A gate may recompute an H200 array on
+> the laptop with the emulated H200 stream (`sfm.refstream` at the H200's launch grid) as a check; such an array is
+> never a pairing partner.
+>
+> **3. Numbers of record** are the benchmark arrays computed on the H200 with the unmodified `common.test_nll`
+> inside `sfm.metric.deterministic()`. The H200's launch grid is read with `sfm.refstream.local_grid()` before
+> anything else is computed. [If it is 1056, the H200 draws the earlier study's fold points: validation 18.118083
+> (MLP) and 18.120407 (formula), formula − MLP = +0.002324 ± 0.000294, to be met within 4e-6 on the float32 means
+> and within 1e-4 per event against the laptop's emulated arrays. The stored test values 18.120842 / 18.123459 and
+> +0.002616 ± 0.000292 are then the expected test numbers of record; they are confirmed by the first step of the
+> final run and not assumed before it. If it is not 1056, the H200's own values are the numbers of record and both
+> the stored and the laptop's values are other sample points.] The laptop's numbers — validation 18.117857 /
+> 18.120061, test 18.120806 / 18.123333, formula − MLP +0.002204 ± 0.000293 (validation) and +0.002527 ± 0.000304
+> (test), the Milestone 1 audit, the eight Track B rows of 24 Nov — are quoted as "laptop (RTX 4060, launch grid
+> 144), other sample points". They are records: kept, never overwritten, never part of a delta with an H200 array.
+>
+> **4. Pairing rule.** A delta of record is formed only between two per-event arrays computed on the H200 on
+> identical fold points (launch grid, seed, K, batch size, fold scheme and split all equal). Each pre-registered
+> rule (keep, promotion, replication, equal NLL, 1-SE, convergence, guards, plateau) is evaluated once, on such
+> arrays, and never again with another machine's numbers. Criteria written as laptop values take their paired
+> form: "A0 at step 0 = 18.120061" becomes "A0 at step 0 equals the H200 formula array, within 1e-4 per event and
+> 1e-6 on the mean"; "at least 3e-4 better than 18.12041, or than the A0 value" is a paired delta against the
+> formula array of the same stream.
+>
+> **5. Provenance.** Weights are files identified by SHA-256 and labelled with the machine that trained them. The
+> five-member ensemble consists of seeds 11 and 12 (fine-tuned on the laptop) and seeds 13–15 (fine-tuned on the
+> H200 from the laptop's stage-1 networks); the two existing fine-tunes are not repeated. The control B0 is trained
+> on the H200 for all three seeds; its seed scatter and the B0 mean use these three runs only.² The laptop's
+> `b0_seed0` is kept, re-scored on the H200 and shown as a labelled record; it enters no scatter, mean or rule.
+> This is fixed before any control has been scored on the H200, and no run is repeated in order to choose between
+> outcomes. A comparator is trained on the machine of the variants paired with it. No interrupted fit is continued
+> on another machine.
+>
+> **6. Budgets (PROPOSED — not yet approved by the user; alternative in footnote 4).** The run lists of `AUDIT.md` §4.1 and §4.2 are run in full on the H200. The wall-clock rule
+> (4 GPU-hours, drop orders) was written for the laptop and is not applied: which runs exist depends only on the
+> lists and on validation outcomes, not on machine speed or on how many jobs run side by side.⁴
+>
+> **7. PySR.** For each search the complete audited front (every seed, every pre-registered complexity tier) goes to
+> the H200. No likelihood computed on the laptop selects, ranks or screens an equation.³ Refits, controls and
+> scores are made on the H200; the audit is repeated on the refitted constants; the "refitted validation NLL" of
+> the plateau rule is the H200's. The number of candidates entering the winner's-curse correction is the number of
+> audited front members sent to the H200.
+>
+> **8. Test split.** The test cache is opened only on the H200 and only by `final_test.py`, after Gate 2c. There is
+> no test access of any kind before that run; benchmark parity on the H200 is shown on validation only; the laptop
+> does not open the test cache again.¹ `final_test.py` first recomputes the per-event test arrays of the two
+> benchmarks and stops before any finalist is loaded unless (a) the SHA-256 of the test cache equals the value
+> recorded by the Gate 0 run in `results/m0_parity/parity.json`, (b) the test event numbers equal
+> `results/m0_parity/test_event_number.npy` in order, and (c) for both benchmarks the arrays agree with the earlier
+> study's stored arrays (`test_v3_nll.npz`, keys `std:mlp_ft` and `std:new`) within 1e-4 for every one of the
+> 14,956 events and within 4e-6 on the mean — the criteria of C1. (PROPOSED, not yet approved:) If the validation parity on the H200 left any
+> event above 5e-5, Gate 2c fixes the per-event clause before the run as: at most three events above 1e-4, none
+> above 1e-3, rms at most 1e-5. [If the launch grid is not 1056, (c) is evaluated on the emulated reference stream,
+> and the native arrays must in addition satisfy A3 against the emulated ones.] A stop is not the final run: only
+> the two benchmarks have been evaluated, the access stays in the log, and a new start needs the cause, the user's
+> go-ahead and an unchanged `LOCK.json`. Finalists are paired against the benchmark test arrays of the same run.
+>
+> **9. Test-access log.** `results/test_access.log` is one tracked file. Its two lines of 24 Nov 2026 (Gate 0
+> parity, C1) were written on the laptop; the file with exactly these two lines has the SHA-256
+> `effa9734743f51959806d7d8b87e2d262c10773a9be25f2104ceeca9557f0c60`. From this amendment on only the H200 adds
+> lines, each with host, GPU and launch grid, and the laptop refuses `allow_test`. Until the final run both working
+> copies hold the file unchanged: two laptop lines, no H200 line. After the final run the H200's file is committed
+> and pulled, so there is one log again: the two laptop lines and one H200 line per start of `final_test.py`. Any
+> other line, on either machine, is reported to the user before anything else is done.
+>
+> **10. Gates.**
+> *Gate 1* also checks: the identity record of the H200 (GPU, launch grid, torch build, generator test) and the
+> validation parity of the two benchmarks against their targets; that the laptop-trained checkpoints have the
+> SHA-256 of their laptop registry rows and that their re-scored values meet the predicted table [grid 1056]; that
+> every array behind a delta, a rule or a table was computed on the H200 against the reference arrays created
+> there, and that no table reads a laptop array or a laptop row; that the control consists of three H200-trained
+> seeds and the H200's `b0_seed0` is not the laptop file; that no fit was continued across machines and every
+> comparator was trained on the machine of its variants; by recomputation on the laptop with the emulated H200
+> stream, that both benchmarks and every kept or promoted candidate agree with the H200 arrays within 1e-4 per
+> event and 1e-6 on the mean; and, if fits ran side by side, the equivalence checks and that the set of runs
+> equals the pre-registered lists.
+> *Gate 2* also checks that every refit and score of an equation is an H200 registry row and that the search
+> record contains no likelihood.
+> *Gate 2c* also checks: `LOCK.json` names the machine of record and holds, for every finalist, the hash of the
+> checkpoint or equation, the training machine, the H200 validation numbers and the hashes of the benchmark arrays
+> they were paired with; every selection step is traceable to H200 arrays; the scores of the geometry arm and of
+> the PySR finalists are H200 rows; the test-access log is as in point 9; the test cache on the H200 has the
+> recorded SHA-256 (or is still absent, if the test-derived files are transferred only after this gate);
+> `final_test.py` refuses any machine other than the one in `LOCK.json`, refuses path overrides, and implements
+> the stop rule of point 8 with the tolerances fixed by this gate.
+> *Gate 3* also checks: the final run took place once, on the machine of record; its first step passed, with the
+> measured differences on file; every test delta is paired against benchmark arrays of the same run; the log holds
+> the two laptop lines and exactly one H200 line (or stop lines, each explained, with `LOCK.json` unchanged in
+> between); laptop numbers appear in the report only under their label; the validation-to-test shrinkage uses H200
+> validation numbers.
+>
+> ¹ Not chosen: a third Gate-0-type parity access on the H200 before the final run.
+> ² Not chosen: a scatter from the laptop's `b0_seed0` and two H200 runs.
+> ³ Not chosen: refitting or ranking candidates by likelihood on the laptop and re-scoring only the selected ones
+> on the H200.
+> ⁴ Alternative: a budget in nominal units (the cost column of `AUDIT.md` §4.1, cap 240 nominal minutes).
+
 **Item C1 — closed, PASS (24 Nov 2026, user decision: run now).** `results/m0_parity/c1_reference_stream.json`: on the
 emulated reference stream the test arrays of both benchmarks agree with the stored ones for all 14,956 events (max |Δ|
 2.9e-5 and 3.1e-5; means 18.120842 and 18.123458; formula − MLP 0.0026163 ± 0.000292 against the stored 0.0026164).
@@ -610,3 +724,553 @@ summary — file count and total size per group — and anything that could not 
 
 **Gap in the move as stated:** PySR refits and the geometry arm's scores enter paired deltas, so they must be produced
 on the H200 even though the searches and the geometry audit stay on the laptop.
+
+**Update, 25 Nov 2026 (midday): the H200 transfer task is complete — see section 16 and §13 (A6 revised).** The
+five work items of §15 remain paused until the user gives the go-ahead; the steps listed in §16.0 then run on the H200.
+
+## 16. H200 transfer package (25 Nov 2026)
+
+*Plan amendment, not a milestone. Nothing was trained for this section and nothing has been run on the H200. Sources:
+`transfer/MANIFEST.json` (the manifest in machine-readable form, generated by the script below at commit `c9b7f72`),
+`transfer/STATUS.md` (how the file reads were traced: an audit hook plus `strace` on CPU, with every open of the test
+cache or of a `*.csv` refused before it happened), and `transfer/REVIEW_STATUS.md` (the Fable review of what depends on
+the machine). Where this section and those files disagree, the files hold the detail and this section the decisions.*
+
+### 16.0 Decisions taken and proposals awaiting approval
+
+**Decided by the user (25 Nov 2026)**
+- The H200 is the machine of record for everything moved there and for the final test evaluation; this laptop's
+  numbers are quoted as "laptop, other sample points" (§13, A6 revised).
+- Moved: the Track A fits (`AUDIT.md` §4.1); the remaining Track B seeds and the ensembles; the remaining Track B runs
+  (`AUDIT.md` §4.2); the θ track Θ1–Θ3. Not moved: the PySR searches, the geometry audit, the Fable gates.
+- (i) No test access on the H200 before the final run. Parity there is shown on validation; `final_test.py` recomputes
+  the two benchmarks' test arrays as its first step and stops before any finalist is loaded if they do not match.
+- (ii) The control B0 is trained on the H200 for all three seeds; the laptop's `b0_seed0` is a labelled record.
+- (iii) PySR searches stay on the laptop CPU and equations travel as text; every likelihood refit and every registered
+  score is produced on the H200. The geometry arm's zero-training scores are produced on the H200 as well.
+
+**Proposed, not approved — nothing below is implemented**
+
+| # | Proposal | Alternative |
+|---|---|---|
+| P1 | Fits side by side on the H200, only if a throughput measurement there shows a gain (§16.5) | keep the exclusive lock, one job at a time |
+| P2 | Run the lists of `AUDIT.md` §4.1 and §4.2 in full; drop the 4-GPU-hour wall-clock rule, which makes the set of runs depend on machine speed (A6 revised, point 6) | a cap in nominal units (the cost column of §4.1, 240 nominal minutes) |
+| P3 | Stop rule of the final run: if validation parity on the H200 leaves any event above 5e-5, the per-event clause becomes "at most three events above 1e-4, none above 1e-3, rms ≤ 1e-5" (A6 revised, point 8) | the strict clause always (every event within 1e-4) |
+| P4 | When the seven test-derived files travel (test cache, `test_v3_nll.npz`, `test_event_number.npy`, four laptop test arrays). **This package copies them now, unopened, as specified.** | copy them only after Gate 2c, so that their absence proves no access (the reviewer's preference; needs a split file list) |
+| P5 | Names: the three H200 controls get new run names (for example `b0h_seed0`, `b0h_seed1`, `b0h_seed2`); `b0_seed0` stays the laptop record. Needed because the tracked `fit_done.json` of `b0_seed0` makes `train.fit` return the laptop network | — (some renaming is unavoidable for seed 0) |
+| P6 | Results come back to the laptop under `shape-form-martin/cache/h200_records/` until arrays carry a machine tag (§16.6) | — |
+
+### 16.1 Manifest of every file the moved steps read
+
+| Group | Files | Bytes | |
+|---|---|---|---|
+| (a) tracked in the pushed branch | 127 | 2,424,088 | arrives with `git clone` / `git pull` |
+| (b1) git-ignored inputs, copied by hand to the SAME path | 23 | 3,063,083,399 (2.85 GiB) | `transfer/files_b_inputs.txt` |
+| (b2) git-ignored laptop records, copied by hand into a QUARANTINE folder | 55 | 5,989,510 (5.71 MiB) | `transfer/files_b_laptop_records.txt` |
+| (c) regenerated on the H200 | 17 entries | — | table below |
+
+Every (a) file was confirmed with `git ls-files --error-unmatch` and every (b) file with `git check-ignore -v` (the
+ignoring rule is recorded per file in `MANIFEST.json`); no file is untracked and not ignored. Sizes and SHA-256 were
+computed by a plain byte read. Cross-checks that agree: both caches against `cache/pion_s1_meta.json` and against the
+hashes the Gate 0 run recorded in the tracked `results/m0_parity/parity.json`; the seven pion files against the tracked
+`checksums.json`; the eight checkpoints against `checkpoint_sha256` of their registry rows; the eight registered
+`val_nll.npy` against the registry's array hashes.
+
+Abbreviations: `SFM/` = `shape-form-martin/`, `PION/` = `shape-form-proton/results/particles/pion/`,
+`DATA/` = `shape-form-original/data/`.
+
+**(a) Tracked (127 files)**
+
+| Kind | Files | Bytes |
+|---|---|---|
+| code | 48 | 821,799 |
+| config | 11 | 8,642 |
+| doc | 9 | 317,992 |
+| env | 4 | 528,482 |
+| package | 4 | 0 |
+| record | 34 | 463,764 |
+| test | 17 | 283,409 |
+
+Tracked files that are laptop RECORDS and that the code trusts — they arrive with `git pull` whether wanted or not:
+
+- `SFM/results/registry.jsonl` (1 file(s)): Read by registered_row (run_m2b_lib.py:51, run_m2a_lib.py:159; match by checkpoint SHA-256 only) and latest() (select_1se registry.py:521, run_m2b_ensembles._arr :162, run_m2b_report.py:42, run_m2a_lib.val_array :174). On the H200, re-running a registered run's script reuses the laptop row ('already registered; not evaluated again'); until H200 rows are appended, every table/ensemble/1-SE step reads the laptop rows' val_nll_path: FileNotFoundError while the laptop arrays are quarantined (correct), silent …
+- `SFM/results/test_access.log` (1 file(s)): Appended by every load_sets(..., allow_test=True) (data.py:253-258). The line holds UTC time, script and reason but no host/GPU: on the H200 the file starts with the two laptop lines and a test access there appends a third line to the H200 copy; Gate 2c's 'exactly two lines' must be restated per machine and the two working copies' logs must be merged by hand.
+- `SFM/results/registry_refs/guard_spec.json` (1 file(s)): _bench_guard_arrays (registry.py:323-338) reuses results/registry_refs/*.npy whenever this spec matches and the four arrays exist: laptop arrays at the live path would be reused silently. With them quarantined, the first guarded evaluate() on the H200 recomputes them and rewrites this file with identical content (no git diff).
+- `SFM/results/m2b_mlp/*/done.json` (8 file(s)): Skip markers: run_m2b_fit.py:40, fit.py:43, fit_queue.py:68 and run_m2b_stage1.py:233 skip these runs. The laptop networks are kept (intended), but they can be re-scored only by a new script (registry.evaluate directly), never through the run scripts. run_m2b_report.py:56 reads them for training details.
+- `SFM/results/m2b_mlp/*/fit_done.json` (3 file(s)): train.fit (train.py:407-416) returns the stored model.pt instead of training whenever this file exists (after checking model.pt's SHA-256). Retraining b0_seed0 on the H200 (user decision, 25 Nov 2026) therefore needs another run name/out_dir; deleting done.json alone would silently reload the laptop network.
+- `SFM/results/m2b_mlp/*/resources.json` (8 file(s)): Read-modify-write by run_m2b_fit.py:79-85 only for a run being executed (none of these). Laptop timings.
+- `SFM/results/m2b_mlp/s1_seed*/stage1_monitor.json` (5 file(s)): Read by run_m2b_stage1.py:75-76 only when stage 1 resumes; done.json prevents that. Laptop record.
+- `SFM/results/m2b_mlp/summary.json` (1 file(s)): Not read by code; rewritten (git diff) by run_m2b_report.py:133 on the H200. Until then it shows laptop numbers (other sample points).
+- `SFM/results/m0_parity/parity.json` (1 file(s)): Its existence makes parity.py refuse to run without --overwrite (parity.py:342): keep it that way.
+- `SFM/results/m0_parity/c1_reference_stream.json` (1 file(s)): Existence check for parity.py --reference-stream.
+- `SFM/results/m0_parity/cache_build.json` (1 file(s)): Rewritten by ANY invocation of build_cache.py (build_cache.py:64-66) unless SFM_RESULTS_DIR points elsewhere.
+- `SFM/results/m0_parity/mc_noise_val.json` (1 file(s)): Rewritten by mc_noise_val.py (no argparse).
+- `SFM/results/m0_parity/checksums.json` (1 file(s)): check_protected.py verify on the H200 reports every protected file that was not copied as missing (exit 1).
+- `SFM/results/m0_parity/checksums_verify.json` (1 file(s)): Not read by code.
+
+**(b1) Inputs — copy to the same path (23 files, 3,063,083,399 bytes)**
+
+| File | Bytes | SHA-256 | Role | Sample points |
+|---|---|---|---|---|
+| `DATA/pion_standalone_N100000_M0_20GeV_reg_balanced_s1_v3.parquet` | 2,604,833,654 | `92c060f0b218ffe2fed28609f9dab270c1c3458b9a7ebb482aa9efdece743eb1` | raw hit table (Parquet copy of the CSV) | none |
+| `SFM/cache/pion_s1_trainval.pt` | 385,953,467 | `9984886fb90214b9c556489bfb3a913aba89509239c9b4a190797a540a6ab4b4` | train/val cache (69,783 + 14,950 events) | none |
+| `SFM/cache/pion_s1_test.pt` | 68,476,893 | `14955929e0a6cfad42e43aa6fa81787a072d9f26d37c3054ef627faac4c9ec88` | TEST cache (14,956 events) - OPAQUE BYTE STREAM, hash and size only | none |
+| `SFM/cache/pion_s1_meta.json` | 4,051 | `d73b2eb06e3f07a484d92b5391e559cea24c7fd53bf641390bfd0c541313e75e` | cache metadata (geometry, counts, per-file SHA-256 of both caches) | none |
+| `PION/mlp_std.pt` | 314,242 | `ee1978a4b4cb3b3c1ea16d19e280327b4df433e24506f5a3f782f6d1fc120469` | benchmark MLP checkpoint (fine-tuned 4x32) | none |
+| `PION/new3_std_n3.pt` | 71,174 | `7c86e2bf39154999ac9091e95757d27332f32dad8d20e8d2ec98ed83a93d3995` | benchmark component formula checkpoint (101 parameters) | none |
+| `PION/abar.pt` | 17,876 | `32eade22cc46307f0ba7848a65a638b84de334b2d6ac8f36609b66b6c00d3458` | stored acceptance template A-bar (128 x 32) | none |
+| `PION/test_v3.json` | 3,282 | `a98f38e79de10202ad056700d7f83d0bd2271f999bb5815f57f9b900040a6324` | final-formula definition of the earlier study (degree, variant); stored RESULTS, not test data | none |
+| `PION/mlp_std.json` | 72 | `a079bfdbfae28e9fffa4963c4f88a0df3618acff66e733bfa77b017d5d383a76` | stored validation mean of mlp_std (reference machine) | reference machine (grid 1056) |
+| `PION/new3_std.json` | 781 | `32f82c37d15137c0d1b3c8082780cc24aa64a548235fac2113784e7d91e70dbe` | stored validation means of the formula rungs (reference machine) | reference machine (grid 1056) |
+| `PION/test_v3_nll.npz` | 600,804 | `174524ef734a50ed96a2e7a2a1b8be71349d2efed2da68a6f1702519d32fd81b` | stored per-event TEST arrays of the earlier study (not a laptop record) | reference machine (grid 1056) |
+| `SFM/results/m0_parity/val_event_number.npy` | 119,728 | `3fc56682836e9f62f5a8351ed2f604ae5f29a0727875824cc09813b09b8c7392` | validation event numbers in pairing order | none |
+| `SFM/results/m0_parity/test_event_number.npy` | 119,776 | `ab5dcf3828d0fd1968d64eae28250a99c835851c9bd7ef60e0c0dc6f595263a4` | test event numbers (order check of the final test; event numbers only, reading it is not a test access) | none |
+| `SFM/results/m0_parity/abar_front.pt` | 17,982 | `e6650b9ba8220e5033d44a7ab9fc3ea6eda5dc6c9da60d603682f5f1e986cc2e` | acceptance template, front face only (A3f, B4f) | none |
+| `SFM/results/m0_parity/abar_front_back.pt` | 18,017 | `292166d95e08ee4fec677ff000600a0bcd0d383f906289541b2d64af20980c28` | acceptance template, front + back (recomputed) | none |
+| `SFM/results/m2b_mlp/s1_seed11/model.pt` | 315,778 | `d8f6e94d04b89e5bca1d9473b547ab61f57cef962e9e56884363a15fc84d907c` | checkpoint of the registered Track B network s1_seed11 | none |
+| `SFM/results/m2b_mlp/s1_seed12/model.pt` | 315,906 | `be1a67e11dc8171c4a620d167e5b84ac4eba13e49fa414417b0e1142955714f6` | checkpoint of the registered Track B network s1_seed12 | none |
+| `SFM/results/m2b_mlp/s1_seed13/model.pt` | 316,098 | `5e8e7ef9f434550cf60e65e5a7363b8c198a97be2d4893977e8bbcc58a2a22f6` | checkpoint of the registered Track B network s1_seed13 | none |
+| `SFM/results/m2b_mlp/s1_seed14/model.pt` | 316,290 | `c0d23ad25b8a555bc9b1bef3429fef0e2704d7865af737e1207a19e6fbe3c1f2` | checkpoint of the registered Track B network s1_seed14 | none |
+| `SFM/results/m2b_mlp/s1_seed15/model.pt` | 315,650 | `95cb4fa4fde34e2dd8a17dd67255fcb7af00bb8b6fc7a458653fd50704752613` | checkpoint of the registered Track B network s1_seed15 | none |
+| `SFM/results/m2b_mlp/s2_seed11/model.pt` | 317,314 | `0a1c0f02c39349aa43459d10713db8e8b0f12d83a814c04133f4c652238cdf6d` | checkpoint of the registered Track B network s2_seed11 | none |
+| `SFM/results/m2b_mlp/s2_seed12/model.pt` | 317,314 | `165123ad4ed76680c1bf996b992d8487307369a3f5e2a056d063b1b93790419a` | checkpoint of the registered Track B network s2_seed12 | none |
+| `SFM/results/m2b_mlp/b0_seed0/model.pt` | 317,250 | `75de31f2540769f68f652979163684213f43e92066f0a6a03f926595ecf6b700` | checkpoint of the registered Track B network b0_seed0 | none |
+
+Expected and confirmed: the Parquet file, the pion result files the legacy adapter and the parity checks read, the
+eight checkpoints. Not in the user's list but required: both cache files with their metadata file, the two front-face
+acceptance templates and the two event-number arrays — the templates and event-number arrays can only be regenerated by
+`scripts/parity.py`, whose default mode opens the test split.
+
+**(b2) Laptop records — copy ONLY under `SFM/cache/laptop_records/<same repo-relative path>` (55 files, 5,989,510 bytes)**
+
+These are per-event arrays computed on this laptop's Monte-Carlo sample points (the pairing arrays the user expected in
+group (b) are here). At their live paths the registry would pair every H200 score against them without any error; the
+review measured the cost of such a mis-pairing at about 2.3 × 10⁻⁴ against the MLP and 3.5 × 10⁻⁴ against the formula,
+against thresholds of 3 and 5. In quarantine they serve as comparison targets only.
+
+| File | Bytes | SHA-256 | Role | Sample points |
+|---|---|---|---|---|
+| `SFM/results/m0_parity/mlp_val_nll.npy` | 59,928 | `bbc915a1021e2c688c9a82e24baf17cf8b3aae70e5b0ddd8661b9326e008f6af` | Gate 0 benchmark pairing array (mlp, validation) | laptop native (grid 144) |
+| `SFM/results/m0_parity/formula_val_nll.npy` | 59,928 | `1234970e1160cd8ec3caf4a63c8da92caa2bcc385666ffa53ee572c0d35c0644` | Gate 0 benchmark pairing array (formula, validation) | laptop native (grid 144) |
+| `SFM/results/m0_parity/mlp_test_nll.npy` | 59,952 | `082a20e522830a371d1537f88b641808e67dc3321c5626fc792f1b5e79bb808d` | Gate 0 benchmark TEST array (mlp), laptop | laptop native (grid 144) |
+| `SFM/results/m0_parity/formula_test_nll.npy` | 59,952 | `ffb37454a3de4523c2b71324e1e2585b278c9662cb1d7d9e6e78f6cd36f811f7` | Gate 0 benchmark TEST array (formula), laptop | laptop native (grid 144) |
+| `SFM/results/m0_parity/mlp_val_nll_ref1056.npy` | 59,928 | `da6248d9985bf4ec41bbdc2ddaaf777577f7adeacec811b1f79a840cc25bc463` | laptop emulation of the reference stream (mlp, val) | laptop, emulated grid 1056 |
+| `SFM/results/m0_parity/formula_val_nll_ref1056.npy` | 59,928 | `b7f64680b7f6222de3469fe2c4b9fa0e6e1799dcc3d4ad81bcedd3a14330c39d` | laptop emulation of the reference stream (formula, val) | laptop, emulated grid 1056 |
+| `SFM/results/m0_parity/mlp_test_nll_ref1056.npy` | 59,952 | `eae19ea081fed9910e846b0fe574b98dfa3c4a11e812ee49a45618700632b2ec` | laptop emulation of the reference stream (mlp, test) | laptop, emulated grid 1056 |
+| `SFM/results/m0_parity/formula_test_nll_ref1056.npy` | 59,952 | `3ecc78bb047e2190f95934be9310183f2fd6ff73ac240aebfa31b04ac90c3f3e` | laptop emulation of the reference stream (formula, test) | laptop, emulated grid 1056 |
+| `SFM/results/registry_refs/mlp_val_k1024.npy` | 59,928 | `5c3b790040b51db0af81e9a58593b70051ff7e3f3f79c918362f55b76a7f83a7` | benchmark guard array (mlp, k1024) | laptop native (grid 144) |
+| `SFM/results/registry_refs/mlp_val_bulk_stratum.npy` | 59,264 | `3cd7d62e9dfce4eeddc1d6a3afc5eee13ef6ea1bd5e6eed01a8e820aedaf5fc2` | benchmark guard array (mlp, bulk_stratum) | laptop native (grid 144) |
+| `SFM/results/registry_refs/formula_val_k1024.npy` | 59,928 | `af5fe5044f998312808b2dba58111727efedf15581f4b3e3e3497b12114f5540` | benchmark guard array (formula, k1024) | laptop native (grid 144) |
+| `SFM/results/registry_refs/formula_val_bulk_stratum.npy` | 59,264 | `da1f2a53ee181e449700be58d0711e943c7966d375288d032d0216d88c75cf3f` | benchmark guard array (formula, bulk_stratum) | laptop native (grid 144) |
+| `SFM/results/m2b_mlp/s1_seed11/val_nll.npy` | 59,928 | `46017b6548430e2b28f5ee8b3a78a017b59c625eeedee51fc8362ecd4c4873bd` | per-event validation NLL of the registered run s1_seed11 | laptop native (grid 144) |
+| `SFM/results/m2b_mlp/s1_seed12/val_nll.npy` | 59,928 | `fc817d7e41643f6d5b67bf487575c806274967639844290df2dafe2dd1a57bf8` | per-event validation NLL of the registered run s1_seed12 | laptop native (grid 144) |
+| `SFM/results/m2b_mlp/s1_seed13/val_nll.npy` | 59,928 | `39f0d958d37a9d0780ad077ccb459a99b60dd585ae78025d50d02f3aadf96e87` | per-event validation NLL of the registered run s1_seed13 | laptop native (grid 144) |
+| `SFM/results/m2b_mlp/s1_seed14/val_nll.npy` | 59,928 | `b7591dbcf16916f8e46db3d0e49a377be0f3c54374da5cf5b9117b675fe9cf48` | per-event validation NLL of the registered run s1_seed14 | laptop native (grid 144) |
+| `SFM/results/m2b_mlp/s1_seed15/val_nll.npy` | 59,928 | `efcdb1c96466b4da764fc748ab14e0b6d83f50a250831615c543b15e8afb84e3` | per-event validation NLL of the registered run s1_seed15 | laptop native (grid 144) |
+| `SFM/results/m2b_mlp/s2_seed11/val_nll.npy` | 59,928 | `eb9d202700788bc94dac05f947f4913073f040a45b278b66fc1a1a9a5a528d31` | per-event validation NLL of the registered run s2_seed11 | laptop native (grid 144) |
+| `SFM/results/m2b_mlp/s2_seed12/val_nll.npy` | 59,928 | `cf281d03547af30c62f43f0f5c971ff90aab4dc29581cb58ecf8ac7f767da76d` | per-event validation NLL of the registered run s2_seed12 | laptop native (grid 144) |
+| `SFM/results/m2b_mlp/b0_seed0/val_nll.npy` | 59,928 | `e1372168c018e911d3d1f7bd66c0dd28eab602114dbabf6f9c986788b935c29d` | per-event validation NLL of the registered run b0_seed0 | laptop native (grid 144) |
+| `SFM/results/m2b_mlp/b0_seed0/val_nll_k1024.npy` | 59,928 | `dfeff1095d0e4d43689ba08144aaba87faf1b005f4abfa973f3a04b2ac1c2aaa` | guard array K=1024 of b0_seed0 | laptop native (grid 144) |
+| `SFM/results/m2b_mlp/s2_seed11/val_nll_k1024.npy` | 59,928 | `eaaeacbd251d6e5315aff19c4b02667f500bc8bb8aa4cacddc4a8ff14157acb9` | guard array K=1024 of s2_seed11 | laptop native (grid 144) |
+| `SFM/results/m2b_mlp/s2_seed12/val_nll_k1024.npy` | 59,928 | `8addbc79724658071895f10cc0d807cb5b53dbf4e247478fba14c9067ca42869` | guard array K=1024 of s2_seed12 | laptop native (grid 144) |
+| `SFM/results/m2b_mlp/b0_seed0/val_bulk_zb1221.npy` | 59,264 | `e4e4fc80e29fe56f208ee7e1fe653ee16d17be54af24c379294cda6746770606` | guard array bulk/stratum of b0_seed0 | laptop native (grid 144) |
+| `SFM/results/m2b_mlp/s2_seed11/val_bulk_zb1221.npy` | 59,264 | `18c863192d1a6f0c0b869f9e5dc88c052f1897d74c5ca1ffe613911b951edba7` | guard array bulk/stratum of s2_seed11 | laptop native (grid 144) |
+| `SFM/results/m2b_mlp/s2_seed12/val_bulk_zb1221.npy` | 59,264 | `2c545806670135abb631e26371cbde743df1421ed3975113f362e8aeedba1ac5` | guard array bulk/stratum of s2_seed12 | laptop native (grid 144) |
+| `SFM/results/m2b_mlp/b0_seed0/val_mass_monitors.npz` | 958,826 | `e48c1d8ede3d47d2db92bb52ffa13f65b1188417c8d1d83c62eef47770f53901` | mass monitors of b0_seed0 (deterministic map functionals) | none |
+| `SFM/results/m2b_mlp/s2_seed11/val_mass_monitors.npz` | 958,826 | `d997e6f75ec08984c68d3392520a247ade1744301bbf599db99abc75821fea41` | mass monitors of s2_seed11 (deterministic map functionals) | none |
+| `SFM/results/m2b_mlp/s2_seed12/val_mass_monitors.npz` | 958,826 | `49305f68f609050bf2bbbe757d3062ec2c4851610a564ec8ce8b2b4074abb9e8` | mass monitors of s2_seed12 (deterministic map functionals) | none |
+| `SFM/results/gates/gate0_checks/val_grid1056_base_std_n1.npy` | 59,928 | `bcc404dbb3983403a4dcc629dc038dcd547bcd92875bb0a739648c54841c812e` | Gate 0 validation arrays on the emulated reference stream (13 models) | laptop, emulated grid 1056 |
+| `SFM/results/gates/gate0_checks/val_grid1056_base_std_n2.npy` | 59,928 | `37989e8cd13803dad694be5267db609388c58a7e1780066c9b50bcce3af3c3e0` | Gate 0 validation arrays on the emulated reference stream (13 models) | laptop, emulated grid 1056 |
+| `SFM/results/gates/gate0_checks/val_grid1056_base_std_n3.npy` | 59,928 | `76e530fb8dee483828387661ddafa2a39ba35b8f2c0c80d6555ee818227c0201` | Gate 0 validation arrays on the emulated reference stream (13 models) | laptop, emulated grid 1056 |
+| `SFM/results/gates/gate0_checks/val_grid1056_base_std_n4.npy` | 59,928 | `f59cfd19dee69392a20b15c829bcf4100804dfc2a1447d6e669c4e75763503cb` | Gate 0 validation arrays on the emulated reference stream (13 models) | laptop, emulated grid 1056 |
+| `SFM/results/gates/gate0_checks/val_grid1056_base_std_n5.npy` | 59,928 | `a051b71665c90e92a826d9d1b57d951eec2bf9a7e573383bcb86bedc16ebb06b` | Gate 0 validation arrays on the emulated reference stream (13 models) | laptop, emulated grid 1056 |
+| `SFM/results/gates/gate0_checks/val_grid1056_base_std_n6.npy` | 59,928 | `5323822a15f1c286739ef2cb8f7ed71043d03ec40015a54e4404d96968548977` | Gate 0 validation arrays on the emulated reference stream (13 models) | laptop, emulated grid 1056 |
+| `SFM/results/gates/gate0_checks/val_grid1056_mlp_std.npy` | 59,928 | `5f1af0753a0bbdc6a7177f4ed7f961dacbddc1067d249b4a647be3af1cbab226` | Gate 0 validation arrays on the emulated reference stream (13 models) | laptop, emulated grid 1056 |
+| `SFM/results/gates/gate0_checks/val_grid1056_new3_std_n1.npy` | 59,928 | `b121d88780760d1970ab6c4928e87164ad314790849e21a174150ce908309f40` | Gate 0 validation arrays on the emulated reference stream (13 models) | laptop, emulated grid 1056 |
+| `SFM/results/gates/gate0_checks/val_grid1056_new3_std_n2.npy` | 59,928 | `f531c751c820f97b6276b43d07d563c576174bf3e9bee6908dfae3afcfa7d9bb` | Gate 0 validation arrays on the emulated reference stream (13 models) | laptop, emulated grid 1056 |
+| `SFM/results/gates/gate0_checks/val_grid1056_new3_std_n3.npy` | 59,928 | `6982a82292f3aa0fb2cf94ca59a87142a6ede5e75cd9fc4faa251b7d5089794c` | Gate 0 validation arrays on the emulated reference stream (13 models) | laptop, emulated grid 1056 |
+| `SFM/results/gates/gate0_checks/val_grid1056_new3_std_n4.npy` | 59,928 | `aa4ce9b125a1e4f5ca9d1ba22f04cea518eb4bda2cae9417ad4a4037a7db3d51` | Gate 0 validation arrays on the emulated reference stream (13 models) | laptop, emulated grid 1056 |
+| `SFM/results/gates/gate0_checks/val_grid1056_new3_std_n5.npy` | 59,928 | `ed004e1c77eff316dd9992a6a58dfac15363af2a9290e8d26ec241cd0bb2ff30` | Gate 0 validation arrays on the emulated reference stream (13 models) | laptop, emulated grid 1056 |
+| `SFM/results/gates/gate0_checks/val_grid1056_new3_std_n6.npy` | 59,928 | `c6e7fc89a23376c1a76b19df216f477275ed1d6c69543a02013ac11fb79f20d4` | Gate 0 validation arrays on the emulated reference stream (13 models) | laptop, emulated grid 1056 |
+| `SFM/results/gates/gate0_checks/val_grid144_base_std_n1.npy` | 59,928 | `a62dcbbaa550520ba5966ab6de2ede3630ca41c1af0a01afff4f0090fc80cebc` | Gate 0 validation arrays on the emulated laptop stream (13 models) | laptop, emulated grid 144 |
+| `SFM/results/gates/gate0_checks/val_grid144_base_std_n2.npy` | 59,928 | `0ba41668005e1d7d2a7bfc5a90310f941968221b4851e9fa9be4298c65f1c042` | Gate 0 validation arrays on the emulated laptop stream (13 models) | laptop, emulated grid 144 |
+| `SFM/results/gates/gate0_checks/val_grid144_base_std_n3.npy` | 59,928 | `3d2701c9816c6ae1d0d456dd8f9c01a7abe4a931cf1d7a6e2e1298aae4091a4c` | Gate 0 validation arrays on the emulated laptop stream (13 models) | laptop, emulated grid 144 |
+| `SFM/results/gates/gate0_checks/val_grid144_base_std_n4.npy` | 59,928 | `d6b80c271f01194d387780040f2a57f376a540e591b0d56897a84a0ee1f1747f` | Gate 0 validation arrays on the emulated laptop stream (13 models) | laptop, emulated grid 144 |
+| `SFM/results/gates/gate0_checks/val_grid144_base_std_n5.npy` | 59,928 | `0b86c92cabe977b3bf16f9bdb5070ab7c0dc7cf4766def0b9361ecb772f64c6d` | Gate 0 validation arrays on the emulated laptop stream (13 models) | laptop, emulated grid 144 |
+| `SFM/results/gates/gate0_checks/val_grid144_base_std_n6.npy` | 59,928 | `2a6f7abc7258bc33d8bac2b92d03f3913bf773ea27181193f720e0e8e2b092a8` | Gate 0 validation arrays on the emulated laptop stream (13 models) | laptop, emulated grid 144 |
+| `SFM/results/gates/gate0_checks/val_grid144_mlp_std.npy` | 59,928 | `de0b2731651c58757d4b4037b5611abea8a0996d5828805fb3b6526a23eebf2d` | Gate 0 validation arrays on the emulated laptop stream (13 models) | laptop, emulated grid 144 |
+| `SFM/results/gates/gate0_checks/val_grid144_new3_std_n1.npy` | 59,928 | `03dea4ea111cc649340774114055911b898d25cd43d1ed579299d03de55111ee` | Gate 0 validation arrays on the emulated laptop stream (13 models) | laptop, emulated grid 144 |
+| `SFM/results/gates/gate0_checks/val_grid144_new3_std_n2.npy` | 59,928 | `e35f0f74662b4c7a7b629c108fcf5e2d2eb85b51a7f7c85651a5d972c8d067e1` | Gate 0 validation arrays on the emulated laptop stream (13 models) | laptop, emulated grid 144 |
+| `SFM/results/gates/gate0_checks/val_grid144_new3_std_n3.npy` | 59,928 | `078d0191b4978c0357deb01028764d80e93a03ab8a5b2e78fa456464423c2205` | Gate 0 validation arrays on the emulated laptop stream (13 models) | laptop, emulated grid 144 |
+| `SFM/results/gates/gate0_checks/val_grid144_new3_std_n4.npy` | 59,928 | `62807dd0ae4c7c0293f57af85e743a3b9d54158761461938d1a8f2608a765973` | Gate 0 validation arrays on the emulated laptop stream (13 models) | laptop, emulated grid 144 |
+| `SFM/results/gates/gate0_checks/val_grid144_new3_std_n5.npy` | 59,928 | `3c753b679e2805c0c44659c52c966e0b0c3f25be5631fcfee30ae40d0c89d9c6` | Gate 0 validation arrays on the emulated laptop stream (13 models) | laptop, emulated grid 144 |
+| `SFM/results/gates/gate0_checks/val_grid144_new3_std_n6.npy` | 59,928 | `0fa899fc22274370fde38c0bde36d9d1ea646619112c391997a8f42100290e7c` | Gate 0 validation arrays on the emulated laptop stream (13 models) | laptop, emulated grid 144 |
+
+**(c) Regenerated on the H200**
+
+| Regenerated on the H200 | How | Output exists on the laptop | Laptop time | Reproducibility |
+|---|---|---|---|---|
+| .venv/ | uv sync --python 3.12   (then confirm torch.version.cuda and torch.cuda.is_available()) | yes | not measured | machine-dependent install (uv.lock pins torch 2.14.0; laptop wheel +cu130, needs a CUDA-13 capable driver) |
+| SFM/cache/philox_emul_622ce7d283034712.so | automatic at the first emulator use (sfm.refstream._load: gcc -O2 -fopenmp -shared -fPIC -ffp-contract=off); name = hash of the C source + flags | yes | seconds (not measured) | binary is machine-dependent; its output bits are machine-independent (integer Philox) |
+| SFM/cache/pion_s1_val_fingerprint.json | automatic in sfm.registry.validation_reference (registry.py:152-160) when absent or keyed to another trainval SHA-256 | yes | seconds | bit-identical with the copied cache: fingerprint must equal 731a199763cc31c498986574083e95c9c6c61e09d83f69b294cee13cf07858a7 (tracked in … |
+| SFM/cache/gpu.lock | created by the first sfm.gpulock.gpu_lock (or SFM_GPU_LOCK) | yes | - | - |
+| SFM/results/m0_parity/mlp_val_nll.npy (H200 version) | no command exists yet; needs a validation-only script: load_sets(('train','val')), legacy.load_mlp_std(), common.test_nll inside sfm.metric.deterministic(), np.save; never opens test; records GPU name and refstream.local_grid() | no | 1.48 s (parity.json) | machine-dependent (stream); bit-reproducible on one machine inside deterministic() |
+| SFM/results/m0_parity/formula_val_nll.npy (H200 version) | no command exists yet (same script, legacy.load_component_formula(train)) | no | 0.90 s (parity.json) | machine-dependent (stream) |
+| SFM/results/registry_refs/{mlp,formula}_val_{k1024,bulk_stratum}.npy (H200 versions) | automatic at the first registry.evaluate(..., guards=True) when the files are absent | no | about 27 s | machine-dependent |
+| SFM/results/m2b_mlp/<8 registered runs>/{val_nll.npy,val_nll_k1024.npy,val_bulk_zb1221.npy,val_mass_monitors.npz} + 8 H200 registry rows | no command exists yet; needs a re-scoring script: check model.pt SHA-256 against the laptop row, models.load_run, registry.evaluate(guards=True for b0_seed0/s2_seed11/s2_seed12, False for s1_*) (run_m2b_fit/run_m2b_stage1 skip on done.json and registered_row reuses laptop rows) | no | 5 x 1.5 s + 3 x 16.1 s + ~27 s once = about 1.5 min | machine-dependent; mass monitors to rounding |
+| SFM/results/m2a_dist/templates/{back_corrected.pt,full_box.pt,templates_all.npz,templates.json,train_theta.npy} | uv run python -B shape-form-martin/scripts/run_m2a.py templates | no | never run | train_theta.npy bit-identical (float64 copy of cache theta); templates GPU float32 sums: identical up to rounding |
+| SFM/results/m2a_dist/{plr.json,decisions.json,gpu_time.jsonl} and <run>/{model.pt,checkpoint.pt,fit_done.json,done.json,init.json,val_nll.npy,...} | uv run python -B shape-form-martin/scripts/run_m2a.py parity plr stage0 stage1p stage1x   (BLOCKED on a grid-1056 GPU by FORMULA_OF_RECORD, run_m2a.py:43/260/266) | no | estimate only: AUDIT 4.1 about 4 GPU-hours; _est_seconds defaults 0.055 s/step (poly), 0.07 s/step … | machine-dependent |
+| Track A report / guards / Stage 2 (A11, A11k, A11n) | no command exists yet; phases guards/stage2 import the missing scripts/run_m2a_report.py (ImportError) | no | - | machine-dependent |
+| SFM/results/m2b_mlp/{s2_seed13,s2_seed14,s2_seed15,b0_seed1,b0_seed2}/* | uv run python -B shape-form-martin/scripts/run_m2b_fit.py shape-form-martin/configs/m2b/s2_seed13.toml shape-form-martin/configs/m2b/s2_seed14.toml shape-form-martin/configs/m2b/s2_seed15.toml shape-form-martin/configs/m2b/b0_seed1.toml shape-form-martin/configs/m2b/b0_seed2.toml   (precondition: … | no | 238 s fit + 16.1 s guarded evaluation each, about 21 min for five | machine-dependent (training fold points; not bit-reproducible) |
+| SFM/results/m2b_mlp/{E5_s2,E6_s2_mlpstd,E2_s2_seeds11-12,E3_s2_seeds11-13,E4_s2_seeds11-14,E5_s1}/*, ensemble_subsets/*.npy, … | uv run python -B shape-form-martin/scripts/run_m2b_ensembles.py   (--table-only: table from saved arrays; precondition: the 8 runs re-scored) | no | never run on the laptop (no measurement) | machine-dependent |
+| SFM/results/m2b_mlp/summary.json (tracked, rewritten) | uv run python -B shape-form-martin/scripts/run_m2b_report.py (no argparse; CPU only) | no | seconds (not measured) | deterministic given the arrays |
+| remaining Track B runs (AUDIT 4.2) | configs + scripts/fit.py or fit_queue.py work for B2a/b/c, B5f (field_mlp_std), B3s (field), B4f/B4s (field_acc front/stored); no command exists yet for B4x (field_acc rejects full_box), B6a/b/c (no factory), B1d/B1f (distillation), B-ceil (train_fraction) | no | estimate only: about 2 GPU-hours (PLAN 15) | machine-dependent |
+| theta track Theta-1..Theta-3 | no command exists yet (own harness forward(lnp, aux); Theta-1b needs the absolute origin in the cache; user decision of 25 Nov 2026: zero-training geometry arm only, after the geometry audit) | no | - | machine-dependent |
+| SFM/results/final/LOCK.json and the final test arrays | no command exists yet (final_test.py and LOCK.json missing; after Gate 2c) | no | - | machine-dependent |
+
+**Caches: copied, not rebuilt.** `scripts/build_cache.py` has no argument parser (any invocation rebuilds), always
+writes both cache files and the metadata file, and rewrites a tracked file. A rebuild on another CPU is not guaranteed
+bit-identical (float64 `cos`/`sin` and the CPU logarithm may take other vector code paths; argued, not tested), and the
+code would not notice the difference. Gate 0 and C1 certified exactly these bytes, so only a byte copy carries them
+over. **The test cache is copied, checked by a plain SHA-256 of its bytes, and stays unopened until the single final
+evaluation after Gate 2c.** The validation fingerprint that `sfm.registry` recomputes on first use must equal
+`731a1997…58a7`, which is a free check of the copied train/validation cache.
+
+### 16.2 The packaging script
+
+`shape-form-martin/scripts/make_transfer_package.py` (standard library only; never imports torch or numpy; 9 tests in
+`tests/test_transfer_package.py`).
+- `list` (laptop): builds groups (b1) and (b2) from an explicit table in the script (each entry names the code that
+  reads it; no directory walk), checks each file with git, hashes it once, and writes `transfer/files_b_inputs.txt`,
+  `transfer/files_b_laptop_records.txt`, `transfer/SHA256SUMS` (`sha256sum -c` format) and `transfer/MANIFEST.json`.
+- `verify` (H200, from the repository root): presence, size and SHA-256 of every (b1) file at its live path and every
+  (b2) file under the quarantine root; presence of the (a) files and that the checkout descends from the manifest's
+  commit; **fails if a stream-dependent laptop record sits at a live path** (it prints the `mv` that would quarantine
+  it and executes nothing); lists the (c) entries and the tracked-record hazards; `--skip-large-hash`, `--json`,
+  `--source-machine` (for the laptop, where the records are at their live paths by definition).
+- It refuses any `*.csv` and treats the test cache as an opaque byte stream: the only access is a chunked binary read
+  for the hash. A byte hash is not a test access and is not logged.
+
+```
+# on the laptop, from the repository root
+python3 -B shape-form-martin/scripts/make_transfer_package.py list
+rsync -a --files-from=shape-form-martin/transfer/files_b_inputs.txt ./ <user>@<h200>:<repo>/
+rsync -a --files-from=shape-form-martin/transfer/files_b_laptop_records.txt ./ <user>@<h200>:<repo>/shape-form-martin/cache/laptop_records/
+# on the H200, from the repository root
+python3 -B shape-form-martin/scripts/make_transfer_package.py verify
+```
+
+State on the laptop: `list` ran at commit `c9b7f72`; `verify --source-machine` passes (80 checks, 0 failures).
+
+### 16.3 Run-book for the H200
+
+All commands from the repository root. "Missing" means no command exists today (§16.7). Durations are LAPTOP
+measurements; the H200's are unknown until the calibration of step 4.
+
+| # | Step | Command | Acceptance | Laptop time |
+|---|---|---|---|---|
+| 1 | Checkout | `git clone` / `git pull`, branch `shape-form-martin`, at or after the commit of this amendment | `git log -1` | — |
+| 2 | Environment | `uv sync --python 3.12` then `uv run python -B -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available(), torch.cuda.get_device_name(0), torch.cuda.device_count())"` | `2.14.0+cu130`, `13.0`, `True`, the H200's name. **If `is_available()` is false, stop:** `common.py` would fall back to the CPU without an error. `nvidia-smi` must report a driver CUDA version ≥ 13.0. `gcc` with OpenMP must exist (the stream emulator compiles on first use). One full GPU visible (`CUDA_VISIBLE_DEVICES`), not a MIG slice | not measured |
+| 3 | Paths | leave `SFM_DATA_DIR`, `SFM_RESULTS_DIR`, `SFM_CACHE_DIR` **unset**. `SFM_RESULTS_DIR` would hide the pairing arrays, the registry and the done-markers and move the test-access log; `SFM_CACHE_DIR` would move the caches away from where `verify` looks. If the repository is on a network file system, point `SFM_GPU_LOCK` at a local disk | — | — |
+| 4 | Copy and verify | the two `rsync` lines of §16.2, then `python3 -B shape-form-martin/scripts/make_transfer_package.py verify` | PASS. This is the cache verification: both caches by SHA-256, the test cache by byte hash only. Never run `scripts/build_cache.py` in place | list 2 s, verify 2 s |
+| 5 | Machine identity (R0) | `uv run python -B -c "import sys; sys.path.insert(0,'shape-form-martin/src'); from sfm import refstream; print(refstream.local_grid())"` and `uv run pytest shape-form-martin/tests/test_refstream.py -q -k emulation_reproduces_torch_rand_bitwise` | launch grid recorded (expected 1056); the emulator equals `torch.rand` bit for bit. Two other tests of that file are expected to fail on any GPU but the laptop's (§16.7) | seconds |
+| 6 | Benchmark parity on validation and the H200 pairing arrays (R1, R1b, R3) | **missing** — a validation-only command; `scripts/parity.py` must not be used (both of its modes open the test split) | if the grid is 1056: float32 validation means 18.118084 (MLP) and 18.120407 (formula) within 4e-6; every event within 1e-4 of the laptop's emulated `*_val_nll_ref1056.npy` in quarantine; formula − MLP = +0.002324 ± 0.000294; a second run bit-identical. Fallbacks in §16.4 | 1.5 s + 0.9 s |
+| 7 | Guard reference arrays (R2), once, by one process, before any registration | automatic at the first guarded `registry.evaluate`; to be run deliberately as its own step | grid 1056: K = 1024 means 18.1155556 / 18.1177364, bulk means 18.0429497 / 18.0448778, within 1e-6; stratum of 14,784 events | ≈ 27 s |
+| 8 | Re-score the eight laptop-trained networks (R4) | **missing** — the run scripts skip them (tracked `done.json`) and would reuse the laptop rows | checkpoint SHA-256 equal to the laptop rows; values of the table below within 1e-6 on the mean | ≈ 1.5 min |
+| 9 | Track B, three fine-tunes | `uv run python -B shape-form-martin/scripts/run_m2b_fit.py shape-form-martin/configs/m2b/s2_seed13.toml shape-form-martin/configs/m2b/s2_seed14.toml shape-form-martin/configs/m2b/s2_seed15.toml` | three registered rows; no laptop checkpoint resumed (`s2_seed13` has none) | 238 s + 16 s each ≈ 13 min |
+| 10 | Track B, controls | the three H200 controls under new names (P5): **configs missing**. The existing `configs/m2b/b0_seed1.toml` and `b0_seed2.toml` run with the same script, but the naming must be fixed before any H200 control is scored, because `run_m2b_report.py` takes the scatter from the names `b0_seed{0,1,2}` | three H200-trained controls; none has the SHA-256 `75de31f2…` of the laptop's `b0_seed0` | 3 × (238 s + 16 s) ≈ 13 min |
+| 11 | Ensembles and report | `uv run python -B shape-form-martin/scripts/run_m2b_ensembles.py` then `uv run python -B shape-form-martin/scripts/run_m2b_report.py` | E5, E6, the size curve; no laptop array read | never run; minutes |
+| 12 | Track A fits | `uv run python -B shape-form-martin/scripts/run_m2a.py templates parity plr stage0 stage1p stage1x` — **blocked today**: the parity phase compares with the laptop value 18.120061 and stops the track; the drift and budget rules are laptop-specific (§16.7) | A0 at step 0 equals the H200 formula array (every event within 1e-4, mean within 1e-6) | never run; ≈ 4.0 h estimated, up to 1.3 h more if the lists run in full |
+| 13 | Track A rules, guards, Stage 2 | **missing** (`scripts/run_m2a_report.py`) | `results/m2a_dist/RESULTS.md` | ≈ 38 min, inside the 4 h |
+| 14 | Remaining Track B (`AUDIT.md` §4.2) | `scripts/fit.py <config>` / `scripts/fit_queue.py <configs>` work for B2a/b/c, B5f, B3s, B4f/B4s once their configs exist; **missing**: the configs, B4x (`full_box` template), B6 (factory), B1d/B1f (distillation), B-ceil (`train_fraction`) | comparators trained on the H200 | ≈ 2.0 h estimated |
+| 15 | PySR refits and scores (decision iii) | **missing** (`src/sfm/sr/` translate, audit, targets, refit not written) | every refit and score an H200 registry row | — |
+| 16 | θ track Θ1–Θ3 and the geometry arm's scores | **missing** (no code); after the θ-blind finalists are frozen and after the geometry audit | G-bulk headline | — |
+| 17 | `LOCK.json` → Gate 2c → single final run | **missing** (`scripts/final_test.py`) | stop rule of A6 revised, point 8 | C1 took 7 s |
+| 18 | Results back to the laptop | §16.6 | — | — |
+
+**Does the H200 reproduce the stored 18.1208 / 18.1235 directly?** These are test numbers, and by decision (i) the test
+split is not opened on the H200 before the final run. What can be said earlier: if steps 5 and 6 pass with launch grid
+1056, the H200 draws the earlier study's sample points, its validation numbers are the stored 18.118084 / 18.120407,
+and its test arrays are predicted to equal the stored ones to about 3e-5 per event — every link verified except the
+evaluation on the test tensors themselves. That is a strong inference, confirmed or refuted by the first step of
+`final_test.py`. That the grid is 1056 is itself an inference (an H200 has the reference machine's GPU layout) until
+step 5 reads it.
+
+Targets for step 8 if the launch grid is 1056 (validation, K = 64; Δ in 10⁻⁴ nat against `mlp_std`, paired):
+
+| Network | Laptop Δ | Predicted H200 mean | Predicted H200 Δ |
+|---|---|---|---|
+| `mlp_std` | — | 18.1180829 | — |
+| component formula | +22.04 ± 2.93 | 18.1204074 | +23.24 ± 2.94 |
+| `s1_seed11` | +21.81 ± 3.17 | 18.1202702 | +21.87 ± 3.17 |
+| `s1_seed12` | +19.25 ± 2.94 | 18.1200090 | +19.26 ± 2.94 |
+| `s1_seed13` | +19.00 ± 2.60 | 18.1199865 | +19.04 ± 2.59 |
+| `s1_seed14` | +12.57 ± 2.32 | 18.1193732 | +12.90 ± 2.31 |
+| `s1_seed15` | +32.94 ± 4.19 | 18.1214207 | +33.38 ± 4.20 |
+| `s2_seed11` | +1.82 ± 1.73 | 18.1182652 | +1.82 ± 1.74 |
+| `s2_seed12` | +3.29 ± 1.70 | 18.1184227 | +3.40 ± 1.73 |
+| `b0_seed0` (laptop record) | +1.19 ± 0.42 | 18.1181833 | +1.00 ± 0.41 |
+
+### 16.4 What carries over and what is recomputed (Fable review)
+
+**Carries over unchanged**
+
+| Item | Why it carries over | What shows it on the H200 |
+|---|---|---|
+| Code and tests | identified by the git commit | checkout descends from `c9b7f72`; the test suite passes except the two launch-grid tests of `tests/test_refstream.py` (§16.7); `test_emulation_reproduces_torch_rand_bitwise` must pass |
+| Split, cuts, event order | made on the CPU with `default_rng(1)`; stored in the cache | follows from the cache hashes |
+| Both cache files (byte copies, not rebuilt) | Gate 0 and C1 certified these bytes; a rebuild on another CPU may differ in the last bit | SHA-256 equal to the tracked `parity.json` (`9984886f…`, `14955929…`; test file by byte hash only); validation fingerprint recomputed there equals `731a1997…58a7` |
+| Benchmark files `mlp_std.pt`, `new3_std_n3.pt`, `abar.pt`, `test_v3.json` | weights and the formula's structure are bytes | SHA-256 of `transfer/SHA256SUMS`; functionally by row R1 below |
+| Weights of the eight laptop-trained networks | a network is a fixed function wherever it was trained | SHA-256 equal to `checkpoint_sha256` of the laptop registry rows |
+| `abar_front.pt`, `abar_front_back.pt`, the two event-number arrays | made from training events, respectively from the split; no fold points | SHA-256 |
+| Gate 0 conclusions on data, code and checkpoints | none uses fold points; they are statements about copied bytes | nothing to redo |
+| C1 (exact test parity on the reference stream) | it certified bytes × code × stream 1056; bytes are identical by hash | the two new links (generator, arithmetic) by R0 and R1; the test evaluation itself by the first step of the final run |
+| Milestone 1 audit and the run lists of AUDIT §4 | no decision is within reach of a change of stream | nothing to redo; numbers quoted as "laptop, other sample points" |
+| Laptop per-event arrays, the eight registry rows, training histories | they are records | kept in quarantine; never at a live path, never in a delta |
+
+**Not carried over** (laptop statements): Gate 0's A1(d) and A3 (statistical parity of the laptop stream), the A2
+run-to-run floor, the numbers of record of Gate 0 §2.5, the timing probe, every cost and budget figure.
+
+**Recomputed on the H200, in this order.** Targets marked ◆ hold only if the launch grid is 1056; the fallback
+follows the table.
+
+| # | Step | Why | Acceptance |
+|---|---|---|---|
+| R0 | Identity of the machine: GPU name, `refstream.local_grid()`, torch and CUDA build, emulator against `torch.rand` | the stream is a property of the GPU and of the torch build | grid read and recorded (expected 1056); torch 2.14.0+cu130; `EmulGen(seed, local_grid())` equals `torch.rand` bit for bit |
+| R1 | Benchmark pairing arrays on validation: `common.test_nll` inside `deterministic()`, K = 64, both benchmarks | every delta is paired against them | ◆ float32 means 18.118083953857422 and 18.120407104492188 within 4e-6; ◆ against the laptop's `*_val_nll_ref1056.npy`: every event within 1e-4 (expected ≤ 3e-5), means within 1e-6; ◆ formula − MLP = +23.24 ± 2.94; a second run is bit-identical |
+| R1b | The laptop stream emulated on the H200 (grid 144), eight networks | separates arithmetic from fold points, whatever the grid | every event within 1e-4 of the laptop's registered `val_nll.npy`, means within 1e-6 |
+| R2 | Guard reference arrays (K = 1024; bulk on the stratum), once, by one process, before any registration | guards are paired against them | ◆ means 18.1155556 / 18.1177364 (K = 1024) and 18.0429497 / 18.0448778 (bulk), within 1e-6; ◆ formula − MLP +21.81 ± 2.83 and +19.28 ± 2.75; 14,784 events in the stratum, 166 short, none undefined |
+| R3 | Run-to-run floor outside `deterministic()` | Gate 0's 2.9e-5 is a laptop measurement | two runs within 1e-4 per event and 1e-6 on the mean (amendment A2) |
+| R4 | Re-scoring of the eight laptop-trained networks, guards for b0_seed0, s2_seed11, s2_seed12 | their laptop arrays are on other fold points | ◆ K = 64 table of session 1 and guard table D: means within 1e-6, deltas within 0.01; mass monitors within 1e-4 relative per event of the laptop's files |
+| R5 | Remaining Track B training: fine-tunes of seeds 13–15; the control for seeds 0, 1 and 2 | not yet trained, or (control seed 0) decision (ii) | no numeric target; configuration equal to the pre-registered files; no checkpoint from the laptop resumed; the H200 control for seed 0 has another SHA-256 than `75de31f2…` |
+| R6 | Ensembles and their subsets | functions of weights, scored on H200 points | the three representative subsets are bit-equal to their registered arrays; no laptop array is read |
+| R7 | Track A: templates, then A0 at step 0, then the list of AUDIT §4.1 | never run | A0 at step 0 against the H200 formula array: every event within 1e-4, mean within 1e-6 (◆ mean 18.120407) |
+| R8 | Remaining Track B list (AUDIT §4.2), θ arms | never run | comparators trained on the H200 |
+| R9 | Refits, controls and scores of PySR equations; scores of the geometry arm | decision (iii) | each is an H200 registry row; translator round trip within 1e-5 against reference values shipped with the equation |
+| R10 | Final test evaluation | single run on the machine of record | stop rule of §13, A6 revised, point 8 |
+| R11 | Timing: throughput calibration | costs and slot count are machine properties | §16.5 |
+
+**Fallback when the grid is not 1056** (or R0's generator check fails): the ◆ targets do not apply to the native
+arrays. Then (a) R1, R2 and R4 are repeated on the *emulated* grid 1056 on the H200 and must meet the same ◆ targets;
+this needs the emulated draw for `sfm.metric.draw`, which exists only for `common.fold` today. (b) R1b must pass.
+(c) The native arrays are the new numbers of record and are accepted on A3: correlation with the emulated arrays
+≥ 0.9995 and rms of the per-event difference within ±15 % of the laptop's validation values (0.033 for the MLP,
+0.036 for the formula; Gate 0 §2.4). (d) Stored arrays are never pairing partners.
+
+**Fallback when a per-event limit is exceeded but the means agree** (another arithmetic, as in measurement E): the
+step passes if at most three events exceed 1e-4, none exceeds 1e-3, the rms is ≤ 1e-5 and the means agree within
+1e-6. The finding is recorded, and the per-event clause of the final run's stop rule is then set as in §13, A6 revised, point 8.
+
+### 16.5 PROPOSAL (not approved, not implemented): running fits side by side on the H200
+
+Measured on the laptop: 104 deterministic evaluations run two, three or four at a time were bit-identical to the
+registered arrays, so concurrency does not change evaluation results; but total throughput did not rise (28.2 → 26.3
+training-like steps per second for one → four processes). On one GPU without the multi-process service the driver runs
+one process at a time, so the gain is bounded by the idle time of a single job. Whether an H200 behaves differently is
+not known.
+
+| Point | Proposal |
+|---|---|
+| Unit | One operating-system process per job (one fit with its registered evaluation, or one evaluation). Never threads: `deterministic()` flips a process-wide switch, `refstream.patched_fold` swaps a module attribute, seeding is process-wide. |
+| How many | N is measured on the H200 (below), not chosen in advance. Expected 1–4 without the multi-process service, more only with it (INFERENCE). Memory would allow more than 16. First use: N ≤ 8. |
+| Adopt or drop | Adopt only if two jobs give at least 1.15 times the throughput of one. Otherwise N = 1, the exclusive lock stays, and nothing else in this table is built. |
+| Lock | N slot files `cache/gpu.slot.<i>`, each an exclusive `flock` taken with the present `gpu_lock` code; a job takes the first free slot. `SFM_GPU_SLOTS` defaults to 1, which is today's behaviour, so the laptop and the tests are unchanged. |
+| Exclusive steps | A second file `cache/gpu.excl`: ordinary jobs hold it shared for their lifetime, exclusive steps hold it exclusively. Exclusive steps are started when the queue is empty. |
+| One run, one process | An exclusive, non-blocking `flock` on `<run directory>/.run.lock`, taken first and held to the end; the done-marker is read again after it is held. A second process on the same run stops at once and names the holder. One such lock per driver as well. |
+| Shared files | Only the single driver process writes `decisions.json`, `plr.json` and the report files. Worker processes write only inside their run directory and append to the registry (already under `flock`). |
+| Memory, static | N × P ≤ half of the device memory, where P is the largest device footprint of any job class measured on the H200 (laptop: about 4.6 GB for a fit with a guarded evaluation). |
+| Memory, at each start | After taking a slot and before allocating: (a) the sum of the footprints declared by the other slot holders, plus the job's own, plus 4 GB, is at most 80 % of the device; (b) the free memory reported by the device is at least the job's own footprint plus 4 GB. Each slot file records its holder's declared footprint. If either fails: release the slot, wait 30 s, retry. |
+| Waiting processes | A process that waits holds only its CUDA context (0.14 GB on the laptop), because `common.py` creates its grid tensors at import. This is harmless on the H200 and is counted by (b). The rules of §15 stay: no tensors on the device before the slot is held, `empty_cache()` before it is released, never wait for memory while holding a slot. |
+| CPU | Threads per process limited to cores ÷ N (at most 8); N ≤ physical cores − 2. |
+| File system | `flock` must be honoured where the lock files and `registry.jsonl` live. Put the lock files on a local disk (`SFM_GPU_LOCK` already relocates them) and run check E5. |
+
+Why condition (a) is needed: the present check reads the free memory at one instant. With N slots, several jobs can
+start together and all see the memory free before any of them has allocated. The declared sum removes that race.
+On a dedicated H200 with N ≤ 8 both conditions always hold (8 × 5 GB against 141 GB, the latter INFERENCE); they
+matter if the GPU is shared with other users or N is raised.
+
+**How N is determined on the H200**
+
+Nothing is registered and nothing is written into the campaign results (scratch result directory).
+
+- **Workloads.** P1: the Track B training step (`mlp_std` architecture, batch 256, K = 16). P2: a Track A training
+  step (`survival_exact` component model, batch 256, K = 16). P3: a guarded evaluation. The timing probe of
+  `scripts/parity.py` cannot be used: that script opens the test split.
+- **Measurement.** For n = 1, 2, 3, 4, 6, 8, 12, 16: start n identical processes behind a common start signal; each
+  runs 20 warm-up steps and then a timed window of at least 20 s, with `torch.cuda.synchronize()` at both ends.
+  Record steps per second per process, the total T(n), the lowest free device memory, GPU utilisation and CPU load.
+  Three repeats per n; use the median. Do this without the multi-process service and, if the user allows it, with it.
+- **Rule.** N is the smallest n with T(n) ≥ 0.9 × the largest T measured, taken separately for P1 and P2; use the
+  smaller of the two. Stop measuring once T has stayed below 0.9 × the running maximum for two consecutive n.
+  Caps: the static memory rule, the CPU rule, and a per-job slow-down of at most 4. If T(2) < 1.15 × T(1): N = 1.
+  P3 is run once at the chosen N, mixed with N − 1 fits, to confirm memory and throughput.
+- **Applied to the laptop numbers:** T(2)/T(1) = 0.94 for steps and 1.00 for evaluations, so N = 1.
+- **If the multi-process service is used:** read `local_grid()` inside it (must equal the value of R0), set no
+  thread limit, and pass check E1 against a reference computed without it. One faulting client can end all
+  clients; the fits resume from their checkpoints.
+
+**What stays strictly one at a time**
+
+| Step | Why |
+|---|---|
+| R0–R4 of §16.4 (identity, reference arrays, re-scoring) | every later delta rests on these files; `_bench_guard_arrays` checks and then writes without a lock; the re-scoring also provides the sequential reference of check E1 |
+| The throughput calibration | it measures time |
+| Every decision of a driver: learning-rate pilot, A0 parity, A0 drift rule, convergence reruns, keep and equal-NLL rules that trigger second seeds, the content of A11, 1-SE selection, promotion | each is a function of registered arrays and must be evaluated once, by one process, in the pre-registered order, after all its inputs exist. The fits between two decision points can run side by side |
+| Report scripts and `LOCK.json` | they rewrite shared files |
+| The final test run | single test access; alone on the GPU, no other campaign process alive |
+| Commits | taken when no job runs, so that no tracked file is caught half-way |
+
+Dependencies inside Track A that limit what can run together (from `scripts/run_m2a.py`): templates → A0 at step 0
+→ three polynomial pilot fits → frozen learning rate → A2s seed 0 → three network pilot fits → frozen learning
+rate → A0 (two seeds) → drift rule → A1, A2e, A2s → A2n (needs A2s of the same seed) → twelve polynomial primaries
+(need A2s of the same seed) → six network primaries (each needs its polynomial run) and the convergence reruns →
+eighteen exploratory fits → second seeds of those that pass → guards → Stage 2.
+
+**The budget rule must not depend on time (proposal P2)**
+
+**Found (FINAL).** `scripts/run_m2a.py` line 44 sets `BUDGET_S` to 4 h. Lines 358–405 drop exploratory runs in the
+pre-registered order while "seconds used so far + expected seconds of what is pending" exceeds it. Both terms are
+wall time: the sum of `gpu_time.jsonl`, and the median seconds per step of finished runs (defaults 0.055 and 0.07 s,
+laptop estimates). A faster machine drops fewer runs; jobs side by side take longer each and drop more. The rule of
+AUDIT §4.0 ("if the budget runs out, runs are dropped in the order given") is the same quantity. Also: the last
+entry of the drop order in AUDIT §4.1, the network runs of primaries that failed on both seeds, cannot be dropped
+by the code, because those runs happen before the exploratory ones.
+
+**Recommended (R1): run the lists in full on the H200.** All eighteen exploratory rungs at seed 0, seed 1 whenever
+seed 0 passes the keep or the equal-NLL rule, all network primaries; the same for the Track B list of AUDIT §4.2. The
+drop logic is switched off and `decisions.json` must show no dropped run. The set of runs then depends only on the
+lists and on validation outcomes. Cost at laptop speed: about 4.0 h plus at most 1.3 h of second seeds for Track A.
+Statistically nothing is added that was not pre-registered: the full list *is* the list; the drop order was a
+fallback for lack of time; the six primaries are unchanged; a rung that is not run cannot enter A11, so dropping
+could only remove candidates for a reason unrelated to their merit. It must be recorded before the first Track A
+fit; none exists today (measurement F).
+
+**Alternative (R2), if the cap is to be kept:** a budget in nominal units. Each run costs its "Cost" entry of AUDIT
+AUDIT §4.1 (laptop minutes, fixed in advance); the cap is 240 nominal minutes; the twelve exploratory rungs that are not
+on the drop list run first; the number of second seeds they trigger then fixes, by arithmetic, which rungs of the
+drop list run. This is independent of speed and of concurrency, but it drops runs on a machine that has the time.
+
+PySR budgets are wall time by design (minutes per seed on 20 threads) and stay on the laptop, so they do not change.
+
+**Checks that show, on the H200, that side by side equals one after another**
+
+All in a scratch result directory, with the H200 reference arrays passed in explicitly; nothing reaches the
+campaign registry.
+
+| # | Check | Criterion |
+|---|---|---|
+| E0 | `local_grid()` and the generator test inside the configuration used for concurrent jobs | equal to R0 |
+| E1 | K = 64 arrays of the eight networks: N processes at once (different networks, then all the same network), other slots busy with the fit probe | array SHA-256 equal to the sequential re-scoring R4, 8 of 8, no tolerance |
+| E2 | Guard arrays (K = 1024, bulk) and mass monitors of the three guarded networks, same arrangement | equal hashes |
+| E3 | One short fit per model class (Track B network; Track A component model) with `deterministic = True`: alone, beside N − 1 other jobs, alone again | hash over the weight tensors (not the `model.pt` file; `transfer/REVIEW_STATUS.md` §4, point 13), validation history without `seconds`, and registered array: all three runs identical. If the two solitary runs differ, the class has an operation without a deterministic kernel and E3 cannot decide for it |
+| E4 | One short fit in the default mode, four times alone and four times under full load, all scored on the same points | mean of "loaded − alone" within 2 SE of zero, SE taken from the alone–alone pairs; rms of per-event differences within a factor 2. Weak with four repeats; E3 is the decisive check. The alone–alone pairs also give the run-to-run scatter that the review could not measure on the laptop |
+| E5 | Locks and registry: N processes appending 200 rows each to a scratch registry; two processes on one run directory; N + 1 jobs on N slots | N × 200 valid lines; the second process stops with the holder's name; never more than N at once |
+| E6 | After the first real batch: two registered runs re-evaluated alone from their `model.pt` | array hash equal to the row's `val_nll_sha256` |
+
+If E1 or E2 fails: evaluations go back to the exclusive lock. The first thing to try is
+`CUBLAS_WORKSPACE_CONFIG=:4096:8`, which the campaign does not set today; if it is introduced, it is part of the
+arithmetic tag and the reference arrays are recomputed under it.
+
+**Option for the user (not recommended as default):** run the Track A fits with `deterministic = True`. Every fit
+is then bit-reproducible and a gate can repeat any of them exactly. It costs speed (to be measured in the
+calibration) and changes the training configuration T_A before its first use. It must not be applied to the Track B
+seeds, whose configurations have to equal the laptop's.
+
+### 16.6 How results come back
+
+Committed on the H200 and pulled on the laptop (tracked): `results/registry.jsonl` (new H200 rows, appended);
+per run `done.json`, `fit_done.json`, `resources.json`, `init.json`; `results/m2a_dist/` `plr.json`, `decisions.json`,
+`gpu_time.jsonl`, `RESULTS.md`; `results/m2b_mlp/summary.json` and `ensemble_scaling.json`;
+`results/registry_refs/guard_spec.json`; new configs and scripts; after the final run `results/final/` JSON files and
+`results/test_access.log`. Staging by explicit path, as everywhere.
+
+Git-ignored and to be copied back by hand, because the gates recompute paired differences, selection and hashes from
+them and the PySR target export needs the networks:
+- per-event arrays: the H200 pairing arrays `results/m0_parity/{mlp,formula}_val_nll.npy`, the guard references
+  `results/registry_refs/*.npy`, every run's `val_nll.npy`, `val_nll_k1024.npy`, `val_bulk_zb1221.npy`,
+  `val_mass_monitors.npz`, the ensemble subset arrays;
+- checkpoints `results/<stage>/<run>/model.pt` of every registered run (not `checkpoint.pt`, not `stage1_fit.pt`);
+- the Track A templates (`results/m2a_dist/templates/*.pt`, `*.npz`);
+- `fit.log` files if a gate wants the training curves (ignored by the repository-wide `*.log` rule);
+- after the final run: the per-event test arrays under `results/final/`.
+
+They must not land on the laptop's live paths, where laptop arrays of the same name exist (the pairing arrays, the
+guard references, the eight re-scored runs). Proposal P6: copy them under `shape-form-martin/cache/h200_records/<same
+repo-relative path>` until every array carries a machine tag and tag-named directories exist (§16.7, E1); the gates
+read them from there. A return-list mode of the packaging script does not exist yet.
+
+### 16.7 What has to exist before each step can run (none of it is written; all of it needs the go-ahead)
+
+| # | Change | Unblocks | Routing |
+|---|---|---|---|
+| E1 | Safeguard against mis-pairing: a stream and machine tag on every per-event array and registry row, tag-named reference directories with no fallback, one delta function that refuses mixed tags, `trained_on` / `scored_on` per row, no cross-machine resume (specification: `transfer/REVIEW_STATUS.md` §4, 15 points) | every registration on the H200 | Fable specifies and reviews, Opus implements |
+| E2 | Validation-only parity and pairing-array command (never opens test) | steps 6, 7 | Opus, Fable reviews |
+| E3 | Re-scoring command for already registered runs | step 8 | Opus |
+| E4 | Track A driver: paired step-0 parity against the same-stream formula array instead of the constant 18.120061; drift rule on H200 arrays; a set of runs that does not depend on time (P2); the report / guards / Stage 2 script | steps 12, 13 | Opus; Fable for the rule changes |
+| E5 | `sfm.refstream` and its tests without the laptop's launch grid as a constant | a clean test suite on the H200 | Opus |
+| E6 | Track B §4.2 configs and missing model code; the three H200 control configs (P5) and the report script's control names | steps 10, 14 | Opus |
+| E7 | θ harness `forward(lnp, aux)`; geometry-arm scoring | step 16 | Opus; Fable verifies the acceptance mathematics (Gate 2c) |
+| E8 | `scripts/final_test.py` with the stop rule of A6 revised, point 8; `LOCK.json`; refusal of any other machine and of path overrides | step 17 | Opus; Fable at Gate 2c |
+| E9 | Slot locks and the per-run lock, if P1 is approved | §16.5 | Opus |
+| E10 | A hard failure instead of the silent CPU fallback; host, GPU and launch grid in every test-access log line | steps 2, 17 | Opus |
+| E11 | `src/sfm/sr/` translate, audit, checks, targets, refit (already on the list of §15) | step 15 | Fable |
+| E12 | Return-list mode of the packaging script; optional split list for the test-derived files (P4) | step 18 | Opus |
+
+Machine-specific constants found in the code (29 entries; each cited line is re-checked by `list`):
+
+| Where | What | Consequence on the H200 if unchanged |
+|---|---|---|
+| `SFM/common.py:313` | common.test_nll draws its fold points from the CUDA Philox generator; the stream depends on the launch grid SMs x … | H200: 132 x 8 = 1056 = REFERENCE_GRID (prediction; read refstream.local_grid()). Its validation numbers would be the earlier study's 18.118084 / 18.120407, not the laptop's 18.117857 / 18.120061. A MIG slice differs |
+| `SFM/common.py:64` | silent CPU fallback | if the CUDA build/driver fails, every script runs on the CPU (another fold stream, very slow) and run_on_gpu/on_gpu skip the memory check (free = inf, run_m2b_lib.py:121, run_m2a_lib.py:128) |
+| `SFM/scripts/run_m2a.py:43` | laptop formula validation mean as the Track A parity target (checked at :260 to 1e-5, stop at :266) | with grid 1056 the value is ~18.120407 (diff ~3.5e-4): the parity phase registers A0_init (registry write), records passed:false in decisions.json and raises SystemExit; Track A cannot proceed until the criterion is restated machine-independently |
+| `SFM/scripts/run_m2a.py:172` | A0 drift rule (/A0 - formula/ > 2e-4 -> stop, :313) pairs with the benchmark array | laptop array at the live path: false STOP (+3.5e-4 stream difference); absent: FileNotFoundError; needs the H200 array |
+| `SFM/scripts/run_m2a.py:44` | 4 GPU-hour budget; with _est_seconds defaults 0.07 / 0.055 s per step (:371, :374) and 180 s per guard evaluation (:381) | the pre-registered drop order depends on machine speed (and on concurrency, since gpu_time.jsonl sums wall seconds): a fast H200 drops fewer runs |
+| `SFM/src/sfm/registry.py:94` | benchmark pairing arrays = 'this machine's stream'; rows record only device 'cuda' and the torch version (:446) | laptop arrays at the live path: every H200 row pairs silently against laptop points (fake +-2.3e-4 vs MLP, 3.5e-4 vs formula); absent: loud error |
+| `SFM/src/sfm/registry.py:328` | guard spec has no GPU/stream identity (_guard_spec :296) | laptop registry_refs/*.npy at the live path are reused silently; absent: recomputed |
+| `SFM/scripts/run_m2b_lib.py:62` | registered_row matches by checkpoint SHA-256 only (also run_m2a_lib.py:166) | re-running a registered run's script reuses the laptop row; re-scoring is impossible through the existing scripts |
+| `SFM/scripts/run_m2b_ensembles.py:177` | scaling table pairs with the benchmark array and the latest rows' arrays (:166; also run_m2b_report.py:42-49, registry.py:542) | before re-scoring: laptop arrays of seeds 11/12 mixed with H200 arrays (if copied) or FileNotFoundError |
+| `SFM/src/sfm/refstream.py:51` | launch grid of the laptop GPU | tests that assume it fail (see tests_expected_to_fail_on_h200) |
+| `SFM/tests/test_refstream.py:52` | asserts the local grid is 144 | fails on the H200 (1056) |
+| `SFM/tests/test_refstream.py:76` | assumes the local stream differs from the grid-1056 stream | fails on a grid-1056 GPU (the streams are identical) |
+| `SFM/tests/test_refstream.py:113` | uses a Gate 0 laptop record if present at its live path | with the record quarantined this sub-check is skipped silently (the test still checks the stored mean to 4e-6) |
+| `SFM/scripts/audit_lib.py:48` | laptop validation numbers of record | M1 audit re-runs on the H200 would compare against laptop numbers (not a moved step) |
+| `SFM/src/sfm/registry.py:440` | absolute laptop paths in rows (also train.py:661 out_dir, config_path in model.pt meta) | informational only; no loader uses them |
+| `SFM/src/sfm/train.py:235` | checkpoint.pt stores CUDA RNG states; the fold generator lives on the device (:427); resume checks only config_hash (:438) | resuming a laptop checkpoint.pt on the H200 continues on another stream (hybrid fit); no partial laptop checkpoint is needed |
+| `SFM/src/sfm/refstream.py:64` | always cuda:0 (with common.DEVICE) | on a multi-GPU node every job runs on GPU 0 (cache/gpu.lock serialises them); MIG changes the grid |
+| `SFM/src/sfm/refstream.py:89` | gcc with -fopenmp must exist (CFLAGS :55) | without it the first emulator use fails (test_refstream, reference-stream checks) |
+| `SFM/scripts/run_m2b_lib.py:110` | free-memory threshold tuned for an 8 GB GPU (run_m2a_lib.py:121: 2500) | harmless on 141 GB |
+| `SFM/tests/test_families_components.py:532` | cost budget written for the RTX 4060 | passes, or skips on a busy GPU (not verified on an H200) |
+| `SFM/scripts/check_protected.py:49` | protected-file manifest incl. Parquet size and mtime | verify on the H200 reports every protected file that was not copied as missing (exit 1); keep the Parquet mtime (rsync -a) |
+| `SFM/src/sfm/data.py:135` | float64 numpy transcendental functions in the cache build (also common.py:144 rotation) | numpy uses AVX-512 SVML kernels where available (the laptop i7-14650HX has no AVX-512): a rebuild on the H200 host is not guaranteed bit-identical -> copy the caches |
+| `SFM/src/sfm/metric.py:79` | bit-reproducibility per machine only | H200 arrays are reproducible on the H200 and differ from the laptop's |
+| `SFM/scripts/parity.py:412` | laptop pairing arrays were computed outside deterministic(); registry arrays inside (registry.py:418) | the H200 recomputation should use deterministic() (differs from an outside run by up to ~2.7e-5 per event) |
+| `SFM/src/sfm/data.py:258` | test-access log line has no host or GPU | lines written on the two machines cannot be told apart; Gate 2c's 'exactly two lines' must be restated per machine |
+| `SFM/src/sfm/gpulock.py:32` | one flock file per working copy (or SFM_GPU_LOCK) | two checkouts on one node do not share the lock unless SFM_GPU_LOCK points to one file; flock may not work on a network filesystem |
+| `SFM/src/sfm/paths.py:26` | SFM_DATA_DIR / SFM_RESULTS_DIR / SFM_CACHE_DIR overrides (:31-33) | the manifest assumes the defaults: setting any of them moves where the code looks for the b1 files |
+| `pyproject.toml:5` | no .python-version; the laptop venv is CPython 3.12 | uv may choose another interpreter on the H200: use uv sync --python 3.12 |
+| `uv.lock:2450` | torch 2.14.0 from PyPI (laptop: 2.14.0+cu130, CUDA 13.0) | the H200 driver must support CUDA 13.0, otherwise torch.cuda.is_available() is False (silent CPU fallback) |
+
+Tests of the campaign suite on an H200:
+
+| Test | Expected | Why |
+|---|---|---|
+| `tests/test_refstream.py::test_local_grid_constant_matches_this_gpu` | FAIL | asserts local_grid() == LOCAL_GRID == 144; the H200 grid is 1056 (any GPU but the RTX 4060 Laptop fails) |
+| `tests/test_refstream.py::test_other_grids_differ_only_beyond_their_thread_count` | FAIL if the H200 grid is 1056 | requires the local stream to differ from the grid-1056 stream |
+| `tests/test_refstream.py (library, bitwise emulation, local/reference stream tests)` | PASS if gcc with OpenMP exists, else FAIL | the .so is compiled on first use; test_emulation_reproduces_torch_rand_bitwise is the check that the H200 torch build has the same Philox layout |
+| `tests/test_families_components.py::test_forward_backward_cost_at_batch_256` | PASS or SKIP | budget written for the RTX 4060; skipped when the GPU is busy |
+| `tests/test_data.py, test_metric.py, test_registry.py real-data tests` | PASS with the b1 files; skip (cache absent) or FAIL (test_registry needs results/m0_parity/val_event_number.npy) without them | they read the copied cache, meta and event numbers |
+| `tests/test_dist_factory.py template test` | SKIP until run_m2a.py templates | HAVE_TEMPLATES |
+
+### 16.8 Not verified
+
+- **Anything about the H200 itself:** its launch grid (1056 is a prediction), driver support for the CUDA 13 build,
+  `gcc` with OpenMP, Python 3.12, whether its torch build has the same random-number kernel layout, whether `flock`
+  works on its file system, MIG or multi-GPU layout, disk space, whether `rsync -a` preserves modification times
+  there, its speed, and whether the predicted values of §16.3 are met.
+- **Reads that only happen inside code that was not run:** fits, registry evaluations, guard recomputation and resumes
+  are known from reading the code; model builds that need a finished Track A run were not exercised; the ensemble,
+  report and Track A scripts were not run because they write or compute.
+- **Code that does not exist yet** cannot be traced: the commands marked missing in §16.3.
+- **Laptop durations** for the ensembles, the report and all of Track A are estimates; none of them has run.
+- **The cache rebuild** being non-identical on another CPU is argued from the code, not observed.
+- **Concurrency on the H200:** nothing measured there; the laptop result (no gain) may not transfer.
