@@ -2071,3 +2071,23 @@ A11p as pre-registered (`AUDIT.md` §4.1): drop the highest-degree coefficients 
 the diagonal Fisher information on training events, refit, accepted at equal NLL, seeds 0 and 1. The user's addition
 of 26 Nov: the short-event stratum must not be hurt; how this enters the acceptance is specified by Fable before any
 Stage-2 result exists.
+
+## 21. The guard bottleneck (26 Nov 2026): located, fixed where it could be, not reproduced
+
+- **It was not the K = 1024 guard.** File times in the copied machine directory show that for every one of the 27
+  runs the registry part (K = 1024, bulk stratum, mass monitors) took about 3 s. The hours went into the G-region
+  step (one extra validation pass with per-hit parts, then host-side work on 4.17 million per-hit values): between
+  3 s and 37 minutes per run, with five runs at 3 s in the middle of the night. All 27 guard rows and arrays exist.
+- **Fix** (commit `dde1764`, Track A driver only): the event index and the hit-centre class masks, which depend only
+  on the validation hits, are computed once per process instead of once per run; host work per run falls from 0.56 s
+  to 0.10 s on the H200. No array changes: on the laptop 119 arrays are byte-identical before and after; **on the
+  H200 the guards of A7_s0 and A2s_s0, recomputed with the new code, are bit-identical to the registered arrays**
+  (K = 1024, bulk, every mass monitor, every G-region class; `checks/guard_recompute/`).
+- **Timing on the H200 at a quiet hour** (26 Nov, 10:36 UTC, load 4–12): a complete guarded evaluation of a component
+  model takes under 5 s (K = 64 0.6 s, K = 1024 with bulk 1.8 s, mass monitors 0.5 s, G-region pass 0.6 s, host
+  part 0.1 s); no page faults, no pressure stalls. **The overnight stall does not reproduce.** It was contention on
+  the shared machine during that night in the host-side part; the cause is not identified.
+- **Consequence:** the driver's guards phase gets a per-run timing record (wall and CPU seconds per part, load,
+  available memory, pressure-stall figures) with a warning when a part exceeds 60 s, so that a recurrence can be
+  diagnosed. Stage 2 has about a dozen guarded runs; even at the worst rate of that night that would be hours, not a
+  blocker.
