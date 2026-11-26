@@ -2137,3 +2137,54 @@ A7s and A8 show the same +22 to +24, so this looks like a property of the rungs 
 of the halo. A11p's conditions are relative to A11 and cannot repair it. About A9r: of its +83.9 ± 62.9 against A9
 on the short events one single event contributes 62 and the median is −1.3 — the "1.4 SE" is a statement about one
 event, and A11p cannot test A9r's change, which removed a component.
+
+## 23. User decisions of 26 Nov 2026 (afternoon) on the fifteen open items of `DECISIONS_OPEN.md`
+
+**Track A Stage 2 and A11p**
+1. **A9 in A11:** kept under the `low_abar` waiver. **First a diagnostic on the existing arrays (no H200 time):**
+   where in (z′, r, p) the +21 shift of A9 against A2c on the short events sits, and whether A2c's advantage on the
+   short events is itself stable. If it shows no physical bug specific to the halo, Stage 2 proceeds with the finding
+   recorded for Gate 1; if it uncovers an actual defect, the work pauses and is reported before Stage 2 is launched.
+2. **A9r:** stays excluded. Restated reason: A9 is the pre-registered primary; A9r is an exploratory variant of the
+   same far-halo component that cannot be merged with it (and it carries a single-event fragility of about 1.0 nat on
+   the short events).
+3. **Short events in A11p:** share ½ accepted — screen below 10.3 on the 678 short training events; U1 below 45 on the
+   166 short validation events on both seeds; U2 at most 95 of the 166 worse by more than 10⁻⁴ nat.
+4. **If the short-event screen vetoes coefficients:** only the reduced set is fitted; the unrestricted registered
+   drop list is logged in the screen table, so that the cost of the short-event screen is visible.
+5. **Refit of A11p:** from the fitted A2s of each seed with the A11 schedule, so that A11p − A11 carries no
+   continued-training term.
+6. **If A11n wins:** it stays out of the automatic polynomial finalist set; it is escalated to the user at Gate 1 if it
+   beats every polynomial model by more than 1 SE on both seeds.
+
+**Track B on the H200**
+7. **The remaining Track B batch is conditionally approved to run unattended** once (i) the Opus code review and the
+   Fable rulings on every mathematically sensitive item among the 17 readings have passed, with all required fixes
+   verified, **and** (ii) the distillation initialisation is fixed: **the two starting networks of B1d / B1f are not
+   picked by validation score** (that would put validation selection into a pre-registered primary comparison). A
+   strictly validation-blind rule is used instead: the fixed seed order `s2_seed11` and `s2_seed12` (or lowest
+   training loss).
+
+**PySR**
+8. Rising stretches on radial profiles: reported only, not enforced.
+9. Fixed radial anchor against C1: wait for the real C1 test on the frozen Track A finalist. If C1 fails, the failing
+   (p, z′, r) points are reported with their density level, so that the choice between freezing the baseline and
+   restricting the relative-slope check to non-negligible density can be made cleanly.
+10. `ppow`: the constant-exponent rule and `ppow: (7, 1)` stay (the base-size limit is not removed). Gate 2-pilot
+    checks whether real trajectory targets lose exponential members before option (b) — `ppow(const, var)`
+    canonicalised to `exp` — is decided.
+11. The searches run on the laptop (20 threads); every likelihood refit and registered score stays on the H200.
+
+**Governance**
+12. **Fable allowance.** Fable is reserved strictly for **Gate 1, Gate 2 (whenever any PySR equation is proposed as
+    a finalist), Gate 2c and Gate 3**, plus any novel physics or mathematics derivation. Opus may cover the
+    operational gates (Gate 2-pilot, Gate 2a) or routine code re-checks **only if the Fable allowance is exhausted
+    and only after notifying the user explicitly** — never silently.
+13. **Hard stops on the H200.** Any failed parity, reference, scoring, guard, or file-access / deferred-file check is
+    a hard stop until the user responds. A failed unit test caused strictly by a test-fixture bug (no change of
+    production code or of a tolerance) may be fixed and re-run after an independent ruling confirms that it is
+    test-only and the incident is logged.
+14. The code for the θ track and the geometry arm starts after Gate 1.
+15. `pion_hits_with_model_outputs.parquet` on the H200 is an unrelated project's dataset (overlapping-shower
+    segmentation); its event overlap with the campaign's standalone sample is unverified; it stays untouched and is
+    never opened by the campaign.
