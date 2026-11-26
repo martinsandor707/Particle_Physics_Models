@@ -614,3 +614,27 @@ def test_c8_5_a2c_carries_the_exactly_a2s_claim(tmp_path, monkeypatch):
     (tmp_path / "A2c_s0" / "init.json").write_text(_json.dumps({"init_info": {"kl_map": 0.0, "kl_ref": "A2s_s0"}}))
     rows = R.initialisation_table()
     assert rows[0]["claim"] == "exactly A2s" and rows[0]["claim_holds"] is True
+
+
+def test_g_region_static_part_is_computed_once_and_equals_the_per_run_computation():
+    """Guard bottleneck fix (STATUS R5): the event index and the class masks of the G-region step depend only on the
+    validation hits; cached per process, they are the arrays the per-run code computed."""
+    C = L.common
+    rng = np.random.default_rng(0)
+    n_ev, per = 40, rng.integers(1, 30, 40)
+    off = torch.tensor(np.concatenate([[0], np.cumsum(per)]))
+    H = int(off[-1])
+    xyz = torch.tensor(np.c_[rng.uniform(-300, 300, (H, 2)), rng.uniform(-200, 1450, H)], dtype=torch.float32)
+
+    class V:
+        pass
+    v = V()
+    v.off, v.xyz = off, xyz
+    v.__len__ = None
+    V.__len__ = lambda self: n_ev
+    M._GR_STATIC.clear()
+    N, ev, masks = M._g_region_static(v)
+    ref = M._g_region_masks(v)
+    assert N == n_ev and np.array_equal(ev, np.repeat(np.arange(n_ev), per))
+    assert set(masks) == set(ref) and all(np.array_equal(masks[k], ref[k]) for k in ref)
+    assert M._g_region_static(v)[1] is ev                         # second call: the cached arrays

@@ -1,5 +1,77 @@
 # Track A (M2A) - status, 25 Nov 2026 (item E4 of PLAN.md section 16.7)
 
+## R5. The guard bottleneck on the H200 (user prerequisite for Stage 2) - cause located, fix bit-identical, H200 timing pending
+
+**Where the time went (measured from the files of the H200 job, `results/machines/h200-g1056-97b197a7/`).** The
+guards phase took 8.5 h for 27 runs. All 27 guard rows exist, with their K = 1024, bulk and mass-monitor arrays and
+their G-region arrays on disk, including the five runs that took 5 s (A9n_s0, A7s_s0, A7s_s1, A7l_s0, A7l_s1): their
+guards were computed. The modification times of the arrays (preserved by the tar copy-back) split each job:
+
+| run | job start | K = 1024 + bulk arrays | mass monitors | G-region files (all, incl. sidecars) | G-region step |
+|---|---|---|---|---|---|
+| A7_s0 | 21:56:08 | 21:56:11 | 21:56:12 | 22:17:28 | **21 min 16 s** |
+| A2s_s0 | 22:17:28 | 22:17:30 | 22:17:31 | 22:46:50 | **29 min 19 s** |
+| A8c_s0 | 02:51:20 | 02:51:21 | 02:51:22 | 03:18:22 | **27 min** |
+| A8n_s0 | 02:44:40 | 02:44:42 | 02:44:43 | 02:50:52 | 6 min 9 s |
+| A9n_s0, A7s_s0 (fast) | 02:50:53, 02:50:58 | +2 s | +2 s | +3 s | 3 s |
+
+- **The K = 1024 guard evaluation is not the bottleneck.** The registry part (K = 1024, bulk stratum, mass monitors)
+  took about 3 s for every run, all night.
+- The time went into the **G-region step** (`run_m2a.g_region_arrays`, Track A code): one extra validation pass with
+  `return_parts=True`, then host-side work on the 4.17 million per-hit values (float64 copies, event index,
+  hit-centre class masks, per-class sums).
+- It ended with all eight files written within one second, so writes and fsyncs were not slow; the time passed
+  before the first write.
+- The same step took 3 s for five consecutive runs and 6-37 minutes otherwise, while the GPU-heavy K = 1024 part of
+  the same jobs stayed at about 3 s. The cause is therefore a resource contended on the H200 that night and used by
+  this step only; GPU throughput is ruled out by the K = 1024 timings.
+
+**Laptop reproduction** (scratch harness, real models of the H200 job loaded read-only; RTX 4060), per run:
+- K = 64 metric of record 1.4-2.3 s; K = 1024 + bulk 13.6-14.2 s; mass monitors 0.7-0.9 s;
+- G-region validation pass 1.4-1.7 s; G-region host work 0.4 s;
+- no major page faults, no allocator retries, peak device memory 0.3 GB for the G-region pass;
+- pressure-stall information (cpu / memory / io) about 0.
+
+The laptop does not reproduce the slowness: the step is intrinsically about 2 s. The candidates on the H200 are host
+memory pressure (page reclaim / swap: the step is the only one that allocates several hundred MB of host memory per
+run), CPU contention, or a stall in the device-to-host copies. Only a measurement there can tell.
+
+**Timing command for the H200** (writes nothing but its log; fail-closed start-up; through the launcher):
+`$L time_guards $P -B shape-form-martin/scripts/time_m2a_guards.py A7_s0 A2s_s0 A9n_s0 --repeat 2`
+
+For every part (load, K = 64, K = 1024 + bulk, mass monitors, G-region pass, G-region host work before and after the
+fix) it prints:
+- wall and process CPU seconds, major and minor page faults;
+- RSS, MemAvailable, swap in use, the load average;
+- the pressure-stall information (/proc/pressure cpu, memory, io: avg10 and the stall seconds during the part);
+- free device memory, peak allocated device memory and allocator retries.
+
+A part whose wall time grows with its memory or I/O stall seconds names the resource. It should be run once at a
+quiet and once at a busy hour, and before Stage 2, which will guard A11.
+
+**Fix (bit-identical; `scripts/run_m2a.py`).**
+- The model-independent part of the G-region step (event index of every hit, the four hit-centre class masks with a
+  float64 copy of all hit coordinates, the stored-template lookup) is computed once per process
+  (`_g_region_static`) instead of once per run.
+- The computation is split into `g_region_compute` (no I/O, the original expressions) and the writer.
+- The per-run host work drops from 0.41 s to 0.085 s on the laptop, together with its host allocations.
+- Whether this removes the H200 stall depends on the cause the timing command finds. If it is host memory, this
+  removes most of the per-run allocation. If it is the device-to-host copy of the per-hit arrays or CPU contention,
+  a further change is needed: per-event sums on the device would not be bit-identical to the float64 `np.bincount`
+  of the registered arrays, so it would need a decision.
+- The registry guard path (`registry.py`, `metric.py`) was not changed: it is not the bottleneck.
+
+**Proof that no number changes.**
+- Laptop, before and after the fix, two benchmarks (mlp_std, component formula) and five component models of the
+  H200 job (A2s_s0, A7_s0, A9_s0, A9n_s0, A10_s0): all 119 arrays are byte-identical - K = 1024 7/7, bulk stratum 7/7,
+  mass monitors 56/56, G-region 49/49.
+- New command `scripts/verify_m2a_guards.py` recomputes the guards of already-guarded runs with the current code and
+  compares bit for bit with the registered arrays of the machine. It overwrites nothing; its only output is a new
+  report `checks/guard_recompute/report_<UTC>.json`.
+- On the laptop, against guards this machine registered with the code before the fix (smoke root): A7_s0, A2s_s0,
+  A9_s0 BIT-IDENTICAL (K = 1024, bulk, every mass monitor, every G-region class); registry unchanged.
+- For the H200: `$L verify_guards $P -B shape-form-martin/scripts/verify_m2a_guards.py A7_s0 A2s_s0` (exit 0 = PASS).
+
 ## R4. Fixes after the re-review of `a05c86e` (REVIEW.md section 8) - for before Stage 2
 
 The re-review gave GO for `warmstart-check warmstart-rerun a2c report` on the H200 at `a05c86e`. The fixes below are

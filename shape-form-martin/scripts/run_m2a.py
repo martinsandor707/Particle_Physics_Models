@@ -522,6 +522,37 @@ def _g_region_masks(val_cpu) -> dict:
             "inner": ~flagged}
 
 
+_GR_STATIC: dict = {}
+
+
+def _g_region_static(val_cpu) -> tuple:
+    """(N, event index of every hit, class masks by hit centre): they depend only on the validation hits and the
+    stored template, not on the model, so they are computed once per process (the guards phase evaluates many runs
+    on the same validation split). Before, every run recomputed them, with a float64 copy of all hit coordinates."""
+    key = (id(val_cpu), len(val_cpu), int(val_cpu.off[-1]))
+    if key not in _GR_STATIC:
+        _GR_STATIC.clear()
+        N = len(val_cpu)
+        off = val_cpu.off.numpy()
+        _GR_STATIC[key] = (N, np.repeat(np.arange(N), np.diff(off)), _g_region_masks(val_cpu))
+    return _GR_STATIC[key]
+
+
+def g_region_compute(model, val, val_cpu) -> dict:
+    """The G-region arrays of one model, without I/O: per class the per-event hit-term contribution
+    np.bincount(ev, weights=-hit * mask) (float64, the expression of the original code, so bit-identical), and the
+    normalisation term weight_sum * log_mass. Returns {"arrays": {class: array, "normalisation": array}, "hit",
+    "parts_nll"}."""
+    model.eval()
+    parts = metric.test_nll(model, val, return_parts=True, deterministic_sum=True)
+    hit = parts["hit"][0].astype(np.float64)
+    norm = (parts["weight_sum"].astype(np.float64) * parts["log_mass"][0].astype(np.float64))
+    N, ev, masks = _g_region_static(val_cpu)
+    arrays = {cls: np.bincount(ev, weights=-hit * m, minlength=N) for cls, m in masks.items()}
+    arrays["normalisation"] = norm
+    return {"arrays": arrays, "hit": hit, "parts_nll": parts["nll"][0]}
+
+
 def g_region_arrays(name: str, model, val, val_cpu) -> dict:
     """Per-event NLL decomposition of one run on the registry's fold points (K = 64, seed 12345, batch 128):
     hit-term contribution -sum_{i in e, class} omega_i ln g_i per class and the normalisation term
@@ -531,17 +562,12 @@ def g_region_arrays(name: str, model, val, val_cpu) -> dict:
     marker = sdir / "g_region.json"
     if marker.exists():
         return L.read_json(marker)
-    model.eval()
-    parts = metric.test_nll(model, val, return_parts=True, deterministic_sum=True)
-    hit = parts["hit"][0].astype(np.float64)
-    norm = (parts["weight_sum"].astype(np.float64) * parts["log_mass"][0].astype(np.float64))
-    N = len(val_cpu)
-    off = val_cpu.off.numpy()
-    ev = np.repeat(np.arange(N), np.diff(off))
-    masks = _g_region_masks(val_cpu)
+    comp = g_region_compute(model, val, val_cpu)
+    hit, norm, parts_nll = comp["hit"], comp["arrays"]["normalisation"], comp["parts_nll"]
+    N, ev, masks = _g_region_static(val_cpu)
     out = {"name": name, "arrays": {}, "n_hits": int(len(hit))}
-    for cls, m in masks.items():
-        a = np.bincount(ev, weights=-hit * m, minlength=N)
+    for cls in masks:
+        a = comp["arrays"][cls]
         pts = provenance.points_tag(grid=base["grid"], K=base["K"], split_fingerprint=base["split_fingerprint"],
                                     seed=base["seed"], batch=base["batch"], subset=f"g_region:{cls}")
         ta = provenance.save_tagged(sdir / f"g_region_{cls}.npy", a, pts, L.live_machine(),
@@ -554,8 +580,8 @@ def g_region_arrays(name: str, model, val, val_cpu) -> dict:
     out["arrays"]["normalisation"] = {"path": paths.portable(ta.path), "sha256": ta.sha256}
     recon = np.bincount(ev, weights=-hit, minlength=N) + norm
     reg = L.tagged(name).values.astype(np.float64)
-    out["identity_check"] = {"parts_nll_vs_parts_sum_max_abs": float(np.abs(recon - parts["nll"][0]).max()),
-                             "parts_nll_vs_registered_k64": provenance.tolerance_check(parts["nll"][0], reg, top=3)}
+    out["identity_check"] = {"parts_nll_vs_parts_sum_max_abs": float(np.abs(recon - parts_nll).max()),
+                             "parts_nll_vs_registered_k64": provenance.tolerance_check(parts_nll, reg, top=3)}
     L.write_json(out, marker)
     return out
 
