@@ -36,6 +36,7 @@ import gc
 import json
 import math
 import os
+import re
 import sys
 import time
 from dataclasses import asdict, dataclass
@@ -199,9 +200,9 @@ def frozen_lr(provider: str) -> float:
     d = json.loads(f.read_text())
     key = {"poly": "lr_poly", "net": "lr_net"}[provider]
     if provider == "net":
-        after = ((decisions().get("warmstart_rerun") or {}).get("lr_net_after_rerun") or {}).get("lr_net_after")
-        if after is not None:
-            return float(after)
+        x = (decisions().get("warmstart_rerun") or {}).get("lr_net_after_rerun") or {}
+        if x.get("lr_net_after") is not None and not x.get("escalated"):     # PLAN 20 item 3: an escalated change
+            return float(x["lr_net_after"])                                  # is not used before the user decides
     if d.get(key) is None:
         raise RuntimeError(f"{paths.portable(f)}: {key} not frozen yet")
     return float(d[key])
@@ -441,6 +442,21 @@ def decisions() -> dict:
     return read_json(decisions_file(), {}) or {}
 
 
+_RUN_RE = re.compile(r"^(?P<rung>.+?)_s\d+(?:_x2)?(?:_ws)?(?:_init)?$")
+_STAGE2_RUN_RE = re.compile(r"^A11[a-z]*_s\d+")
+
+
+def rung_of(name: str) -> str:
+    """The rung of a run name: A9_s0 -> A9, A4_s1_x2 -> A4, A9n_s0_ws -> A9n, A2c_x2_s0 -> A2c_x2."""
+    m = _RUN_RE.match(str(name))
+    return m.group("rung") if m else str(name)
+
+
+def is_stage2_run(name: str) -> bool:
+    """A run of Stage 2 (A11, A11k, A11n, A11p ...): its records stay out of the Stage-1 results.json (review R6)."""
+    return bool(_STAGE2_RUN_RE.match(str(name)))
+
+
 # ----------------------------------------------------------------------------------------------------------------------
 # divergence (user decision of 25 Nov 2026, PLAN.md section 17.11)
 # ----------------------------------------------------------------------------------------------------------------------
@@ -450,6 +466,21 @@ FROZEN_FRACTION = 0.5     # skipped batches in the last evaluation window
 EXPLORATORY_CLASSES = ("exploratory", "primary-net")     # AUDIT 4.1: the net column is exploratory
 INJECT_ENV = "SFM_M2A_INJECT_DIVERGENCE"                 # smoke only: comma-separated run names (testing hook)
 DIVERGENCE_DEFINITION = (
+    "A run is 'diverged' iff (i) its FINAL validation mean is not finite, or (ii) the registry evaluation of the "
+    "finished fit finds a non-finite per-event NLL (FloatingPointError), or (iii) 'frozen': in the last evaluation "
+    "window at least 50 % of the training batches were skipped by sfm.train.fit for a non-finite loss or gradient, "
+    "or (iv) 'blow-up': the last validation mean exceeds the reference by more than 1 nat per event (10,000 in table "
+    "units), the reference being the lowest of: the finite validation means of the fit history, the step-0 "
+    "validation mean of a network warm start, and the registered validation mean of the run's comparator. A "
+    "non-finite validation mean in the middle of a fit that recovered (final value finite, not frozen, no blow-up) is "
+    "NOT a divergence: it is a warning, counted in the run's metadata and listed in the report for Gate 1 (user "
+    "decision of 26 Nov 2026, PLAN 20 item 2). Isolated skipped batches of a fit that ends finite are not a divergence "
+    "either (they are reported with the run).")
+# The definition of 25 Nov 2026 (PLAN 17.11) under which the Stage-1 runs were classified; the Stage-1 report keeps
+# printing it (its RESULTS.md stays byte-identical, REVIEW 10.5 R5 / R9). It differs from the present one only in
+# criterion (i) - any non-finite validation mean of the history - and the Stage-2 report shows from the stored
+# histories that every registered run is classified the same under both.
+DIVERGENCE_DEFINITION_25NOV = (
     "A run is 'diverged' iff (i) a validation mean in its fit history is not finite, or (ii) the registry evaluation "
     "of the finished fit finds a non-finite per-event NLL (FloatingPointError), or (iii) 'frozen': in the last "
     "evaluation window at least 50 % of the training batches were skipped by sfm.train.fit for a non-finite loss or "
@@ -564,8 +595,8 @@ def divergence_check(history: list, ref_vals: list) -> list:
     registry's FloatingPointError)."""
     crit = []
     vals = [h.get("val") for h in history]
-    if any(v is None or not math.isfinite(float(v)) for v in vals):
-        crit.append("non-finite validation mean in the fit history")
+    if vals and (vals[-1] is None or not math.isfinite(float(vals[-1]))):        # PLAN 20 item 2: the final value
+        crit.append("non-finite final validation mean")
     if len(history) >= 1:
         last = history[-1]
         prev = history[-2] if len(history) >= 2 else {"step": 0, "skipped_loss": 0, "skipped_grad": 0}
@@ -580,6 +611,13 @@ def divergence_check(history: list, ref_vals: list) -> list:
             crit.append(f"blow-up: last validation {float(lv):.4f} exceeds the reference {min(refs):.4f} by more "
                         f"than {BLOWUP_NAT} nat")
     return crit
+
+
+def recovered_nonfinite(history: list) -> dict:
+    """Non-finite validation means before the last evaluation of a fit (PLAN 20 item 2: a warning, not a divergence,
+    when the fit recovered). {"count": n, "steps": [...]}."""
+    steps = [h["step"] for h in history[:-1] if h.get("val") is None or not math.isfinite(float(h["val"]))]
+    return {"count": len(steps), "steps": steps}
 
 
 def _diverged_record(spec, cfg, res, model, tr, crit, eval_error=None, step0=None) -> dict:
@@ -612,6 +650,72 @@ def _diverged_record(spec, cfg, res, model, tr, crit, eval_error=None, step0=Non
     log(f"[{spec.name}] DIVERGED ({'; '.join(crit)}); recorded in {DIVERGED_FILE} and decisions.json; the job "
         "continues with the runs that do not depend on it")
     return rec
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# timing of guard parts (STATUS R5; the guards phase records it for every run, timing fields only)
+# ----------------------------------------------------------------------------------------------------------------------
+SLOW_PART_S = 60.0
+
+
+def _read_text(path: str) -> str:
+    try:
+        return Path(path).read_text()
+    except OSError:
+        return ""
+
+
+def host_state() -> dict:
+    """Load average, available memory, swap in use, resident set size and the pressure-stall totals (Linux)."""
+    mi = {ln.split(":")[0]: int(ln.split()[1]) for ln in _read_text("/proc/meminfo").splitlines() if ln.split()[1:]}
+    st = {ln.split(":")[0]: ln.split()[1] for ln in _read_text("/proc/self/status").splitlines() if ln.split()[1:]}
+    psi = {}
+    for res in ("cpu", "memory", "io"):
+        for line in _read_text(f"/proc/pressure/{res}").splitlines():
+            f = dict(x.split("=") for x in line.split()[1:])
+            psi[f"{res}_{line.split()[0]}_avg10"] = float(f.get("avg10", "nan"))
+            psi[f"{res}_{line.split()[0]}_total_us"] = int(f.get("total", 0))
+    return {"load1": float((_read_text("/proc/loadavg").split() or ["nan"])[0]),
+            "mem_available_mb": mi.get("MemAvailable", 0) // 1024,
+            "swap_used_mb": (mi.get("SwapTotal", 0) - mi.get("SwapFree", 0)) // 1024,
+            "rss_mb": int(st.get("VmRSS", 0)) // 1024, "psi": psi}
+
+
+class PartTimer:
+    """with PartTimer(label, rec): ...  ->  rec[label] = wall / CPU seconds, page faults, host state and the stall
+    seconds of the part; a part longer than SLOW_PART_S is logged as a loud WARNING."""
+
+    def __init__(self, label: str, rec: dict, run: str = ""):
+        self.label, self.rec, self.run = label, rec, run
+
+    def __enter__(self):
+        import resource
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        ru = resource.getrusage(resource.RUSAGE_SELF)
+        self.t0, self.c0, self.f0, self.m0 = time.perf_counter(), time.process_time(), ru.ru_majflt, ru.ru_minflt
+        self.h0 = host_state()
+        return self
+
+    def __exit__(self, *exc):
+        import resource
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        ru = resource.getrusage(resource.RUSAGE_SELF)
+        h1 = host_state()
+        stall = {k.replace("_total_us", "_stall_s"): round((v - self.h0["psi"].get(k, 0)) / 1e6, 3)
+                 for k, v in h1["psi"].items() if k.endswith("_total_us")}
+        r = {"wall_s": round(time.perf_counter() - self.t0, 3), "cpu_s": round(time.process_time() - self.c0, 3),
+             "majflt": ru.ru_majflt - self.f0, "minflt": ru.ru_minflt - self.m0,
+             **{k: v for k, v in h1.items() if k != "psi"},
+             **{k: v for k, v in h1["psi"].items() if k.endswith("avg10")}, **stall}
+        self.rec[self.label] = r
+        if r["wall_s"] > SLOW_PART_S:
+            log(f"WARNING: guard part '{self.label}' of {self.run} took {r['wall_s']:.0f} s (> {SLOW_PART_S:.0f} s): "
+                f"CPU {r['cpu_s']:.0f} s, load {r['load1']}, MemAvailable {r['mem_available_mb']} MB, swap "
+                f"{r['swap_used_mb']} MB, major faults {r['majflt']}, stall s cpu/memory/io "
+                f"{stall.get('cpu_some_stall_s')}/{stall.get('memory_some_stall_s')}/{stall.get('io_some_stall_s')}")
+        return False
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -678,7 +782,8 @@ def superseded_recorded() -> dict:
 def superseded() -> dict:
     """The supersessions IN FORCE: only a re-run with a registry row supersedes its original. A re-run that diverged
     (or is blocked, or did not finish) does not: the original stays in force and the report says so (review C8-4)."""
-    return {o: n for o, n in superseded_recorded().items() if registered_row(n) is not None}
+    not_used = set(((decisions().get("warmstart_rerun") or {}).get("lr_net_after_rerun") or {}).get("not_used") or [])
+    return {o: n for o, n in superseded_recorded().items() if registered_row(n) is not None and o not in not_used}
 
 
 def rerun_not_in_force() -> dict:
@@ -807,12 +912,18 @@ def run_spec(spec: Spec) -> dict:
                 return rec
         log(f"[{spec.name}] registered: val {row['val_mean']:.6f}  vs formula {row['vs_formula']['mean'] * 1e4:+.3f}"
             f" +- {row['vs_formula']['se'] * 1e4:.3f}e-4  skipped {res.skipped_loss}/{res.skipped_grad}")
+        warn = recovered_nonfinite(res.history)
+        if warn["count"]:                                  # PLAN 20 item 2: a warning for Gate 1, not a divergence
+            record_decision("warnings", spec.name, {"recovered_nonfinite_validation": warn, "cls": spec.cls})
+            log(f"[{spec.name}] WARNING: {warn['count']} non-finite validation mean(s) before the final value (steps "
+                f"{warn['steps']}); the fit recovered - listed for Gate 1")
         done = {"name": spec.name, "stage": CTX.stage, "smoke": CTX.smoke, "spec": asdict(spec), "build_kwargs": kw,
                 "fit_config": cfg.result_dict(), "fit": res.summary(), "history": res.history,
                 "val_mean": row["val_mean"], "k": row["k"], "kl_map": info.get("kl_map"),
                 "checkpoint_sha256": row.get("checkpoint_sha256"), "val_nll_sha256": row.get("val_nll_sha256"),
                 "build_seconds": init.get("build_seconds"), "job_seconds": time.time() - t0,
                 "sources_verified": sources, "step0_parity": init.get("step0_parity"),
+                "warnings": ({"recovered_nonfinite_validation": warn} if warn["count"] else None),
                 "machine_id": MACHINE_ID, "machine_tag": MACHINE.to_dict(),
                 "stream_id": live_stream_id(), "batch": CTX.batch,
                 "finished_utc": datetime.now(timezone.utc).isoformat(timespec="seconds")}

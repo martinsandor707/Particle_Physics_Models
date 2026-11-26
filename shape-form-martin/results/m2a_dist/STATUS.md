@@ -1,5 +1,152 @@
 # Track A (M2A) - status, 25 Nov 2026 (item E4 of PLAN.md section 16.7)
 
+## R6. Stage 2 (REVIEW.md sections 10, 11), the user's decisions of PLAN 20 and 23, and the guard timing record of PLAN 21 - written, waiting for the final re-check
+
+Nothing was trained for real; everything below ran in smoke mode, in scratch output roots on the laptop
+(`<scratch>`) and in fresh output roots of the H200 test copy (slot `ta`). The H200 state of record was read only (`results/machines/h200-g1056-97b197a7/`, copied back). Base modules touched: only
+`src/sfm/models/dist_factory.py` (the new `prune` argument of A11p, REVIEW 11.5; default unchanged).
+
+### R6.1 What each requirement became
+
+| Item | Where | What it does |
+|---|---|---|
+| PLAN 21 timing | `run_m2a.guard_run`, `run_m2a_lib.PartTimer`, `host_state` | per guarded run and part (registry evaluate total; K = 1024 + bulk; mass monitors; the K = 64 rest; G-region GPU pass; G-region host work): wall and CPU seconds, page faults, load, MemAvailable, swap, RSS, PSI avg10 and stall seconds of the part; logged, and written to `guard_timing_<UTC>.json` beside the run's arrays; a part over 60 s logs `WARNING: guard part '...' of <run> took N s (> 60 s): ...`. Timing fields only, not in decisions.json or results.json; nothing moved to the GPU |
+| PLAN 20 item 1 / conditional controls | `evaluate_conditional_controls`, phase `conditional-controls` | A2c_x2 only if a doubled-step rerun pair (`<rung>_s<seed>_x2` vs `A2s_s<seed>_x2`) passes keep or one-seed equal NLL; A2c6k only if a mixture rung (A10, A10-2/4/5, A10g) passes either against A2s of its seed; recorded with every evaluated pair's numbers (decisions.json `conditional_controls`, excluded from results.json); trained only if triggered (A2c_x2_s<seed>: A2s from A2s_s<seed>, 8000 steps, vs A2s_s<seed>_x2; A2c6k_s<seed>: 6000 steps, vs A2s_s<seed>); the gate requires the record to equal its re-evaluation and triggered controls to be resolved; printed in the Stage-2 report. On the H200 table: no rerun pair exists, every mixture is worse by +20 to +116 -> neither triggers |
+| PLAN 20 item 2 / R3 | `DIVERGENCE_DEFINITION`, `divergence_check`, `recovered_nonfinite`, `run_spec` | criterion (i) is now a non-finite FINAL validation mean; a non-finite value earlier in a fit that recovered registers the run with a WARNING, the count and steps in done.json (`warnings`) and decisions.json `warnings`; listed for Gate 1 in the Stage-2 report together with a re-classification of every finished run from its stored history. Frozen last window and blow-up stay terminal. The Stage-1 report keeps printing the definition of 25 Nov (`DIVERGENCE_DEFINITION_25NOV`) under which its runs were classified, so that its RESULTS.md stays byte-identical |
+| PLAN 20 item 3 / R3 | `phase_warmstart_rerun`, `frozen_lr`, `superseded`, `lr_net_escalation_pending` | if re-run network pilots change lr_net and no re-run pilot had a target column below the floor (rule a), the change is escalated: recorded `escalated`, `status: awaiting the user`, `not_used: [pilots]`; no dependent re-run; the rate of record stays (frozen_lr ignores it, superseded() drops the pilots' re-runs); Stage 2 refuses until the approval carries `lr_net_escalation: {decision: keep_rate_of_record, date, reason}` (any other decision is implemented by hand). REVIEW 9.5 Rm1: the comparator of a re-run and the second lr decision use the re-runs in force (registered), not the recorded map |
+| R1 | `stage2_approval`, `stage2_content_check`, `check_stage2_decisions` | the approval carries `a11_content`, `excluded` (rung -> {reason, date}), `waivers` ([{rung, guard, class, basis, subject_to, date}]); refused unless the content is the computed kept-and-replicated list minus the exclusions (content within the list; every other rung excluded with a reason; no exclusion outside it), the content merges, every guard failure of a content rung (G-K, G-bulk, G-region on the pairs the rules use) has exactly one waiver of that guard whose flagged* line covers it, and no waiver lacks such a failure. Only G-region / low_abar can be waived. Content, exclusions, waivers and the flagged* lines go to decisions.json (`stage2_content`) and the head of the Stage-2 report |
+| R2 | `stage2_specs` (unchanged), `memory_probe_k64` | A11 (0, 1, 2), A11k (0, 1), A11n (0, 1) as coded. Before the first k_train = 64 fit: one training step of the fitted A11 at k_train 64 on the 256 training events with the most hits, peak allocated memory against 90 % of the job's cap (`sfm.machine.caps`; device memory without a cap); if it does not fit, `stage2` stops with the numbers |
+| R4 | `phase_stage2_guards`, `guard_run` | guard rows, G-region and flagged* arrays and the timing record for every Stage-2 run and its comparator (A11 / A11k vs A2s, A11n vs the A2n in force, A11p vs A11); existing rows, arrays and markers are reused, none rewritten |
+| R5 | `run_m2a_report.report_stage2` | RESULTS_stage2.md / results_stage2.json: the comparisons of REVIEW 10.4 on all events and the strata (secondary columns, short and bulk), A11 - A9 reproducibility (max per-event difference, bit for bit), the finalist rule (one_se_select per seed, eligible on both, fewest constants; A11n never a candidate, PLAN 23 item 6: the line "ESCALATE TO THE USER AT GATE 1" is printed when A11n beats every polynomial candidate by more than 1 SE on both seeds), "cleaner" (c1) and (c2) for every Stage-2 rung against the formula array with the literal sentence when the finalist is not cleaner, the A11p screen tables and acceptance, the A11n initialisation, convergence, the guards with the waiver line, the conditional controls, the warnings and the re-classification. Stage-1 results.json / RESULTS.md: not touched, and the gate's recomputation still passes after Stage 2 (a re-issued `stage2` starts no fit and is not refused) |
+| R6 | `g_region_star_arrays` (subset `g_region:flagged_star`, marker `g_region_star.json`), `g_region_star_check` | flagged* = deep, last ring, first / last z-bin by hit centre. The marker also records whether the flagged class recomputed in the same pass equals the stored one bit for bit, and the identity flagged = flagged* + (low_abar and not flagged*). G-region is printed as registered (FAILED) and the waiver line separately; it never says "passes"; a failing flagged* line is "NOT covered by the waiver" (and the gate refuses) |
+| R7 / A11p | `a11p_screen`, `a11p_select`, `second_difference`, `curvature_autodiff`, `a11p_specs`, `a11p_run`, `dist_factory._prune_rows` | exactly REVIEW 11: candidates k >= 1 per row from the top (58 asserted for the content A9); H_j by the central second difference (h = max(0.1 |c|, 1e-3), realised float32 steps), Q_j = 0.5 |H_j| c_j^2 < 0.2e-4 nat, the short-event condition f_tr Q^S_j < share x 0.2e-4; pass on both seeds; Z_0 and Z; sum of Q, J and J^S per seed; an autodiff check of H on 256 training events for the three most resolved candidates; written to `a11p/screen.json` and hashed (decisions.json) before any fit, never overwritten; the fits (A11p_s0/s1: A11 procedure with `prune`, comparator A11_s, step-0 rows) refuse any other pruning set; their guards; acceptance (equal NLL; U1 with M = share x 1e-4 / f; U2 N_s <= 95 of 166) in the Stage-2 report with the sentence of 11.7. The two [confirm] choices are recorded parameters (`a11p_parameters` in the approval: `short_event_share`, default 0.5; `if_vetoed`: `fit_Z` (default) or `fit_Z_and_Z0`, which also fits A11pz_s0/s1), written into screen.json and decisions.json; the user confirmed the defaults (PLAN 23 items 3-5: share 1/2, only Z fitted with Z_0 logged in the screen table, refit from the fitted A2s with the A11 schedule) and the proposed approval records them with date and basis |
+| R8 | see R6.4 | |
+| R9 | `phase_stage2` order | gate -> A11, A11k (after the probe), A11n -> their guards -> A11p screen -> A11p fits -> their guards -> Stage-2 report; on the H200 first `conditional-controls guards report` at the new commit (R6.5) |
+
+### R6.2 Hard stops on the H200 (PLAN 23 item 13)
+
+Every one of these ends the process with a non-zero exit and a last line that starts with `STOP (PLAN 23 item 13` or
+`stage2 refused:` (or a Python traceback for an exception), and no later phase of the same command runs:
+
+- **parity / reference**: the harness parity of A0 at step 0 (`phase_parity`, unchanged), the reference set and its
+  parity record (`registry`, unchanged), the source checks of every warm start (`verify_sources`: SHA-256 of
+  model.pt and weights) and the tag / hash checks of every array read (`provenance.load_tagged`, unchanged);
+- **scoring**: a Stage-2 run that diverges or is blocked (`run_stage2_spec`; criterion (ii) is a failed scoring
+  check) - Stage 2 stops there instead of continuing as Stage 1 did; the gate's recomputation of results.json; the
+  R9 comparison `run_m2a_report.py --compare` (exit 1 if anything other than `git` differs);
+- **guards**: the G-region pass of a newly guarded run that does not reproduce its registered K = 64 array (strict
+  criterion) or its own sum (> 1e-4) - nothing is written; the flagged* pass whose recomputed flagged class is not the
+  stored array bit for bit, or whose identity flagged = flagged* + (low_abar and not flagged*) fails (> 1e-9) -
+  nothing is written; any exception of registry.evaluate(guards=True);
+- **file access / deferred files**: a missing or altered approval file, results.json, screen.json (SHA-256), marker
+  or array (`FileNotFoundError`, hash mismatch), a pruning set other than the hashed one;
+- **memory**: the k_train = 64 probe above 90 % of the cap stops before A11k.
+
+A slow guard part (> 60 s) is a WARNING only (it is not a failed check).
+
+### R6.3 Notes for the reviewer
+
+- Reproducibility of a rebuilt source is compared on `weights_sha256`, the arrays and `kl_map`, never on the bytes of
+  `init.json` or the file hash of `model.pt` (REVIEW 9.3): time stamps, the latest registry row of the source and the
+  checkpoint file hash differ between executions of the same computation.
+- The gate's recomputation of results.json includes the report's commit (REVIEW 9.5 Rm3): after the pull on the
+  H200 the Stage-1 report must be issued again at the new commit, and the approval written for that file; that the
+  new file differs from the approved one in `git` only is step 2 of R6.5.
+- The H200 numbers of A9 bound the flagged* line before it is computed: flagged - low_abar = -0.34 (7 % of the gain)
+  <= flagged* <= deep + border_ring + border_zbin = -0.80 (17 %), so the margin flagged* - 0.5 main lies between about
+  +1.5 and +2.0 (seed 0; seed 1 alike): the waiver is expected to cover the failure. The gate decides on the array.
+- The autodiff check (REVIEW 11.2): the second difference agrees with the exact second derivative to < 2 % where the
+  float32 per-event values resolve the curvature (k = 1 coefficients: 0.2 - 1 % on 256 events); for leading
+  coefficients with tiny h the per-event rounding dominates on a few hundred events (on all training events the
+  noise of Q_j is about 0.005e-4, REVIEW 11.2), so the screen checks the three most resolved candidates. Outside
+  `deterministic()` the CUDA sums alone differ by ~2e-5 per event and spoil the check; the check and the screen run
+  inside it.
+
+### R6.4 Evidence (laptop, smoke, a fresh scratch root; approval files were scratch fixtures and are gone)
+
+- **Tests (laptop, CPU; the one GPU test - the A11p autodiff check - runs in the H200 test copy since the user moved
+  test jobs there)**: `test_run_m2a.py`, `test_dist_factory.py`, `test_review_fixes.py`: 130 passed, 3 skipped (the
+  three template tests that need the Track A templates in the default output root), 1 deselected.
+- **Listing**: the output of `--list` up to the new block is byte-identical to the listing of the HEAD code
+  (SHA-256 `5d67b5e2...`, first 102 lines `8762ba00...`); the additions of 26 Nov are a separate block appended after
+  the block of 25 Nov (whole output now `1f1808a3...`, 128 lines).
+- **A fresh smoke state made with the present code** (val_parity, refset, templates, parity; default list; then
+  `warmstart-check warmstart-rerun a2c report`): 67 registry rows; kept list empty; guard pairs A7 and A9.
+- **R8** on that state: the Stage-1 report of the HEAD code and of the present code are byte-identical
+  (results.json and RESULTS.md). The state continued with the present code (default list again, then
+  `warmstart-check warmstart-rerun a2c conditional-controls guards report`): no fit, registry.jsonl byte-identical,
+  results.json and RESULTS.md byte-identical, 432 result files (arrays, checkpoints, done/init/marker files)
+  unchanged; decisions.json gained only `conditional_controls` (not triggered; the six mixture pairs printed with
+  their numbers).
+- **R1 gate, real command**: refused without an approval; with content outside the list; with an exclusion outside
+  the list; with a waiver for a rung outside the content; with a forged table hash; with an invalid A11p share.
+  The valid approval (smoke content []) ran `stage2`: memory probe (1.74 GB for 205,842 hits, laptop limit 7.7 GB),
+  A11k_s0, A11k_s1, their guards, A11p "not applicable", Stage-2 report (finalist A11k; "not cleaner than the
+  legacy formula ... remains the Track A baseline"). Registry: 67 rows before, 71 after, the 67 a byte-identical
+  prefix.
+- **R9 in passing**: two commits by other workers landed between the state and the re-issue; the re-issued `stage2`
+  was refused ("results.json differs ... (keys ['git'])"), the Stage-1 report re-issued, `run_m2a_report.py
+  --compare` reported "only git differs" (exit 0), RESULTS.md differs in its commit line only; with the approval
+  renewed for that file, the re-issued `stage2` started no fit, wrote no registry line and was not refused.
+
+- **The content of PLAN 20 (A2s + A9) end to end** (laptop, scratch copy of the state above; the smoke list is not
+  [A9, A9r], so a scratch harness fabricated that list IN MEMORY for the content check and replaced only
+  `stage2_approval`; preconditions with the recomputation of results.json, the runs, the guards, the screen, the
+  fits and the report are the real code). The content check on the smoke arrays refused - correctly: on smoke
+  numbers the flagged* line of A9_s0 does not cover the G-region failure (flagged* carries 95 % of the smoke gain).
+  Then: A11_s0/s1/s2, memory probe (1.86 GB), A11k_s0/s1, A11n_s0/s1, 12 guarded runs, the A11p screen (10 of 58
+  coefficients pass on both seeds, Z = Z_0, k 104 -> 94; autodiff check passed: logit_tr[1] rel. 1.1e-4,
+  logit_tr[2] 2.7e-4, s_R[1] non-finite autodiff recorded and skipped; 26 min on the shared laptop GPU), A11p_s0/s1
+  with step-0 rows and the hashed pruning set, their guards, RESULTS_stage2.md (34 comparisons, 9 guard blocks).
+  **A11_s0 and A11_s1 are bit-identical to A9_s0 and A9_s1** (max |Δ| 0). Smoke verdicts as printed: finalist A11k;
+  no rung "cleaner"; A11p "not accepted (not equal NLL)", U1 and U2 met. Registry 67 -> 90 rows, the 67 a
+  byte-identical prefix. A re-issued `stage2` (after the Stage-1 report was re-issued for a newer commit of another
+  worker; `--compare`: only git differs): no fit, no GPU lock taken, registry unchanged, not refused.
+- **First version of the screen, found by this run and fixed**: one candidate's autodiff second derivative was
+  non-finite and the report could not format it; the check now takes the most resolved candidates until three
+  finite comparisons exist, records the others, and stops A11p (PLAN 23 item 13) if a finite one disagrees by more
+  than 2 %.
+- **In the H200 test copy** (machine of record's GPU, grid 1056; not a git repository, so the commit fields are
+  None there and the R9 comparison and the commit part of the gate's recomputation were exercised on the laptop
+  only): the three test files 130 passed, 3 skipped, 1 failed - `test_review_fixes.py::test_C4_git_state_and_env_record`,
+  which needs a git repository (expected in the test copy); `test_run_m2a.py` 59 of 59, the GPU autodiff test
+  included. A fresh smoke state (5 min), then `warmstart-check warmstart-rerun a2c conditional-controls guards
+  report`, then both commands again: no fit, registry.jsonl, results.json and RESULTS.md byte-identical; guard
+  timing per run on the H200: K = 1024 + bulk 1.8 s, mass monitors 0.5 s, the K = 64 rest 0.7 s, G-region pass 0.6 s.
+  `stage2` with a fixture approval (smoke content []): probe 1.76 GB of the 10 GB cap, A11k_s0/s1, guards, Stage-2
+  report; re-issued: no fit, registry unchanged; the Stage-1 results.json / RESULTS.md byte-identical after Stage 2
+  (70 -> 74 registry rows, prefix identical). The harness with the content A9 in a second fresh root: A11 (3),
+  probe 1.91 GB, A11k (2), A11n (2), guards, **A11p screen in 10 min** (10 of 58 pass, Z = Z_0, k 104 -> 94;
+  autodiff check passed with rel. 6.0e-4, 5.8e-4, 7.5e-3; two candidates with non-finite autodiff recorded), A11p
+  (2) with step-0 rows, guards, report; **A11_s0 / A11_s1 bit-identical to A9_s0 / A9_s1 on the H200 as well**
+  (smoke length); re-issued: no fit, no GPU lock taken.
+
+### R6.5 On the H200 (R9): command sequence, and where it stops
+
+Environment, output root and lock exactly as for the `m2a` job (section 4); a clean clone at the commit that carries
+these files (REVIEW 11 is in `d0f04b8`, which precedes it). `<out>` is the machine's output root of record,
+`<repo>` the clone. Each step ends with exit 0 or stops (non-zero exit, last line `STOP (PLAN 23 item 13 ...` or
+`stage2 refused: ...`, R6.2); nothing after a stopped step is run.
+
+    # 1. conditional controls (evaluated, recorded; nothing triggers on the H200 table), flagged* arrays and timing
+    #    record for the 27 Stage-1 guard targets (no registry line), the Stage-1 report at the new commit
+    uv run python -B shape-form-martin/scripts/run_m2a.py conditional-controls guards report
+    # 2. R9: the re-issued table against the one the user approved (the copy-back in the clone); exit 1 = stop
+    uv run python -B shape-form-martin/scripts/run_m2a_report.py --compare \
+        <out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2a_dist/results.json \
+        <repo>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2a_dist/results.json
+    # 3. (orchestrator) runs/m2a_dist/stage2_approval.json from the user's decisions, with the SHA-256 of the file of
+    #    step 1 - the text proposed in the final report of this round
+    # 4. Stage 2: gate -> A11 (0, 1, 2) -> memory probe -> A11k (0, 1) -> A11n (0, 1) -> guards -> A11p screen
+    #    (written and hashed) -> A11p (0, 1) -> guards -> RESULTS_stage2.md
+    uv run python -B shape-form-martin/scripts/run_m2a.py stage2
+
+Steps 1 and 2 can be one job (`step1 && step2`). Expected on the H200: step 1 registers nothing and writes 27
+flagged* arrays with markers (each marker records the bit-for-bit reproduction of the stored flagged class; a
+failure stops); step 2 prints `keys that differ: ['git']`; step 4 refuses if the flagged* line of A9 does not cover
+the G-region failure (expected to cover, R6.3). Copy back as before (`runs/m2a_dist/`, `registry.jsonl`,
+`gpu_time.jsonl`, the guard_timing files).
+
 ## R5. The guard bottleneck on the H200 (user prerequisite for Stage 2) - cause located, fix bit-identical, H200 timing pending
 
 **Where the time went (measured from the files of the H200 job, `results/machines/h200-g1056-97b197a7/`).** The

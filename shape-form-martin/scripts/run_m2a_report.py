@@ -34,10 +34,17 @@ negative results are printed as measured. Rules (nat per event):
     uv run python -B shape-form-martin/scripts/run_m2a_report.py --without-guards   (review C2) the tables without
                   guard columns, written to RESULTS_without_guards.md / results_without_guards.json (results.json,
                   the file a Stage-2 approval is bound to, is written only by the full report)
+
+Stage 2 (REVIEW.md section 10.5 R5): report_stage2(), called by `run_m2a.py stage2 | a11p | stage2-report`, writes
+RESULTS_stage2.md / results_stage2.json - the comparisons of REVIEW 10.4, the finalist rule, "cleaner" (c1), (c2)
+against the formula array, the A11p screen and acceptance (REVIEW 11), the A11n initialisation, the Stage-2 guards
+with the flagged* waiver line, the conditional controls (PLAN 20 item 1) and the warnings for Gate 1 (item 2).
+results.json and RESULTS.md of Stage 1 are not touched and do not change while Stage 2 runs.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import sys
 from pathlib import Path
@@ -273,9 +280,10 @@ def warm_start_targets(done: dict) -> dict:
             "smallest_varying": (min(varying, key=varying.get), min(varying.values())) if varying else None}
 
 
-def initialisation_table() -> list:
+def initialisation_table(stage2: bool = False) -> list:
     """Review B2: kl_map of every finished run against what it was started / initialised / fitted from, the
-    "exactly A2s" claims, and for net runs the warm-start report with the degraded-start flag."""
+    "exactly A2s" claims, and for net runs the warm-start report with the degraded-start flag. ``stage2``: the
+    Stage-2 runs instead (the Stage-2 report; REVIEW 10.5 R5)."""
     out = []
     chk = (L.decisions().get("warmstart_check") or {}).get("runs") or {}
     sup = L.superseded()
@@ -284,7 +292,7 @@ def initialisation_table() -> list:
         init = L.read_json(f.parent / "init.json", {}) or {}
         info = init.get("init_info") or {}
         spec = d.get("spec") or {}
-        if spec.get("cls") == "stage2":                         # Stage 2 has its own report (keeps R6 stable)
+        if (spec.get("cls") == "stage2") != stage2:            # Stage 2 has its own report (keeps R6 stable)
             continue
         row = {"run": f.parent.name, "rung": spec.get("rung"), "provider": spec.get("provider"),
                "cls": spec.get("cls"), "kl_map": d.get("kl_map", info.get("kl_map")), "kl_ref": info.get("kl_ref"),
@@ -421,9 +429,27 @@ def primary_pairs(r: str, masks: dict) -> tuple:
     return c, orig
 
 
+STAGE1_EXCLUDED_KEYS = ("conditional_controls",)   # PLAN 20 item 1: printed by the Stage-2 report (REVIEW 10.5 R5)
+
+
+def stage1_decisions(raw: dict) -> dict:
+    """decisions.json as results.json carries it: without the Stage-2 records (keys 'stage2*', the conditional-control
+    record of PLAN 20, and in every per-run map - diverged, blocked, warnings, step0_parity - the entries of Stage-2
+    runs). results.json and RESULTS.md of Stage 1 stay byte-identical (apart from the commit) while the additions of
+    26 Nov 2026 and Stage 2 run (REVIEW 10.5 R5, R8, R9)."""
+    out = {}
+    for k, v in raw.items():
+        if k.startswith("stage2") or k in STAGE1_EXCLUDED_KEYS:
+            continue
+        if isinstance(v, dict) and any(L.is_stage2_run(n) for n in v):
+            v = {n: x for n, x in v.items() if not L.is_stage2_run(n)}
+        out[k] = v
+    return out
+
+
 def collect(with_guards: bool = True) -> dict:
     M = _m()
-    dec = {k: v for k, v in (L.read_json(L.decisions_file(), {}) or {}).items() if not k.startswith("stage2")}
+    dec = stage1_decisions(L.read_json(L.decisions_file(), {}) or {})
     from sfm import machine as _machine
     gs = _machine.git_state()
     E = L.effective
@@ -633,6 +659,10 @@ def markdown(res: dict) -> str:
         x = ws["lr_net_after_rerun"]
         w(f"- lr_net after the warm-start re-run of the network pilots: {x.get('lr_net_after')} (before: "
           f"{x.get('lr_net_before')})")
+        if x.get("escalated"):                                                       # PLAN 20 item 3
+            w(f"- **lr_net ESCALATED to the user (PLAN 20 item 3):** {x.get('reason')}; the re-run pilots "
+              f"{x.get('not_used')} are not used and the rate of record stays {x.get('lr_net_before')} until the "
+              "user decides (Stage 2 is refused until then)")
     w(f"- Dropped runs: {dec.get('dropped', [])} ({dec.get('budget_rule', 'budget rule: not applied')})\n")
     w("## Stage 0 (report metric)\n")
     w("| comparison | Δ |\n|---|---|")
@@ -813,7 +843,7 @@ def markdown(res: dict) -> str:
         w(f"## A6b: Fisher information of k\n\nObserved information of the raw coefficient of `sh_rk` on the "
           f"training events: {f['observed_information']:.4g} (SE of the coefficient {f['se_coefficient']}).\n")
     w("## Diverged and blocked runs (user decision of 25 Nov 2026, PLAN 17.11)\n")
-    w(f"Definition: {L.DIVERGENCE_DEFINITION}\n")
+    w(f"Definition: {L.DIVERGENCE_DEFINITION_25NOV}\n")
     if not res.get("diverged") and not res.get("blocked"):
         w("None.\n")
     for nme, v in (res.get("diverged") or {}).items():
@@ -908,11 +938,631 @@ def report(with_guards: bool = True) -> dict:
     return res
 
 
+# ---------------------------------------------------------------------------------------------------- stage 2 ---------
+def gate1_warnings(stage2: bool = False) -> dict:
+    """PLAN 20 item 2: runs whose fit recovered from a non-finite validation mean before its final value (a warning
+    for Gate 1, not a divergence), from the fit histories of the done.json files (Stage-1 or Stage-2 runs)."""
+    out = {}
+    for f in sorted(L.out_dir().glob("*/done.json")):
+        d = L.done_marker(f) or {}
+        if ((d.get("spec") or {}).get("cls") == "stage2") != stage2:
+            continue
+        w = L.recovered_nonfinite(d.get("history") or [])
+        if w["count"]:
+            out[f.parent.name] = w
+    return out
+
+
+def reclassification() -> dict:
+    """REVIEW 10.5 R3: every finished run of this stage classified by criterion (i) of the definition of 25 Nov 2026
+    (any non-finite validation mean of the history) and of the present one (a non-finite final value); the other
+    criteria are the same in both. Runs whose class would differ are listed."""
+    n, nonfinite, differ = 0, {}, []
+    for f in sorted(L.out_dir().glob("*/done.json")):
+        d = L.done_marker(f) or {}
+        hist = d.get("history") or []
+        bad = [h["step"] for h in hist if h.get("val") is None or not math.isfinite(float(h["val"]))]
+        n += 1
+        if bad:
+            nonfinite[f.parent.name] = bad
+            old = True
+            new = bool(hist) and (hist[-1].get("val") is None or not math.isfinite(float(hist[-1]["val"])))
+            if old != new:
+                differ.append(f.parent.name)
+    return {"finished_runs": n, "runs_with_a_non_finite_validation_mean": nonfinite, "classified_differently": differ,
+            "diverged_records": sorted((L.decisions().get("diverged") or {}).keys())}
+
+
+def _gr_star_tagged(name: str) -> provenance.TaggedArray:
+    sdir = L.scores_dir(name)
+    mk = L.read_json(sdir / "g_region_star.json")
+    if not mk:
+        raise FileNotFoundError(f"{L.stage()}/{name}: no flagged* array (guards phase, REVIEW 10.5 R6)")
+    ta = provenance.load_tagged(sdir / f"g_region_{_m().G_STAR}.npy", expect_machine_id=L.live_machine().id)
+    if ta.sha256 != mk["array"]["sha256"]:
+        raise RuntimeError(f"{name}: flagged* array differs from its marker")
+    return ta
+
+
+def g_region_star_check(run: str, comp: str, cls: str = "low_abar") -> dict:
+    """The waiver line of REVIEW 10.5 R6 (user decision of PLAN 20): the rule of G-region with flagged* (deep, last
+    ring, first / last z-bin: flagged for a reason other than low acceptance) in place of flagged - gain < 0 and at
+    most 50 % of it from flagged*, i.e. margin flagged* - 0.5 main >= 0 (paired SE, resolved at 2 SE). 'covered' =
+    that rule holds, i.e. the failure of G-region as registered lies within the waived class. It is never a
+    statement that G-region passes."""
+    try:
+        a, b = _gr_star_tagged(run), _gr_star_tagged(comp)
+    except FileNotFoundError as err:
+        return {"class": cls, "available": False, "covered": False, "reason": str(err)}
+    main = provenance.paired_difference(L.tagged(run), L.tagged(comp))
+    st = provenance.paired_difference(a, b)
+    margin = stats.paired(st - 0.5 * main, np.zeros_like(main))
+    gain = float(main.mean())
+    return {"class": cls, "available": True, "hit_term_flagged_star": L.pd(provenance.paired_delta(a, b)),
+            "flagged_star_share_of_gain": (float(st.mean()) / gain) if gain != 0 else None,
+            "margin_flagged_star_minus_half_main": L.pd(margin), "resolved": abs(margin.z) >= 2.0,
+            "covered": bool(gain < 0 and margin.mean >= 0.0)}
+
+
+def _r3(x):
+    return "-" if x is None else round(x, 3)
+
+
+FORMULA_CONSTANTS = 101
+CLEANER_RULE = ("'cleaner' (AUDIT 4.1 Stage 2; REVIEW 10.4; PLAN 20: the legacy formula stays the fallback "
+                "comparator), against THIS machine's reference array of the legacy formula (k = 101): (c1) better by at "
+                "least 3: Δ_0 <= -3e-4, with the replication rule of AUDIT 4.0 in its literal reading: Δ_1 <= -1.5e-4 and "
+                "(Δ_0 + Δ_1)/2 <= -3e-4; or (c2) k <= 90 (0.9 x 101: at least 10 % fewer constants) and equal NLL "
+                "against the formula on both seeds (Δ_s <= +1 SE_s and Δ_s < +1e-4). Seeds 0 and 1; seed 2 of A11 is "
+                "reported and decides nothing.")
+FALLBACK_NOTE = ("If no Stage-2 model meets the 'cleaner' bar against the formula, or the finalist fails Gate 1, the "
+                 "legacy formula remains the Track A baseline for PySR (user decision of 26 Nov 2026, PLAN 20).")
+FINALIST_RULE = ("REVIEW 10.4: candidates A2s, A11, A11k and A11p (A11p only if accepted without hurting the short "
+                 "events); for each of the seeds 0 and 1 sfm.stats.one_se_select on the candidates' registered arrays "
+                 "of that seed (best = lowest mean; eligible if Δ < SE, strict); a candidate is eligible if it is "
+                 "eligible on both seeds; the finalist is the eligible candidate with the fewest constants, ties to the "
+                 "lower two-seed mean. No candidate eligible on both seeds: no automatic finalist (the table goes to "
+                 "the user). A11n is not a candidate (PLAN 23 item 6): the table is printed once more with A11n for "
+                 "information, and the report escalates to the user at Gate 1 if A11n beats every polynomial "
+                 "candidate by more than 1 SE on both seeds.")
+SHORT = "short (zb < 1221 mm)"
+
+
+def stage2_masks() -> dict:
+    """The registered secondary strata plus the short / bulk validation strata (REVIEW 10.4)."""
+    m = secondary_masks()
+    sets, _ = L.data_val()
+    zb = sets["val"].ev["zb"].numpy().astype(np.float64)
+    m[SHORT] = zb < registry.ZB_STRATUM_MM
+    m["bulk (zb >= 1221 mm)"] = ~m[SHORT]
+    return m
+
+
+def s2_pair(label: str, run: str, comp: str | None, masks: dict) -> dict:
+    """One comparison row of REVIEW 10.4 (provenance.paired_delta on registered arrays), or its status."""
+    row = {"label": label, "run": run, "vs": comp}
+    if comp is None:
+        return {**row, "paired": None, "status": "no comparator"}
+    if not have(run) or not (comp == "formula" or have(comp)):
+        st = run_status(run) if not have(run) else f"comparator {comp}: {run_status(comp)}"
+        return {**row, "paired": None, "status": st}
+    row["paired"] = pdict(run, comp)
+    row["strata"] = {k: (pdict(run, comp, mask=m) if m.sum() >= 2 else None) for k, m in masks.items()}
+    return row
+
+
+def reproducibility(run: str, ref: str) -> dict | None:
+    """REVIEW 10.3 item 2: A11 with a one-rung content is the same computation as that rung (same arguments, start,
+    seed, schedule); the maximum absolute per-event difference of the registered arrays must be 0."""
+    if not (have(run) and have(ref)):
+        return None
+    a, b = L.tagged(run), L.tagged(ref)
+    provenance.check_pairable(a, b)
+    d = a.values.astype(np.float64) - b.values.astype(np.float64)
+    return {"run": run, "ref": ref, "max_abs_per_event": float(np.abs(d).max()),
+            "bit_identical": bool(np.array_equal(a.values, b.values))}
+
+
+def stage2_comparisons(content: list, masks: dict) -> list:
+    rows = []
+    for s in (0, 1, 2):
+        rows.append(s2_pair("A11 - A2s", f"A11_s{s}", f"A2s_s{s}", masks))
+    for s in (0, 1):
+        rows.append(s2_pair("A11 - A2c", f"A11_s{s}", f"A2c_s{s}", masks))
+    if have("A11_s2"):
+        rows.append({"label": "A11 - A2c", "run": "A11_s2", "vs": None, "paired": None,
+                     "status": "no matched control exists for seed 2"})
+    if len(content) == 1:
+        for s in (0, 1):
+            rows.append(s2_pair(f"A11 - {content[0]} (reproducibility)", f"A11_s{s}", f"{content[0]}_s{s}", masks))
+    for s in (0, 1):
+        rows.append(s2_pair("A11k - A11", f"A11k_s{s}", f"A11_s{s}", masks))
+        rows.append(s2_pair("A11k - A2s", f"A11k_s{s}", f"A2s_s{s}", masks))
+    for s in (0, 1):
+        rows.append(s2_pair("A11p - A11", f"A11p_s{s}", f"A11_s{s}", masks))
+        rows.append(s2_pair("A11p - A2s", f"A11p_s{s}", f"A2s_s{s}", masks))
+        rows.append(s2_pair("A11p - A2c", f"A11p_s{s}", f"A2c_s{s}", masks))
+    for s in (0, 1):
+        rows.append(s2_pair("A11n - A2n (in force)", f"A11n_s{s}", L.effective(f"A2n_s{s}"), masks))
+        rows.append(s2_pair("A11n - A11", f"A11n_s{s}", f"A11_s{s}", masks))
+    for rung, seeds in (("A2s", (0, 1, 2)), ("A11", (0, 1, 2)), ("A11k", (0, 1)), ("A11p", (0, 1)), ("A11n", (0, 1))):
+        for s in seeds:
+            rows.append(s2_pair(f"{rung} - formula", f"{rung}_s{s}", "formula", masks))
+    return [r for r in rows if r.get("paired") is not None or r["status"] not in ("missing",)]
+
+
+def _k_of(run: str):
+    row = L.registered_row(run)
+    return None if row is None else int(row["k"])
+
+
+def cleaner(rung: str) -> dict:
+    """(c1) and (c2) of CLEANER_RULE for one rung (seeds 0 and 1) against the formula array."""
+    M = _m()
+    if not (have(f"{rung}_s0") and have(f"{rung}_s1")):
+        return {"rung": rung, "evaluable": False}
+    p = [L.paired(f"{rung}_s{s}", "formula") for s in (0, 1)]
+    d0, d1 = p[0].mean, p[1].mean
+    k = _k_of(f"{rung}_s0")
+    c1 = bool(d0 <= -M.KEEP_GAIN and d1 <= -0.5 * M.KEEP_GAIN and 0.5 * (d0 + d1) <= -M.KEEP_GAIN)
+    eq = [bool(M.equal_rule_one(x)) for x in p]
+    c2 = bool(k <= 0.9 * FORMULA_CONSTANTS and all(eq))
+    return {"rung": rung, "evaluable": True, "k": k, "delta": [L.pd(x) for x in p], "mean_of_seeds": 0.5 * (d0 + d1),
+            "c1": c1, "c1_parts": {"d0<=-3": bool(d0 <= -M.KEEP_GAIN), "d1<=-1.5": bool(d1 <= -0.5 * M.KEEP_GAIN),
+                                   "mean<=-3": bool(0.5 * (d0 + d1) <= -M.KEEP_GAIN)},
+            "c2": c2, "c2_parts": {"k<=90": bool(k <= 0.9 * FORMULA_CONSTANTS), "equal_s0": eq[0], "equal_s1": eq[1]},
+            "cleaner": bool(c1 or c2)}
+
+
+def finalist(candidates: list) -> dict:
+    """FINALIST_RULE on the given candidate rungs (those with both seeds registered)."""
+    usable = [c for c in candidates if have(f"{c}_s0") and have(f"{c}_s1")]
+    out = {"candidates": usable, "not_candidates": [c for c in candidates if c not in usable], "tables": {},
+           "eligible_both": [], "finalist": None}
+    if not usable:
+        return out
+    within, means = {c: True for c in usable}, {c: [] for c in usable}
+    for s in (0, 1):
+        arrs = [L.tagged(f"{c}_s{s}") for c in usable]
+        provenance.check_pairable(*arrs)
+        sel = stats.one_se_select([stats.Candidate(c, a.values.astype(np.float64), k=_k_of(f"{c}_s{s}"))
+                                   for c, a in zip(usable, arrs)])
+        out["tables"][s] = sel.table
+        for row in sel.table:
+            within[row["name"]] = within[row["name"]] and row["within_1se"]
+            means[row["name"]].append(row["mean"])
+    elig = [c for c in usable if within[c]]
+    out["eligible_both"] = elig
+    if elig:
+        out["finalist"] = min(elig, key=lambda c: (_k_of(f"{c}_s0"), float(np.mean(means[c]))))
+    out["two_seed_mean"] = {c: float(np.mean(v)) for c, v in means.items()}
+    return out
+
+
+def a11n_escalation(candidates: list) -> dict:
+    """PLAN 23 item 6: A11n stays out of the automatic polynomial finalist set; it is escalated to the user at Gate 1
+    if it beats every polynomial candidate by more than 1 paired SE on both seeds (Δ = A11n - candidate < -SE)."""
+    poly = [c for c in candidates if have(f"{c}_s0") and have(f"{c}_s1")]
+    if not (have("A11n_s0") and have("A11n_s1")) or not poly:
+        return {"evaluable": False, "escalate": False}
+    rows = {}
+    for c in poly:
+        rows[c] = {}
+        for s in (0, 1):
+            p = L.paired(f"A11n_s{s}", f"{c}_s{s}")
+            rows[c][s] = {"paired": L.pd(p), "beats_by_more_than_1se": bool(p.mean < -p.se)}
+    esc = all(v[s]["beats_by_more_than_1se"] for v in rows.values() for s in (0, 1))
+    return {"evaluable": True, "polynomial_candidates": poly, "pairs": rows, "escalate": esc}
+
+
+def u2_max(n_s: int) -> int:
+    """REVIEW 11.6 (b): N_s <= 95 for n_S = 166, the level P(Binomial(166, 1/2) > 95); for another n_S (smoke data
+    are the same split, so this is a guard) the smallest N with P(Binomial(n_S, 1/2) > N) <= that level."""
+    def tail(n, N):
+        return sum(math.comb(n, j) for j in range(N + 1, n + 1)) / 2 ** n
+    n0, N0 = _m().A11P_U2_REF
+    if n_s == n0:
+        return N0
+    alpha = tail(n0, N0)
+    N = 0
+    while tail(n_s, N) > alpha:
+        N += 1
+    return N
+
+
+def a11p_acceptance(share: float | None, name: str = "A11p") -> dict | None:
+    """REVIEW 11.6 on the registered validation arrays: registered (equal NLL against A11_s on both seeds) and the
+    short-event conditions U1 (Δ^S + 2 SE^S < share x 1e-4 / f) and U2 (N_s <= u2_max(n_S)) on both seeds."""
+    M = _m()
+    if share is None or not all(have(f"{name}_s{s}") and have(f"A11_s{s}") for s in (0, 1)):
+        return None
+    sets, _ = L.data_val()
+    S = sets["val"].ev["zb"].numpy().astype(np.float64) < registry.ZB_STRATUM_MM
+    f = float(S.mean())
+    margin = share * 1e-4 / f
+    nmax = u2_max(int(S.sum()))
+    seeds = {}
+    for s in (0, 1):
+        a, b = L.tagged(f"{name}_s{s}"), L.tagged(f"A11_s{s}")
+        p = provenance.paired_delta(a, b)
+        d = provenance.paired_difference(a, b)
+        dS = stats.paired(d[S], np.zeros(int(S.sum())))
+        n_worse = int((d[S] > 1e-4).sum())
+        seeds[s] = {"paired": L.pd(p), "equal": bool(M.equal_rule_one(p)), "short": L.pd(dS),
+                    "U1_bound": dS.mean + 2 * dS.se, "U1": bool(dS.mean + 2 * dS.se < margin),
+                    "N_worse_by_1e-4": n_worse, "U2": bool(n_worse <= nmax)}
+    reg = all(v["equal"] for v in seeds.values())
+    short_ok = all(v["U1"] and v["U2"] for v in seeds.values())
+    return {"run": name, "share": share, "f_short": f, "n_short": int(S.sum()), "U1_margin": margin, "U2_max": nmax,
+            "seeds": seeds, "accepted": reg, "accepted_without_hurting_short": bool(reg and short_ok),
+            "verdict": ("accepted without hurting the short events" if reg and short_ok else
+                        "equal NLL overall, short events hurt" if reg else "not accepted (not equal NLL)")}
+
+
+def collect_stage2() -> dict:
+    M = _m()
+    dec = L.decisions()
+    content = dec.get("stage2_content")
+    if content is None:
+        raise SystemExit("stage2 report: no stage2_content record (the stage2 phase has not started)")
+    run = content.get("a11_content") or []
+    s1 = json.loads((L.out_dir() / "results.json").read_text())
+    from sfm import machine as _machine
+    gs = _machine.git_state()
+    masks = stage2_masks()
+    specs = M.stage2_specs(run)
+    par = content.get("a11p_parameters") or {}
+    screen = None
+    sc_rec = dec.get("stage2_a11p_screen")
+    if sc_rec:
+        f = L.out_dir() / M.A11P_DIR / "screen.json"
+        screen = json.loads(f.read_text()) if f.exists() else None
+        if screen is not None and provenance.sha256_file(f) != sc_rec["sha256"]:
+            raise RuntimeError("stage2 report: a11p/screen.json differs from its recorded SHA-256")
+    acc = a11p_acceptance(par.get("short_event_share"))
+    acc_z0 = a11p_acceptance(par.get("short_event_share"), name="A11pz")
+    cc = dec.get("conditional_controls")
+    ccr = {}
+    for ctl, mk in (("A2c_x2", M.a2c_x2_specs), ("A2c6k", M.a2c6k_specs)):
+        if cc and cc[ctl]["triggered"]:
+            for sp in mk(cc[ctl]["seeds"]):
+                ccr[sp.name] = entry(sp.name, sp.comparator, {}) or {"run": sp.name, "vs": sp.comparator,
+                                                                    "status": "not run yet"}
+    cands = ["A2s", "A11", "A11k"] + (["A11p"] if acc and acc["accepted_without_hurting_short"] else [])
+    fin = finalist(cands)
+    fin_net = finalist(cands + ["A11n"])
+    esc = a11n_escalation(cands)
+    rungs = ["A11", "A11k", "A11p", "A11n"] + (["A2s"] if fin.get("finalist") == "A2s" else [])
+    cl = {r: cleaner(r) for r in rungs}
+    guards = {}
+    pairs = (dec.get("stage2_guard_targets") or {}).get("pairs", []) + \
+        (dec.get("stage2_a11p_guard_targets") or {}).get("pairs", [])
+    for r_, c_ in pairs:
+        blk = guard_block(r_, c_)
+        if blk is None:
+            guards[f"{r_} vs {c_}"] = {"run": r_, "vs": c_, "missing": True}
+            continue
+        blk["waiver_lines"] = [{**wv, "check": g_region_star_check(r_, c_, wv["class"])}
+                               for wv in content.get("waivers") or []]
+        guards[f"{r_} vs {c_}"] = blk
+    names = [sp.name for sp in specs] + [f"{r}_s{s}" for r in ("A11p", "A11pz") for s in (0, 1)]
+    s2dec = {k: {n: v for n, v in (dec.get(k) or {}).items() if L.is_stage2_run(n)}
+             for k in ("diverged", "blocked", "warnings")}
+    fa = L.formula_array()
+    return {"stage": L.stage(), "smoke": L.CTX.smoke, "machine_id": L.MACHINE_ID, "stream_id": L.live_stream_id(),
+            "git": {"commit": gs.get("commit"), "clean": gs.get("clean")},
+            "units": "1e-4 nat per event (deltas); paired SE; n events",
+            "approval": dec.get("stage2_approval"), "content": content,
+            "stage1_results_json_sha256": provenance.sha256_file(L.out_dir() / "results.json"),
+            "stage1_guards": {k: (g.get("G-region") or {}) for k, g in (s1.get("guards") or {}).items()},
+            "memory_probe": dec.get("stage2_memory_probe"), "a11p_status": dec.get("stage2_a11p"),
+            "formula": {"constants": FORMULA_CONSTANTS, "validation_mean": float(np.mean(fa.values, dtype=np.float64)),
+                        "reference_array": paths.portable(L.refset().dir)},
+            "reproducibility": ([reproducibility(f"A11_s{s}", f"{run[0]}_s{s}") for s in (0, 1)]
+                                if len(run) == 1 else None),
+            "comparisons": stage2_comparisons(run, masks),
+            "strata_n": {k: int(v.sum()) for k, v in masks.items()},
+            "finalist_rule": FINALIST_RULE, "finalist": fin, "finalist_with_A11n": fin_net,
+            "finalist_changed_by_A11n": fin_net.get("finalist") != fin.get("finalist"), "a11n_escalation": esc,
+            "cleaner_rule": CLEANER_RULE, "cleaner": cl, "fallback": FALLBACK_NOTE,
+            "a11p_screen": screen, "a11p_screen_sha256": (sc_rec or {}).get("sha256"), "a11p_acceptance": acc,
+            "a11p_z0_acceptance": acc_z0, "conditional_controls": cc, "conditional_controls_runs": ccr,
+            "warnings_gate1_stage1": gate1_warnings(stage2=False), "reclassification": reclassification(),
+            "divergence_definition": L.DIVERGENCE_DEFINITION,
+            "initialisation": initialisation_table(stage2=True),
+            "convergence": {n: convergence(n) for n in names if L.done_marker(L.out_dir() / n / "done.json")},
+            "guards": guards, "diverged": s2dec["diverged"], "blocked": s2dec["blocked"],
+            "warnings_gate1": gate1_warnings(stage2=True)}
+
+
+def _s2_guard_text(g: dict) -> list:
+    out = []
+    gk, gb = g["G-K"], g["G-bulk"]
+    out.append(f"- G-K: {fmt(gk['delta_k1024'])}, passed {yn(gk['persistence']['passed'])}, resolved "
+               f"{yn(gk['persistence']['flags']['resolved'])}")
+    out.append(f"- G-bulk: {fmt(gb['delta_bulk'])}, passed {yn(gb['persistence']['passed'])}, resolved "
+               f"{yn(gb['persistence']['flags']['resolved'])}")
+    out.append("- report metric on the strata: " + "; ".join(f"{k} {fmt(v)}" for k, v in
+                                                           g["report_metric_strata"].items()))
+    gr = g.get("G-region")
+    if gr:
+        out.append("- G-region as registered, hit term by class: " + "; ".join(
+            f"{k} {fmt(v)}" for k, v in gr["hit_term_by_class"].items()) + f"; normalisation "
+            f"{fmt(gr['normalisation_term'])}; flagged share {_r3(gr['flagged_share_of_gain'])}, margin "
+            f"{fmt(gr['margin_flagged_minus_half_main'])} -> " + ("**FAILED**" if not gr["passed"] else "not failed"))
+    for wv in g.get("waiver_lines") or []:
+        ch = wv["check"]
+        if not ch.get("available"):
+            out.append(f"- User's waiver of PLAN 20 ({wv['date']}; {wv['rung']}, class {wv['class']}, subject to "
+                       f"{wv['subject_to']}): flagged* line NOT AVAILABLE ({ch.get('reason')}) - not covered")
+            continue
+        out.append(f"- User's waiver of PLAN 20 ({wv['date']}; {wv['rung']} is part of this model; {wv['guard']}, "
+                   f"class {wv['class']} only, subject to {wv['subject_to']}): flagged* share "
+                   f"{_r3(ch['flagged_star_share_of_gain'])}, margin {fmt(ch['margin_flagged_star_minus_half_main'])} "
+                   f"(resolved {yn(ch['resolved'])}) -> the failure lies within the waived class: "
+                   f"**{yn(ch['covered'])}**" + ("" if ch["covered"] else " - NOT covered by the waiver"))
+    out.append("- G-mass: " + "; ".join(f"{k} {fmt(v['delta'])}" for k, v in g["G-mass"].items()) + "\n")
+    return out
+
+
+def markdown_stage2(res: dict) -> str:
+    out = []
+    w = out.append
+    w("# Track A (M2A) Stage 2 - " + ("SMOKE RUN (shortened fits; not numbers of record)" if res["smoke"] else
+                                      "results on the machine of record") + "\n")
+    c = res["content"]
+    ap = res.get("approval") or {}
+    w(f"Stage `{res['stage']}`, machine `{res['machine_id']}`, stream `{res['stream_id']}`, report code at commit "
+      f"`{(res.get('git') or {}).get('commit')}` (clean clone: {(res.get('git') or {}).get('clean')}). Approved "
+      f"Stage-1 results.json `{str(ap.get('results_json_sha256'))[:16]}...` (approved {ap.get('approved_utc')} by "
+      f"{ap.get('approved_by')}; reading '{c.get('replication_reading')}'). Validation only; deltas in 1e-4 nat per "
+      "event, mean ± paired SE (n), through `sfm.provenance.paired_delta`.\n")
+    w("## Content of A11 (user decisions of 26 Nov 2026, PLAN 20; REVIEW 10.5 R1)\n")
+    w(f"- Computed kept-and-replicated list: {c.get('kept_and_replicated')}")
+    for r, e in (c.get("excluded") or {}).items():
+        w(f"- **User exclusion** ({e['date']}): **{r} does not enter A11** - {e['reason']}")
+    for wv in c.get("waivers") or []:
+        w(f"- **Guard waiver** ({wv['date']}): {wv['rung']} enters under an explicit waiver of **{wv['guard']}** for "
+          f"the class **{wv['class']}** only, subject to {wv['subject_to']} - {wv['basis']}")
+    for rung, chks in (c.get("waiver_checks") or {}).items():
+        for key, chk in chks.items():
+            w(f"  - Stage 1, {key}: G-region as registered FAILED: {yn(chk.get('g_region_passed') is False)}; "
+              + (f"flagged* share {_r3(chk['flagged_star_share_of_gain'])}, margin "
+                 f"{fmt(chk['margin_flagged_star_minus_half_main'])} -> within the waived class "
+                 f"{yn(chk['covered'])}" if chk.get("available") else "flagged* line not available"))
+    w(f"- **Content = computed list minus user exclusions: {c.get('a11_content')}** -> A11 = {c.get('A11')}; A11n: "
+      f"{c.get('A11n')}; lr_net of record {c.get('lr_net_of_record')}")
+    par = c.get("a11p_parameters") or {}
+    w(f"- A11p: {(res.get('a11p_status') or {}).get('status', 'not started')}; parameters of the [confirm] choices of "
+      f"REVIEW 11: short-event share {par.get('short_event_share')}, if the short events veto coefficients: "
+      f"{par.get('if_vetoed')} ({par.get('source')})")
+    mp = res.get("memory_probe")
+    if mp:
+        w(f"- Memory probe before the first k_train = 64 fit (REVIEW 10.5 R2): peak {mp['peak_gb']:.2f} GB for "
+          f"{mp['hits_in_batch']} hits, limit {mp['limit_gb']} GB (cap {mp['cap_gb']}) -> "
+          f"{'fits' if mp['fits'] else 'DOES NOT FIT'}")
+    rp = res.get("reproducibility")
+    if rp:
+        w("- **Reproducibility (REVIEW 10.3 item 2):** A11 with this content is the same computation as the rung "
+          "(same arguments, start, seed and schedule); the two runs are not a further replication of it, only seed "
+          "2 is new information. " + "; ".join(
+              f"{x['run']} - {x['ref']}: max |Δ per event| {x['max_abs_per_event']:.3e} nat, bit for bit: "
+              f"**{yn(x['bit_identical'])}**" for x in rp if x) + ("" if all(x for x in rp) else " (a run is missing)"))
+    w("")
+    w("## Comparisons (REVIEW 10.4)\n")
+    n = res["strata_n"]
+    w("| comparison | run vs comparator | Δ (all events) | " + " | ".join(f"{k} (n {n[k]})" for k in n) + " |\n|---|---|"
+      + "---|" * (1 + len(n)))
+    for r in res["comparisons"]:
+        if r.get("paired") is None:
+            w(f"| {r['label']} | {r['run']} vs {r['vs']} | **{r.get('status')}** |" + " |" * len(n))
+            continue
+        w(f"| {r['label']} | {r['run']} vs {r['vs']} | {fmt(r['paired'])} | "
+          + " | ".join(fmt(r["strata"].get(k)) for k in n) + " |")
+    w("\n## Finalist (REVIEW 10.4)\n")
+    w(res["finalist_rule"] + "\n")
+    for label, fin in (("candidates", res["finalist"]), ("with A11n", res["finalist_with_A11n"])):
+        w(f"**{label}:** {fin['candidates']} (not candidates / incomplete: {fin['not_candidates']})\n")
+        for s_, tab in fin["tables"].items():
+            w(f"seed {s_}:\n\n| candidate | k | mean | Δ vs best | SE | within 1 SE | best |\n|---|---|---|---|---|---|---|")
+            for row in tab:
+                w(f"| {row['name']} | {row['k']} | {row['mean']:.6f} | {row['delta'] * E4:+.2f} | {row['se'] * E4:.2f} | "
+                  f"{yn(row['within_1se'])} | {yn(row['best'])} |")
+            w("")
+        fz_ = fin["finalist"] or "none (no automatic finalist; the table goes to the user)"
+        w(f"eligible on both seeds: {fin['eligible_both']} -> finalist: **{fz_}**\n")
+    if res["finalist_changed_by_A11n"]:
+        w("Including A11n changes the 1-SE selection (information; A11n is not a candidate, PLAN 23 item 6).\n")
+    esc = res.get("a11n_escalation") or {}
+    if esc.get("evaluable"):
+        w("A11n against every polynomial candidate (PLAN 23 item 6; beats = Δ < -1 SE): " + "; ".join(
+            f"{c} s{s_}: {fmt(v[s_]['paired'])} {'beats' if v[s_]['beats_by_more_than_1se'] else 'does not beat'}"
+            for c, v in esc["pairs"].items() for s_ in (0, 1)) + "\n")
+        if esc["escalate"]:
+            w("**ESCALATE TO THE USER AT GATE 1: A11n beats every polynomial model by more than 1 SE on both "
+              "seeds.**\n")
+    w("## 'Cleaner' against the legacy formula\n")
+    f = res["formula"]
+    w(f"Legacy formula: k = {f['constants']}, validation mean on this machine {f['validation_mean']:.6f} (reference "
+      f"array `{f['reference_array']}`). {res['cleaner_rule']}\n")
+    w("| rung | k | Δ vs formula s0 | Δ vs formula s1 | (c1) Δ_0 <= -3, Δ_1 <= -1.5, mean <= -3 | (c2) k <= 90 and equal "
+      "NLL s0 / s1 | cleaner |\n|---|---|---|---|---|---|---|")
+    for r, v in res["cleaner"].items():
+        if not v["evaluable"]:
+            w(f"| {r} | - | - | - | not evaluable (a seed is missing) | - | - |")
+            continue
+        p1, p2 = v["c1_parts"], v["c2_parts"]
+        w(f"| {r} | {v['k']} | {fmt(v['delta'][0])} | {fmt(v['delta'][1])} | {yn(v['c1'])} ({yn(p1['d0<=-3'])}, "
+          f"{yn(p1['d1<=-1.5'])}, {yn(p1['mean<=-3'])}; mean {v['mean_of_seeds'] * E4:+.2f}) | {yn(v['c2'])} "
+          f"({yn(p2['k<=90'])}; {yn(p2['equal_s0'])} / {yn(p2['equal_s1'])}) | **{yn(v['cleaner'])}** |")
+    fz = res["finalist"].get("finalist")
+    fc = res["cleaner"].get(fz) if fz else None
+    if fz is None:
+        w("\nNo automatic finalist, so no finalist 'cleaner' statement; " + res["fallback"] + "\n")
+    elif fc and fc.get("evaluable") and not fc["cleaner"]:
+        w(f"\n**The finalist {fz} is not cleaner than the legacy formula; the legacy formula remains the Track A "
+          "baseline (PLAN 20).**\n")
+    elif fc and fc.get("cleaner"):
+        w(f"\nThe finalist {fz} is cleaner than the legacy formula by ({'c1' if fc['c1'] else 'c2'}); Gate 1 "
+          "decides.\n")
+    else:
+        w(f"\nThe finalist {fz}: 'cleaner' not evaluable. " + res["fallback"] + "\n")
+    w("## A11p (REVIEW 11)\n")
+    sc = res.get("a11p_screen")
+    if sc is None:
+        w(f"Screen not run: {(res.get('a11p_status') or {}).get('status', 'not started')}.\n")
+    else:
+        w(f"Screen `a11p/screen.json` (SHA-256 `{str(res.get('a11p_screen_sha256'))[:16]}...`): {sc['n_candidates']} "
+          f"candidates; threshold Q_j < {sc['threshold_nat'] * E4:.1f}e-4 nat; short events f_tr Q^S_j < "
+          f"{sc['short_threshold_nat'] * E4:.2f}e-4 nat (share {sc['short_event_share']}). Z_0 (registered condition "
+          f"alone, both seeds): {len(sc['Z0'])}; **Z (with the short-event condition): {len(sc['Z'])}**; vetoed by the "
+          f"short events (Z_0 minus Z): {sc['Z0_minus_Z']}. k {sc['k_A11']} -> {sc['k_A11p']}.")
+        for s_, j in sc["joint"].items():
+            w(f"- seed {s_}: sum of Q_j over Z {j['sum_Q_dropped'] * E4:.3f}e-4; joint cost before the refit J "
+              f"{j['J'] * E4:+.3f}e-4, J^S {j['J_S'] * E4:+.3f}e-4")
+        cc_ = sc.get("curvature_check") or {}
+
+        def _g(x, f=".4g"):
+            return "non-finite" if x is None else format(x, f)
+        w(f"- autodiff check of H_j (REVIEW 11.2; 256 training events, the most resolved candidates): passed "
+          f"**{yn(cc_.get('passed'))}** (tolerance {cc_.get('tolerance')}, finite comparisons {cc_.get('n_finite')}): "
+          + "; ".join(f"{k}: autodiff {_g(v['autodiff'])}, second difference {_g(v['second_difference'])} (rel. "
+                      f"{_g(v['rel_diff'], '.1e')})" for k, v in (cc_.get("coefficients") or {}).items()))
+        w(f"- reduced degrees: " + ", ".join(f"{k} {v}" for k, v in sc["prune"].items()) + "\n")
+        for s_, t in sc["tables"].items():
+            w(f"Seed {s_} ({t['run']}; n_train {t['n_train']}, short {t['n_short']}, f_tr {t['f_tr']:.6f}):\n")
+            w("| row | k | c | h | H | Q (1e-4) | -g c (1e-4) | H^S | Q^S (1e-4) | f_tr Q^S (1e-4) | pass reg. | pass "
+              "short |\n|---|---|---|---|---|---|---|---|---|---|---|---|")
+            for r in t["rows"]:
+                w(f"| {r['row']} | {r['k']} | {r['c']:.4g} | {r['h']:.3g} | {r['H']:.4g} | {r['Q'] * E4:.4f} | "
+                  f"{r['minus_g_c'] * E4:+.4f} | {r['H_S']:.4g} | {r['Q_S'] * E4:.3f} | {r['f_tr_Q_S'] * E4:.4f} | "
+                  f"{yn(r['pass_registered'])} | {yn(r['pass_short'])} |")
+            w("")
+    acc = res.get("a11p_acceptance")
+    if acc:
+        w(f"Acceptance (REVIEW 11.6): margin U1 M = {acc['U1_margin'] * E4:.2f}e-4 (share {acc['share']}, f "
+          f"{acc['f_short']:.6f}), U2: N_s <= {acc['U2_max']} of {acc['n_short']}.\n")
+        w("| seed | Δ A11p - A11 | equal NLL | Δ^S (short) | Δ^S + 2 SE^S | U1 | N_s worse by > 1e-4 | U2 |\n"
+          "|---|---|---|---|---|---|---|---|")
+        for s_, v in acc["seeds"].items():
+            w(f"| {s_} | {fmt(v['paired'])} | {yn(v['equal'])} | {fmt(v['short'])} | {v['U1_bound'] * E4:+.2f} | "
+              f"{yn(v['U1'])} | {v['N_worse_by_1e-4']} | {yn(v['U2'])} |")
+        w(f"\n**A11p: {acc['verdict']}.** " + (
+            f"The coefficients of Z can be removed from A11 without hurting the short events (within the margins of "
+            f"REVIEW 11.6)." if acc["accepted_without_hurting_short"] else
+            "The coefficients of Z cannot be removed from A11 without hurting the short events (within the margins "
+            "of REVIEW 11.6), or not at equal NLL.")
+            + (f" Z_0 minus Z: {sc['Z0_minus_Z']}." if sc else "") + "\n")
+    az = res.get("a11p_z0_acceptance")
+    if az:
+        w(f"Z_0 fits (A11pz, fitted because the parameter 'if_vetoed' asks for it; reported, not a finalist "
+          f"candidate): " + "; ".join(f"seed {s_}: {fmt(v['paired'])}, equal {yn(v['equal'])}, U1 {yn(v['U1'])}, "
+                                      f"U2 {yn(v['U2'])}" for s_, v in az["seeds"].items()) + f" -> {az['verdict']}\n")
+    w("## Initialisation of the network runs (A11n)\n")
+    w("| run | kl_map | reference | fit_to version / rms_max / std (column) | step-0 parity | below-floor target "
+      "columns |\n|---|---|---|---|---|---|")
+    for x in res.get("initialisation") or []:
+        if x.get("provider") != "net":
+            continue
+        p0 = x.get("step0_parity") or {}
+        rr = x.get("fit_to_rms_max_rel")
+        tg = x.get("targets") or {}
+        w(f"| {x['run']} | {x.get('kl_map')} | {x.get('kl_ref')} | v{x.get('fit_to_version')} / "
+          f"{'-' if rr is None else f'{rr * 100:.2f} %'} ({x.get('fit_to_rms_max_name')}) | "
+          f"{fmt(p0.get('paired')) if p0.get('available') else '-'} | "
+          f"{', '.join(tg.get('below_scale_floor') or []) or 'none'} |")
+    w("\n## Convergence (|val(last) - val(last - window)| < 0.5e-4)\n")
+    for k, v in res["convergence"].items():
+        if v:
+            mv = "-" if v["moved"] is None else f"{v['moved'] * E4:.2f}e-4"
+            w(f"- {k}: converged {yn(v['converged'])}, moved {mv}")
+    w("\n## Guards of the Stage-2 runs (own tables)\n")
+    if not res["guards"]:
+        w("No guard data yet (the Stage-2 guards run inside the stage2 phase).\n")
+    for key, g in res["guards"].items():
+        w(f"### {key}\n")
+        if g.get("missing"):
+            w("**Guard data MISSING.**\n")
+            continue
+        out.extend(_s2_guard_text(g))
+    w("## Conditional controls (user decision of 26 Nov 2026, PLAN 20 item 1)\n")
+    ccd = res.get("conditional_controls")
+    if not ccd:
+        w("**Not evaluated** (`run_m2a.py conditional-controls` has not run).\n")
+    else:
+        for ctl, v in ccd.items():
+            w(f"- **{ctl}**: {'TRIGGERED for seeds ' + str(v['seeds']) if v['triggered'] else '**not triggered**'} - "
+              f"rule: {v['rule']}")
+            for nme, x in v["evaluated_pairs"].items():
+                w(f"  - {nme} vs {x['vs']}: {fmt(x['paired'])}; keep {yn(x['keep'])}, equal NLL (one seed) "
+                  f"{yn(x['equal_one_seed'])}")
+            if not v["evaluated_pairs"]:
+                w("  - no registered pair of this kind on this machine")
+        for nme, x in (res.get("conditional_controls_runs") or {}).items():
+            w(f"- control run {nme} vs {x.get('vs')}: " + (fmt(x.get("paired")) if x.get("paired") else
+                                                          str(x.get("status"))))
+        w("")
+    w("## Divergence definition and warnings for Gate 1 (PLAN 20 item 2; REVIEW 10.5 R3)\n")
+    w(f"Present definition: {res['divergence_definition']}\n")
+    rc = res["reclassification"]
+    w(f"Re-classification of every finished run of this stage ({rc['finished_runs']}) from its stored fit history: "
+      f"runs with a non-finite validation mean anywhere in the history: {len(rc['runs_with_a_non_finite_validation_mean'])}"
+      f" {rc['runs_with_a_non_finite_validation_mean'] or ''}; classified differently by the present definition than "
+      f"by that of 25 Nov 2026: **{rc['classified_differently'] or 'none'}**.\n")
+    wg = res.get("warnings_gate1_stage1") or {}
+    w("Recovered non-finite validation values (warnings for Gate 1), Stage-1 runs: " + (
+        "; ".join(f"{k}: {v['count']} at steps {v['steps']}" for k, v in wg.items()) if wg else "none") + "\n")
+    w("## Diverged, blocked and warnings for Gate 1 (Stage 2)\n")
+    for nme, v in (res.get("diverged") or {}).items():
+        w(f"- **{nme}** diverged: {'; '.join(v.get('criteria') or [])}")
+    for nme, v in (res.get("blocked") or {}).items():
+        w(f"- **{nme}** blocked by {v.get('blocked_by')}")
+    for nme, v in (res.get("warnings_gate1") or {}).items():
+        w(f"- **{nme}**: {v['count']} recovered non-finite validation mean(s) at steps {v['steps']} (warning)")
+    if not (res.get("diverged") or res.get("blocked") or res.get("warnings_gate1")):
+        w("None.")
+    return "\n".join(out) + "\n"
+
+
+def report_stage2() -> dict:
+    """The Stage-2 report: results_stage2.json and RESULTS_stage2.md (results.json and RESULTS.md of Stage 1, the
+    files the approval is bound to, are not touched)."""
+    res = collect_stage2()
+    od = L.out_dir()
+    L.write_json(res, od / "results_stage2.json")
+    f = paths.check_output_path(od / "RESULTS_stage2.md")
+    tmp = f.with_name(f".{f.name}.tmp")
+    tmp.write_text(paths.scrub_str(markdown_stage2(res)))
+    tmp.replace(f)
+    log(f"stage2 report: {paths.portable(f)} written ({len(res['comparisons'])} comparisons, {len(res['guards'])} "
+        f"guard blocks, finalist {res['finalist'].get('finalist')})")
+    return res
+
+
+def compare_results(new: Path, approved: Path) -> int:
+    """REVIEW 10.5 R9: the results.json re-issued at a new commit against the one the user approved; 0 if they differ
+    in the key 'git' only, 1 otherwise (the differing keys are printed; a hard stop, PLAN 23 item 13)."""
+    a, b = json.loads(Path(approved).read_text()), json.loads(Path(new).read_text())
+    diff = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
+    print(f"keys that differ: {diff}")
+    if diff and set(diff) != {"git"}:
+        print("STOP (PLAN 23 item 13): results.json differs from the approved one beyond the commit; waiting for the "
+              "user")
+        return 1
+    print(f"OK: only {'git' if diff else 'nothing'} differs (approved commit {(a.get('git') or {}).get('commit')}, "
+          f"new {(b.get('git') or {}).get('commit')})")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--smoke", action="store_true")
     ap.add_argument("--without-guards", action="store_true", help="tables without guard columns (review C2)")
+    ap.add_argument("--compare", nargs=2, metavar=("NEW", "APPROVED"),
+                    help="R9: exit 1 unless two results.json differ in 'git' only (reads the two files, writes nothing)")
     args = ap.parse_args(argv)
+    if args.compare:
+        return compare_results(Path(args.compare[0]), Path(args.compare[1]))
     L.configure(smoke=args.smoke)
     L.start("run_m2a_report")
     report(with_guards=not args.without_guards)

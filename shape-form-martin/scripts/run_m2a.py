@@ -33,21 +33,32 @@ Phases
                 dropped = [].
     guards      guard columns (registry.evaluate(guards=True): G-K, G-bulk, G-mass) and G-region arrays for every run
                 of a rung that passes the keep or the equal-NLL rule on any seed, and for their comparators; Fisher
-                information of k for A6b
+                information of k for A6b. Since 26 Nov 2026 also the flagged* arrays (REVIEW 10.5 R6; new files under
+                their own subset tag and marker, nothing existing rewritten) and a timing record per run and part
+                (guard_timing_<UTC>.json beside the arrays; a part over 60 s is logged as a WARNING)
     report      scripts/run_m2a_report.py: the rules applied to the registered arrays, guard tables, secondary
                 columns, RESULTS.md / results.json
-    stage2      A11 / A11k / A11n (explicit only; refused before the report exists: the user sees the Stage-1 table
-                before any combination is formed)
+
+Added phases (never in the default list): warmstart-check, warmstart-rerun, a2c (PLAN 17.11); conditional-controls
+(PLAN 20 item 1: A2c_x2 / A2c6k evaluated on the registered arrays, trained only if triggered); and, each only on
+its own, after the user has seen the Stage-1 table and the approval file exists (REVIEW 10.5):
+    stage2         gate (approval R1, preconditions) -> A11 (0, 1, 2), A11k (0, 1; memory probe first), A11n (0, 1)
+                   -> their guards -> A11p screen (REVIEW 11; hashed) -> A11p fits -> their guards -> Stage-2 report
+    a11p           the A11p part alone (re-issue), behind the same gate
+    stage2-report  RESULTS_stage2.md / results_stage2.json (results.json of Stage 1 is never touched)
 """
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import math
 import sys
 import time
 from dataclasses import asdict, replace
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -58,7 +69,7 @@ import torch  # noqa: E402
 import run_m2a_lib as L  # noqa: E402
 from run_m2a_lib import Spec, log  # noqa: E402
 
-from sfm import metric, paths, provenance, registry  # noqa: E402
+from sfm import machine, metric, paths, provenance, registry  # noqa: E402
 from sfm.models import dist_factory as dfac  # noqa: E402
 
 LN20 = math.log(20.0)
@@ -538,33 +549,48 @@ def _g_region_static(val_cpu) -> tuple:
     return _GR_STATIC[key]
 
 
-def g_region_compute(model, val, val_cpu) -> dict:
+def g_region_compute(model, val, val_cpu, timing: Optional[dict] = None, run: str = "") -> dict:
     """The G-region arrays of one model, without I/O: per class the per-event hit-term contribution
     np.bincount(ev, weights=-hit * mask) (float64, the expression of the original code, so bit-identical), and the
     normalisation term weight_sum * log_mass. Returns {"arrays": {class: array, "normalisation": array}, "hit",
     "parts_nll"}."""
     model.eval()
-    parts = metric.test_nll(model, val, return_parts=True, deterministic_sum=True)
-    hit = parts["hit"][0].astype(np.float64)
-    norm = (parts["weight_sum"].astype(np.float64) * parts["log_mass"][0].astype(np.float64))
-    N, ev, masks = _g_region_static(val_cpu)
-    arrays = {cls: np.bincount(ev, weights=-hit * m, minlength=N) for cls, m in masks.items()}
-    arrays["normalisation"] = norm
+    rec = timing if timing is not None else {}
+    with L.PartTimer("G-region pass (GPU)", rec, run):
+        parts = metric.test_nll(model, val, return_parts=True, deterministic_sum=True)
+    with L.PartTimer("G-region host work", rec, run):
+        hit = parts["hit"][0].astype(np.float64)
+        norm = (parts["weight_sum"].astype(np.float64) * parts["log_mass"][0].astype(np.float64))
+        N, ev, masks = _g_region_static(val_cpu)
+        arrays = {cls: np.bincount(ev, weights=-hit * m, minlength=N) for cls, m in masks.items()}
+        arrays["normalisation"] = norm
     return {"arrays": arrays, "hit": hit, "parts_nll": parts["nll"][0]}
 
 
-def g_region_arrays(name: str, model, val, val_cpu) -> dict:
+def g_region_arrays(name: str, model, val, val_cpu, timing: Optional[dict] = None, comp: Optional[dict] = None) -> dict:
     """Per-event NLL decomposition of one run on the registry's fold points (K = 64, seed 12345, batch 128):
     hit-term contribution -sum_{i in e, class} omega_i ln g_i per class and the normalisation term
-    weight_sum_e ln M_e, saved as tagged arrays (subset "g_region:<class>"); paired across runs by the report."""
+    weight_sum_e ln M_e, saved as tagged arrays (subset "g_region:<class>"); paired across runs by the report.
+    ``comp``: the result of g_region_compute for this model, if the caller has it already."""
     base = L.live()["points"]
     sdir = L.scores_dir(name)                          # where the registry put this run's arrays
     marker = sdir / "g_region.json"
     if marker.exists():
         return L.read_json(marker)
-    comp = g_region_compute(model, val, val_cpu)
+    if comp is None:
+        comp = g_region_compute(model, val, val_cpu, timing=timing, run=name)
     hit, norm, parts_nll = comp["hit"], comp["arrays"]["normalisation"], comp["parts_nll"]
     N, ev, masks = _g_region_static(val_cpu)
+    recon = np.bincount(ev, weights=-hit, minlength=N) + norm
+    reg = L.tagged(name).values.astype(np.float64)
+    identity = {"parts_nll_vs_parts_sum_max_abs": float(np.abs(recon - parts_nll).max()),
+                "parts_nll_vs_registered_k64": provenance.tolerance_check(parts_nll, reg, top=3)}
+    if not identity["parts_nll_vs_registered_k64"].get("strict_pass") or \
+            identity["parts_nll_vs_parts_sum_max_abs"] > IDENTITY_TOL:            # PLAN 23 item 13: hard stop
+        tc = identity["parts_nll_vs_registered_k64"]
+        raise SystemExit(f"STOP (PLAN 23 item 13, guard check): the G-region pass of {name} does not reproduce its "
+                         f"registered array (strict {tc.get('strict_pass')}, max {tc.get('max_abs')}) or its own sum "
+                         f"({identity['parts_nll_vs_parts_sum_max_abs']:.2e}); nothing written; waiting for the user")
     out = {"name": name, "arrays": {}, "n_hits": int(len(hit))}
     for cls in masks:
         a = comp["arrays"][cls]
@@ -578,10 +604,55 @@ def g_region_arrays(name: str, model, val, val_cpu) -> dict:
     ta = provenance.save_tagged(sdir / "g_region_normalisation.npy", norm, pts, L.live_machine(),
                                 label=f"{L.stage()}/{name}:g_region:normalisation")
     out["arrays"]["normalisation"] = {"path": paths.portable(ta.path), "sha256": ta.sha256}
-    recon = np.bincount(ev, weights=-hit, minlength=N) + norm
-    reg = L.tagged(name).values.astype(np.float64)
-    out["identity_check"] = {"parts_nll_vs_parts_sum_max_abs": float(np.abs(recon - parts_nll).max()),
-                             "parts_nll_vs_registered_k64": provenance.tolerance_check(parts_nll, reg, top=3)}
+    out["identity_check"] = identity
+    L.write_json(out, marker)
+    return out
+
+
+G_STAR = "flagged_star"
+IDENTITY_TOL = 1e-4                 # nat per event: parts sum vs parts NLL (the H200 markers: <= 1.1e-5)
+STAR_TOL = 1e-9                     # nat per event: flagged = flagged* + (low_abar and not flagged*), float64 sums
+G_STAR_DEFINITION = ("flagged* = deep (z' >= 1221 mm) or last ring or first / last z-bin, by the hit centre: the hits "
+                     "flagged for a reason other than low acceptance alone (REVIEW 10.3 item 3, R6); the waiver line "
+                     "of G-region for the class low_abar applies the rule of G-region with flagged* in place of "
+                     "flagged")
+
+
+def g_region_star_arrays(name: str, comp: dict, val_cpu) -> dict:
+    """REVIEW 10.5 R6: the per-event hit-term contribution of the flagged* cells (G_STAR_DEFINITION) from the same
+    per-hit values as the G-region classes, saved as a new tagged array (subset "g_region:flagged_star") with its own
+    marker g_region_star.json; the existing arrays and marker are not touched. The marker records whether the
+    flagged class recomputed in this pass equals the stored one bit for bit, and the identity
+    flagged = flagged* + (low_abar and not flagged*)."""
+    base = L.live()["points"]
+    sdir = L.scores_dir(name)
+    marker = sdir / "g_region_star.json"
+    if marker.exists():
+        return L.read_json(marker)
+    N, ev, masks = _g_region_static(val_cpu)
+    star = masks["deep"] | masks["border_ring"] | masks["border_zbin"]
+    hit = comp["hit"]
+    a = np.bincount(ev, weights=-hit * star, minlength=N)
+    low_only = np.bincount(ev, weights=-hit * (masks["low_abar"] & ~star), minlength=N)
+    stored = None
+    gr = L.read_json(sdir / "g_region.json")
+    if gr:
+        st = provenance.load_tagged(sdir / "g_region_flagged.npy", expect_machine_id=L.live_machine().id)
+        stored = bool(st.sha256 == gr["arrays"]["flagged"]["sha256"]
+                      and np.array_equal(st.values, comp["arrays"]["flagged"]))
+    resid = float(np.abs(comp["arrays"]["flagged"] - a - low_only).max())
+    if stored is False or resid > STAR_TOL:                                       # PLAN 23 item 13: hard stop
+        raise SystemExit(f"STOP (PLAN 23 item 13, guard check): {name}: the flagged class recomputed for the flagged* "
+                         f"array is not the stored one bit for bit ({stored}) or the identity fails ({resid:.2e}); "
+                         "nothing written; waiting for the user")
+    pts = provenance.points_tag(grid=base["grid"], K=base["K"], split_fingerprint=base["split_fingerprint"],
+                                seed=base["seed"], batch=base["batch"], subset=f"g_region:{G_STAR}")
+    ta = provenance.save_tagged(sdir / f"g_region_{G_STAR}.npy", a, pts, L.live_machine(),
+                                label=f"{L.stage()}/{name}:g_region:{G_STAR}")
+    out = {"name": name, "class": G_STAR, "definition": G_STAR_DEFINITION,
+           "array": {"path": paths.portable(ta.path), "sha256": ta.sha256},
+           "flagged_recomputed_bit_identical_to_stored": stored,
+           "max_abs_flagged_minus_star_minus_low_only": resid}
     L.write_json(out, marker)
     return out
 
@@ -614,6 +685,78 @@ def fisher_k_a6b(name: str, model, tr) -> dict:
     return out
 
 
+@contextlib.contextmanager
+def _time_registry_parts(rec: dict, name: str):
+    """Time the two guard parts inside registry.evaluate (K = 1024 + bulk; mass monitors) by wrapping the two module
+    functions for the duration of the call. Timing only: the wrapped functions are called unchanged."""
+    orig_g, orig_m = registry._guard_arrays, registry._mass
+
+    def g(*a, **k):
+        with L.PartTimer("guard K=1024 + bulk", rec, name):
+            return orig_g(*a, **k)
+
+    def m(*a, **k):
+        with L.PartTimer("guard mass monitors", rec, name):
+            return orig_m(*a, **k)
+    registry._guard_arrays, registry._mass = g, m
+    try:
+        yield
+    finally:
+        registry._guard_arrays, registry._mass = orig_g, orig_m
+
+
+def guard_run(name: str, sets, extras) -> Optional[dict]:
+    """Guard columns (registry.evaluate(guards=True)) and G-region arrays of one run, if missing, with a timing record
+    per part (STATUS R5): wall and CPU seconds, page faults, load, available memory, swap, pressure-stall figures.
+    The record goes to the log and to guard_timing_<UTC>.json next to the run's arrays (not to decisions.json, so
+    results.json does not depend on it); a part longer than 60 s is logged as a WARNING. Timing fields only: no array
+    and no registry number changes."""
+    need_row = L.registered_row(name, need_guards=True) is None
+    need_gr = not (L.scores_dir(name) / "g_region.json").exists()
+    need_star = not (L.scores_dir(name) / "g_region_star.json").exists()        # REVIEW 10.5 R6 (new arrays only)
+    if not (need_row or need_gr or need_star):
+        return None
+
+    def job():
+        rec = {}
+        dev = L.common.DEVICE
+        va = sets["val"].to(dev)
+        val = registry.ValidationSet(va, extras["val"]["event_number"])
+        model = L.rebuild(name, dev)
+        mp = L.out_dir() / name / "model.pt"
+        if need_row:
+            row0 = L.registered_row(name)
+            with L.PartTimer("registry evaluate (total)", rec, name), _time_registry_parts(rec, name):
+                registry.evaluate(model, name, L.stage(), val,
+                                  meta={"k": row0["k"], "seed": row0.get("seed"), "checkpoint": str(mp),
+                                        "config_hash": row0.get("config_hash"), "smoke": L.CTX.smoke,
+                                        "trained_on": {"machine_id": L.MACHINE_ID, "source": "trained on this machine"},
+                                        "notes": "guard columns (G-K, G-bulk, G-mass) of a Track A run"},
+                                  guards=True)
+            inner = sum(rec[k]["wall_s"] for k in ("guard K=1024 + bulk", "guard mass monitors") if k in rec)
+            rec["K=64 metric of record and row (total minus guard parts)"] = {
+                "wall_s": round(rec["registry evaluate (total)"]["wall_s"] - inner, 3)}
+        if need_gr or need_star:
+            comp = g_region_compute(model, va, sets["val"], timing=rec, run=name)
+            if need_gr:
+                g_region_arrays(name, model, va, sets["val"], comp=comp)
+            if need_star:
+                g_region_star_arrays(name, comp, sets["val"])
+            del comp
+        del model, va, val
+        return rec
+
+    rec = L.on_gpu(f"guards {name}", job)
+    slow = {k: v["wall_s"] for k, v in rec.items() if v.get("wall_s", 0) > L.SLOW_PART_S}
+    log(f"[{name}] guard timing: " + ", ".join(f"{k} {v['wall_s']:.1f} s" for k, v in rec.items()))
+    f = L.scores_dir(name) / f"guard_timing_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
+    if not f.exists():
+        L.write_json({"run": name, "utc": datetime.now(timezone.utc).isoformat(timespec="seconds"), "parts": rec,
+                      "slow_parts": slow, "threshold_s": L.SLOW_PART_S,
+                      "note": "timing fields only (STATUS R5); no array or registry number depends on them"}, f)
+    return rec
+
+
 def phase_guards():
     targets, pairs, passing = guard_targets()
     note_decision("guard_targets", {"rungs_passing_keep_or_equal": passing, "runs": targets, "pairs": pairs,
@@ -621,30 +764,7 @@ def phase_guards():
     log(f"guards: {len(targets)} runs ({targets})")
     sets, extras = L.data_cpu()
     for name in targets:
-        need_row = L.registered_row(name, need_guards=True) is None
-        need_gr = not (L.scores_dir(name) / "g_region.json").exists()
-        if not (need_row or need_gr):
-            continue
-
-        def job(name=name, need_row=need_row, need_gr=need_gr):
-            dev = L.common.DEVICE
-            va = sets["val"].to(dev)
-            val = registry.ValidationSet(va, extras["val"]["event_number"])
-            model = L.rebuild(name, dev)
-            mp = L.out_dir() / name / "model.pt"
-            if need_row:
-                row0 = L.registered_row(name)
-                registry.evaluate(model, name, L.stage(), val,
-                                  meta={"k": row0["k"], "seed": row0.get("seed"), "checkpoint": str(mp),
-                                        "config_hash": row0.get("config_hash"), "smoke": L.CTX.smoke,
-                                        "trained_on": {"machine_id": L.MACHINE_ID, "source": "trained on this machine"},
-                                        "notes": "guard columns (G-K, G-bulk, G-mass) of a Track A run"},
-                                  guards=True)
-            if need_gr:
-                g_region_arrays(name, model, va, sets["val"])
-            del model, va, val
-
-        L.on_gpu(f"guards {name}", job)
+        guard_run(name, sets, extras)
     a6b = "A6b_s0"
     if L.done_marker(L.out_dir() / a6b / "done.json") is not None and \
             not (L.out_dir() / "fisher" / f"{a6b}_sh_rk.json").exists():
@@ -855,11 +975,16 @@ def phase_warmstart_rerun():
     rec = decisions().get("warmstart_rerun") or {"superseded": {}, "dependent": {}, "listed": listed}
     sup = dict(rec.get("superseded") or {})
 
+    def in_force(n: str) -> str:
+        """REVIEW 9.5 Rm1 (aligned with C8-4): a recorded re-run stands for its original only if it is registered."""
+        r = sup.get(n)
+        return r if (r is not None and L.registered_row(r) is not None) else n
+
     def rerun(name: str, lr=None, reason="listed by warmstart-check"):
         sp = _spec_of(name)
         kw = {k: v for k, v in sp.kwargs.items() if k != "fit_to_scale_floor"}     # always fit_to version 3
         new = replace(sp, name=name + "_ws", kwargs=kw, lr=(lr if lr is not None else sp.lr),
-                      comparator=sup.get(sp.comparator, sp.comparator),
+                      comparator=in_force(sp.comparator) if sp.comparator else sp.comparator,
                       notes=f"warm-start re-run of {name} (PLAN 17.11; {reason}); fit_to version 3")
         res = L.run_spec(new)
         sup[name] = new.name
@@ -873,10 +998,20 @@ def phase_warmstart_rerun():
     lr_net = (L.read_json(L.plr_file(), {}) or {}).get("lr_net")
     if pilots:
         net_p = plr_specs()[1]
-        new_lr, tab = _plr_decide({sp.lr: sup.get(sp.name, sp.name) for sp in net_p})
+        new_lr, tab = _plr_decide({sp.lr: in_force(sp.name) for sp in net_p})
         rec["lr_net_after_rerun"] = {"lr_net_before": lr_net, "lr_net_after": new_lr, "table": tab}
         note_decision("warmstart_rerun", rec)
-        if new_lr is not None and new_lr != lr_net:
+        under_a = [p for p in pilots if ((chk.get("runs") or {}).get(p) or {}).get("rule_a_below_floor")]
+        if new_lr is not None and new_lr != lr_net and not under_a:
+            # PLAN 20 item 3: replicate re-runs (no pilot target below the floor) changed lr_net. The change is not
+            # caused by the fix: this branch stops, the re-run pilots are not used, the rate stays, the user decides.
+            rec["lr_net_after_rerun"].update({"escalated": True, "status": "awaiting the user", "not_used": pilots,
+                                              "reason": "replicate re-runs of the network pilots (no target column "
+                                                        "below the floor) changed lr_net"})
+            note_decision("warmstart_rerun", rec)
+            log(f"warmstart-rerun: lr_net would change {lr_net} -> {new_lr} on replicate re-runs (no column below the "
+                "floor): ESCALATED to the user; the re-run pilots are not used and no dependent run is started")
+        elif new_lr is not None and new_lr != lr_net:
             for n in _net_runs_executed():
                 if n not in listed and not n.startswith("plr_A2n_"):
                     rec.setdefault("dependent", {})[n] = f"lr_net changed from {lr_net} to {new_lr}"
@@ -884,7 +1019,8 @@ def phase_warmstart_rerun():
     todo = [n for n in _net_runs_executed() if not n.startswith("plr_A2n_")
             and (n in listed or n in (rec.get("dependent") or {}))]
     lr_changed = bool((rec.get("lr_net_after_rerun") or {}).get("lr_net_after") not in
-                      (None, (rec.get("lr_net_after_rerun") or {}).get("lr_net_before")))
+                      (None, (rec.get("lr_net_after_rerun") or {}).get("lr_net_before"))
+                      and not (rec.get("lr_net_after_rerun") or {}).get("escalated"))
     for n in todo:
         rerun(n, lr=(lr_net if lr_changed else None),
               reason="listed by warmstart-check" if n in listed else rec["dependent"][n])
@@ -892,6 +1028,64 @@ def phase_warmstart_rerun():
     note_decision("warmstart_rerun", rec)
     log(f"warmstart-rerun: superseded {sup}")
     phase_guards()
+
+
+# ------------------------------------------------------------------------- additions of 26 Nov 2026 (PLAN 20) --------
+MIXTURE_RUNGS = ("A10", "A10-2", "A10-4", "A10-5", "A10g")
+CONDITIONAL_RULE = {
+    "A2c_x2": "run only if a doubled-step rerun pair (<rung>_s<seed>_x2 vs A2s_s<seed>_x2) passes the keep rule or the "
+              "one-seed equal-NLL rule (user decision of 26 Nov 2026, PLAN 20 item 1); then for the seeds concerned",
+    "A2c6k": "run only if a mixture rung (A10, A10-2, A10-4, A10-5, A10g; any seed) passes the keep rule or the "
+             "one-seed equal-NLL rule against A2s of its seed (PLAN 20 item 1); then for the seeds concerned"}
+
+
+def evaluate_conditional_controls() -> dict:
+    """The PLAN 20 rule evaluated on the registered Stage-1 arrays (paired deltas, this machine)."""
+    out = {}
+    pairs = {"A2c_x2": [(f"{r}_s{s}_x2", f"A2s_s{s}_x2", s) for r in PRIMARIES for s in (0, 1)],
+             "A2c6k": [(f"{r}_s{s}", f"A2s_s{s}", s) for r in MIXTURE_RUNGS for s in (0, 1)]}
+    for ctl, cand in pairs.items():
+        rows, seeds = {}, []
+        for run, comp, s in cand:
+            if L.registered_row(run) is None or L.registered_row(comp) is None:
+                continue
+            p = L.paired(run, comp)
+            k, e = keep_rule(p), equal_rule_one(p)
+            rows[run] = {"vs": comp, "paired": L.pd(p), "keep": k, "equal_one_seed": e}
+            if (k or e) and s not in seeds:
+                seeds.append(s)
+        out[ctl] = {"rule": CONDITIONAL_RULE[ctl], "evaluated_pairs": rows, "triggered": bool(seeds),
+                    "seeds": sorted(seeds)}
+    return out
+
+
+def a2c_x2_specs(seeds) -> list:
+    return [Spec(f"A2c_x2_s{s}", "A2c_x2", "component", dict(variant="survival_exact", start=a2s(s)), s, "poly",
+                 "control", comparator=f"A2s_s{s}_x2", steps=8000,
+                 notes="conditional control (PLAN 20 item 1): A2s continued for the doubled step budget of a rerun "
+                       "pair") for s in seeds]
+
+
+def a2c6k_specs(seeds) -> list:
+    return [Spec(f"A2c6k_s{s}", "A2c6k", "component", dict(variant="survival_exact", start=a2s(s)), s, "poly",
+                 "control", comparator=f"A2s_s{s}", steps=6000,
+                 notes="conditional control (PLAN 20 item 1): A2s continued for the 6000-step budget of the "
+                       "mixtures") for s in seeds]
+
+
+def phase_conditional_controls():
+    """Evaluate the PLAN 20 rule, record it, and train a control only if its condition is met."""
+    out = evaluate_conditional_controls()
+    note_decision("conditional_controls", out)
+    for ctl, mk in (("A2c_x2", a2c_x2_specs), ("A2c6k", a2c6k_specs)):
+        if out[ctl]["triggered"]:
+            log(f"conditional control {ctl}: TRIGGERED for seeds {out[ctl]['seeds']}")
+            for sp in mk(out[ctl]["seeds"]):
+                L.run_spec(sp)
+        else:
+            log(f"conditional control {ctl}: not triggered (" + "; ".join(
+                f"{n} {v['paired']['mean'] * 1e4:+.2f} +- {v['paired']['se'] * 1e4:.2f}"
+                for n, v in out[ctl]["evaluated_pairs"].items()) + ")")
 
 
 def phase_report():
@@ -954,22 +1148,76 @@ def stage2_specs(kept: list) -> list:
 
 STAGE2_APPROVAL = "stage2_approval.json"
 REPLICATION_READINGS = {"literal": "kept_and_replicated", "two_se": "kept_and_replicated_alternative_2se"}
+WAIVABLE = {"G-region": ("low_abar",)}            # REVIEW 10.3 item 3 / R6: the waiver line uses flagged*
+LR_NET_ESCALATION_DECISIONS = ("keep_rate_of_record",)
+
+
+def _nonempty(x) -> bool:
+    return isinstance(x, str) and bool(x.strip())
+
+
+def check_stage2_decisions(ud: dict, where: str) -> dict:
+    """Format of the user's decisions on the Stage-2 content carried by the approval file (PLAN 20; REVIEW 10.5 R1):
+
+        "excluded": {"A9r": {"reason": "...", "date": "2026-11-26"}},
+        "waivers": [{"rung": "A9", "guard": "G-region", "class": "low_abar", "basis": "...",
+                     "subject_to": "Gate 1", "date": "2026-11-26"}],
+        "lr_net_escalation": null        # or {"decision": "keep_rate_of_record", "date": ..., "reason": ...}
+
+    Returns {"excluded", "waivers", "lr_net_escalation"}; SystemExit on any malformed entry."""
+    out = {"excluded": ud.get("excluded") or {}, "waivers": ud.get("waivers") or [],
+           "lr_net_escalation": ud.get("lr_net_escalation")}
+    if not isinstance(out["excluded"], dict):
+        raise SystemExit(f"{where}: 'excluded' maps rung -> {{'reason': ..., 'date': ...}}")
+    for r, e in out["excluded"].items():
+        if not (isinstance(e, dict) and _nonempty(e.get("reason")) and _nonempty(e.get("date"))):
+            raise SystemExit(f"{where}: the exclusion of {r} needs a 'reason' and a 'date': {e}")
+    for w in out["waivers"]:
+        if not (isinstance(w, dict) and _nonempty(w.get("rung")) and _nonempty(w.get("date"))
+                and _nonempty(w.get("basis")) and _nonempty(w.get("subject_to"))):
+            raise SystemExit(f"{where}: every waiver needs 'rung', 'guard', 'class', 'basis', 'subject_to' and "
+                             f"'date': {w}")
+        if w.get("guard") not in WAIVABLE:
+            raise SystemExit(f"{where}: only these guards can be waived: {sorted(WAIVABLE)} (got {w.get('guard')})")
+        if w.get("class") not in WAIVABLE[w["guard"]]:
+            raise SystemExit(f"{where}: a {w['guard']} waiver is for one of the classes {list(WAIVABLE[w['guard']])} "
+                             f"(got {w.get('class')})")
+    x = out["lr_net_escalation"]
+    if x is not None and not (isinstance(x, dict) and x.get("decision") in LR_NET_ESCALATION_DECISIONS
+                              and _nonempty(x.get("date")) and _nonempty(x.get("reason"))):
+        raise SystemExit(f"{where}: lr_net_escalation needs 'decision' in {LR_NET_ESCALATION_DECISIONS}, 'date' and "
+                         f"'reason' (any other decision is implemented by hand): {x}")
+    return out
+
+
+def lr_net_escalation_pending(appr: Optional[dict] = None) -> bool:
+    """PLAN 20 item 3: re-run pilots changed lr_net without a column below the floor and the user's decision (the
+    approval key 'lr_net_escalation') is not on file."""
+    x = ((decisions().get("warmstart_rerun") or {}).get("lr_net_after_rerun") or {})
+    return bool(x.get("escalated")) and (appr or {}).get("lr_net_escalation") is None
 
 
 def stage2_approval() -> tuple:
-    """Review B5: Stage 2 runs only with an approval file written AFTER the user has seen the Stage-1 table and
-    approved it (created by the orchestrator, never by this code), in this stage's directory:
+    """Review B5 and REVIEW 10.5 R1: Stage 2 runs only with an approval file written AFTER the user has seen the
+    Stage-1 table and approved it (created by the orchestrator, never by this code), in this stage's directory:
 
         runs/<stage>/stage2_approval.json
         {"results_json_sha256": "<SHA-256 of the results.json the user saw>",
          "replication_reading": "literal" | "two_se",      # the user's choice (review ruling 5, [confirm])
-         "kept_and_replicated": ["A7", ...],               # the list the user approved, under that reading
+         "kept_and_replicated": ["A9", "A9r"],             # the computed list, under that reading (unchanged)
+         "a11_content": ["A9"],                            # = computed list minus the exclusions
+         "excluded": {"A9r": {"reason": "...", "date": "2026-11-26"}},
+         "waivers": [{"rung": "A9", "guard": "G-region", "class": "low_abar", "basis": "...",
+                      "subject_to": "Gate 1", "date": "2026-11-26"}],
+         "lr_net_escalation": null,                        # the user's decision if warmstart-rerun escalated
+         "a11p_parameters": {"short_event_share": 0.5, "if_vetoed": "fit_Z"},   # optional; these are the defaults
          "approved_utc": "2026-11-26T10:00:00Z", "approved_by": "user (recorded by the orchestrator)",
          "notes": "..."}
 
     Refused if the file is absent, if results.json is absent or its SHA-256 differs (the table was recomputed after
-    the approval), if the reading is unknown, or if the approved list differs from the list results.json gives
-    under that reading. Returns (approval, kept list, results.json SHA-256)."""
+    the approval), if the reading is unknown, if the approved list differs from the list results.json gives under
+    that reading, or if the content check (stage2_content_check) fails. Returns (approval, kept list, results.json
+    SHA-256, content record)."""
     rf, af = L.out_dir() / "results.json", L.out_dir() / STAGE2_APPROVAL
     if not rf.exists():
         raise SystemExit("stage2 refused: the Stage-1 report (results.json) does not exist")
@@ -994,7 +1242,92 @@ def stage2_approval() -> tuple:
     for k in ("approved_utc", "approved_by"):
         if not appr.get(k):
             raise SystemExit(f"stage2 refused: the approval file has no '{k}'")
-    return appr, kept, sha
+    content = stage2_content_check(appr, res, kept)
+    content["a11p_parameters"] = a11p_parameters(appr)        # format checked now; used by the A11p part
+    return appr, kept, sha, content
+
+
+def _rule_guard_blocks(res: dict, rung: str) -> dict:
+    """The Stage-1 guard blocks of the poly pairs of ``rung`` that the rules use (not the originals replaced by a
+    rerun pair, not superseded warm starts)."""
+    not_used = {c["run"] for v in (res.get("primaries") or {}).values()
+                for c in (v.get("originals_not_used") or {}).values()}
+    not_used |= set((res.get("superseded_warm_start") or {}).keys())
+    return {k: g for k, g in (res.get("guards") or {}).items()
+            if L.rung_of(g["run"]) == rung and g["run"] not in not_used}
+
+
+def _failed_guards(g: dict) -> list:
+    return [n for n, ok in (("G-K", g["G-K"]["persistence"]["passed"]),
+                            ("G-bulk", g["G-bulk"]["persistence"]["passed"]),
+                            ("G-region", (g.get("G-region") or {}).get("passed"))) if not ok]
+
+
+def stage2_content_check(appr: dict, res: dict, kept: list, star_check=None) -> dict:
+    """REVIEW 10.5 R1 and PLAN 20: refused unless the content is the computed kept-and-replicated list minus the
+    user's exclusions (every other rung of the list excluded with a reason and a date, no exclusion outside it);
+    every content rung whose guard block in results.json fails a guard has a waiver for exactly that guard, and its
+    waiver line (flagged*, REVIEW 10.5 R6, computed now from the tagged arrays) covers the failure on every pair the
+    rules use; no waiver exists without such a failure; the content merges without conflict. ``star_check(run, comp,
+    class)`` defaults to run_m2a_report.g_region_star_check."""
+    if star_check is None:
+        import run_m2a_report as R
+        star_check = R.g_region_star_check
+    for k in ("a11_content", "excluded", "waivers"):
+        if k not in appr:
+            raise SystemExit(f"stage2 refused: the approval file has no key '{k}' (write [] / {{}} if empty)")
+    a = check_stage2_decisions(appr, "stage2 approval")
+    content = appr.get("a11_content")
+    if not isinstance(content, list):
+        raise SystemExit("stage2 refused: 'a11_content' must be a list of rungs")
+    stray = [r for r in content if r not in kept]
+    if stray:
+        raise SystemExit(f"stage2 refused: content rungs {stray} are not in the kept-and-replicated list {kept}")
+    missing = [r for r in kept if r not in content and r not in a["excluded"]]
+    if missing:
+        raise SystemExit(f"stage2 refused: kept-and-replicated rungs {missing} are neither in the content nor excluded "
+                         "with a reason")
+    odd = [r for r in a["excluded"] if r not in kept or r in content]
+    if odd:
+        raise SystemExit(f"stage2 refused: exclusions {odd} are not rungs of the list {kept} outside the content")
+    want = [r for r in kept if r not in a["excluded"]]
+    if sorted(content) != sorted(want):                       # implied by the three checks; stated as the rule
+        raise SystemExit(f"stage2 refused: the content {content} is not the computed list minus the exclusions {want}")
+    try:
+        stage2_specs(content)
+    except SystemExit as err:
+        raise SystemExit(f"stage2 refused: the content does not merge: {err}")
+    waived = {}
+    for w in a["waivers"]:
+        if w["rung"] not in content:
+            raise SystemExit(f"stage2 refused: a waiver names {w['rung']}, which is not in the content {content}")
+        if (w["rung"], w["guard"]) in waived:
+            raise SystemExit(f"stage2 refused: more than one waiver of {w['guard']} for {w['rung']}")
+        waived[(w["rung"], w["guard"])] = w
+    checks = {}
+    failing = set()
+    for r in content:
+        blocks = _rule_guard_blocks(res, r)
+        if not blocks:
+            raise SystemExit(f"stage2 refused: no guard data for {r} in results.json (guards phase)")
+        for key, g in blocks.items():
+            for gname in _failed_guards(g):
+                failing.add((r, gname))
+                w = waived.get((r, gname))
+                if w is None:
+                    raise SystemExit(f"stage2 refused: {key}: {gname} failed and the user has neither excluded {r} "
+                                     "nor waived that guard explicitly")
+                chk = {**star_check(g["run"], g["vs"], w["class"]), "g_region_passed": False, "guard": gname}
+                checks.setdefault(r, {})[key] = chk
+                if not chk.get("covered") or chk.get("class") != w["class"]:
+                    raise SystemExit(f"stage2 refused: {key}: the {gname} waiver for the class {w['class']} does not "
+                                     f"cover the failure (flagged* line: {chk or 'missing - run the guards phase'})")
+    extra = [k for k in waived if k not in failing]
+    if extra:
+        raise SystemExit(f"stage2 refused: waivers without a failure of that guard: {extra}")
+    return {"computed_kept_and_replicated": kept, "replication_reading": appr["replication_reading"],
+            "excluded": a["excluded"], "waivers": a["waivers"], "lr_net_escalation": a["lr_net_escalation"],
+            "content": content, "waiver_checks": checks}
 
 
 def _resolved(name: str) -> bool:
@@ -1007,11 +1340,13 @@ def _resolved(name: str) -> bool:
     return L.diverged_marker(name) is not None and bool((L.diagnosis(name) or {}).get("valid"))
 
 
-def stage2_preconditions() -> None:
-    """User decisions of 25 Nov 2026 and review R6: refused while (i) A2c_s0 / A2c_s1 are not finished, (ii) the
-    warm-start check has not run or a run it listed has no finished re-run, (iii) a primary, base, control or rerun
-    run diverged and has no valid diagnosis, or (iv) results.json differs from the report recomputed now from the
-    registered arrays (only a table that follows from the arrays can be approved)."""
+def stage2_preconditions(appr: Optional[dict] = None) -> None:
+    """User decisions of 25 / 26 Nov 2026 and review R6: refused while (i) A2c_s0 / A2c_s1 are not finished, (ii)
+    the warm-start check has not run or a run it listed has no finished re-run, (iii) a Stage-1 run diverged and has
+    no valid diagnosis, (iv) an lr_net escalation awaits the user, (v) the conditional controls are not evaluated
+    (or their record differs from the re-evaluation, or a triggered control is not finished), or (vi) results.json
+    differs from the report recomputed now from the registered arrays (only a table that follows from the arrays
+    can be approved)."""
     import run_m2a_report as R
     miss = [sp.name for sp in a2c_specs() if not _resolved(sp.name)]
     if miss:
@@ -1026,9 +1361,24 @@ def stage2_preconditions() -> None:
         raise SystemExit(f"stage2 refused: warm-start re-runs missing, or diverged without a valid diagnosis, for "
                          f"{open_}; run `run_m2a.py warmstart-rerun`, or for a diverged re-run obtain the diagnosis")
     waiting = [n for n, v in (decisions().get("diverged") or {}).items()
-               if v.get("status") == "diverged - awaiting diagnosis" and not (L.diagnosis(n) or {}).get("valid")]
+               if v.get("status") == "diverged - awaiting diagnosis" and not (L.diagnosis(n) or {}).get("valid")
+               and not L.is_stage2_run(n)]
     if waiting:
         raise SystemExit(f"stage2 refused: diverged runs await an independent diagnosis: {waiting}")
+    if lr_net_escalation_pending(appr):
+        raise SystemExit("stage2 refused: the change of lr_net by replicate re-runs of the network pilots awaits the "
+                         "user (PLAN 20 item 3; decisions.json warmstart_rerun.lr_net_after_rerun)")
+    cc = decisions().get("conditional_controls")
+    if cc is None:
+        raise SystemExit("stage2 refused: run `run_m2a.py conditional-controls` first (PLAN 20 item 1)")
+    if json.loads(json.dumps(L._jsonable(evaluate_conditional_controls()))) != cc:
+        raise SystemExit("stage2 refused: the recorded conditional-control decision differs from its re-evaluation "
+                         "on the registered arrays; re-run `run_m2a.py conditional-controls`")
+    trig = [sp.name for ctl, mk in (("A2c_x2", a2c_x2_specs), ("A2c6k", a2c6k_specs)) if cc[ctl]["triggered"]
+            for sp in mk(cc[ctl]["seeds"]) if not _resolved(sp.name)]
+    if trig:
+        raise SystemExit(f"stage2 refused: triggered conditional controls not finished (or diverged without a valid "
+                         f"diagnosis): {trig}")
     on_disk = json.loads((L.out_dir() / "results.json").read_text())
     now = json.loads(paths.scrub_str(json.dumps(L._jsonable(R.collect(with_guards=True)))))
     if now != on_disk:
@@ -1045,27 +1395,436 @@ def _lr_net_or_none():
         return None
 
 
-def phase_stage2():
-    appr, kept, sha = stage2_approval()
-    stage2_preconditions()
+# ------------------------------------------------------------------------- stage 2: memory, guards, A11p ---------
+MEMORY_HEADROOM = 0.9           # a k_train = 64 step must stay below 90 % of the job's cap (REVIEW 10.5 R2)
+
+
+def memory_probe_k64(name: str) -> dict:
+    """REVIEW 10.5 R2: before the first k_train = 64 fit, the peak GPU memory of one training step of the fitted
+    structure ``name`` at k_train = 64 on the 256 training events with the most hits (forward and backward, train
+    and validation sets resident as in sfm.train.fit), against the job's memory cap (sfm.machine.caps; the device
+    memory where no cap applies). Trains nothing; the model is discarded."""
+    rec = decisions().get("stage2_memory_probe")
+    if rec is not None:
+        return rec
+    sets, _ = L.data_cpu()
+
+    def job():
+        dev = L.common.DEVICE
+        tr, va = sets["train"].to(dev), sets["val"].to(dev)
+        model = L.rebuild(name, dev).train()
+        n_hits = (tr.off[1:] - tr.off[:-1])
+        idx = torch.argsort(n_hits, descending=True)[:256]
+        torch.cuda.synchronize()
+        torch.cuda.reset_peak_memory_stats()
+        b = tr.batch(idx)
+        gen = torch.Generator(device=dev).manual_seed(0)
+        nll, _ = metric.event_nll(model, b, tr.box, 64, gen)
+        nll.mean().backward()
+        torch.cuda.synchronize()
+        peak = torch.cuda.max_memory_allocated() / 2 ** 30
+        hits = int(n_hits[idx].sum())
+        del model, tr, va, b, nll
+        return {"peak_gb": peak, "hits_in_batch": hits}
+    out = L.on_gpu("memory probe k_train 64", job)
+    caps = machine.caps()
+    limit = caps.get("gpu_mem_cap_gb") or caps.get("device_total_gb")
+    out.update({"structure": name, "k_train": 64, "batch": 256, "cap_gb": caps.get("gpu_mem_cap_gb"),
+                "limit_gb": limit, "headroom": MEMORY_HEADROOM,
+                "fits": bool(limit is not None and out["peak_gb"] <= MEMORY_HEADROOM * limit)})
+    note_decision("stage2_memory_probe", out)
+    log(f"memory probe (k_train 64, batch 256, {out['hits_in_batch']} hits): peak {out['peak_gb']:.2f} GB, limit "
+        f"{limit} GB -> {'fits' if out['fits'] else 'DOES NOT FIT'}")
+    return out
+
+
+def stage2_guard_pairs(specs) -> list:
+    """(run, comparator) of every registered Stage-2 run: A11 / A11k vs A2s of the same seed, A11n vs the A2n run in
+    force, A11p vs A11 of the same seed; the guard columns of Stage 1 plus the flagged* arrays (REVIEW 10.5 R4)."""
+    return [(sp.name, sp.comparator) for sp in specs
+            if L.registered_row(sp.name) is not None and L.registered_row(sp.comparator) is not None]
+
+
+def phase_stage2_guards(specs, key: str = "stage2_guard_targets") -> None:
+    pairs = stage2_guard_pairs(specs)
+    targets = list(dict.fromkeys(n for pr in pairs for n in pr))
+    note_decision(key, {"runs": targets, "pairs": pairs})
+    log(f"stage2 guards: {len(targets)} runs ({targets})")
+    sets, extras = L.data_cpu()
+    for name in targets:
+        guard_run(name, sets, extras)
+
+
+A11P_THRESHOLD = 0.2e-4             # nat per training event: "removal costs < 0.2" (REVIEW 11.2)
+A11P_N_CANDIDATES = {("A9",): 58}   # REVIEW 11.1: 14 x 3 + 8 x 2 coefficients with k >= 1 for the content A9
+A11P_K, A11P_SEED, A11P_BATCH = 16, 12345, 128
+A11P_DIR = "a11p"
+A11P_U2_REF = (166, 95)             # REVIEW 11.6 (b): N_s <= 95 of 166 short validation events
+A11P_DEFAULTS = {"short_event_share": 0.5, "if_vetoed": "fit_Z"}     # REVIEW 11.6 [confirm]: the reviewer's values
+A11P_IF_VETOED = {"fit_Z": "Z is fitted; Z_0 is recorded and not fitted",
+                  "fit_Z_and_Z0": "Z is fitted, and Z_0 as well (A11pz_s0, A11pz_s1; reported, not a candidate)"}
+
+
+def a11p_parameters(appr: dict) -> dict:
+    """The two [confirm] choices of REVIEW 11 as recorded inputs (approval key 'a11p_parameters', optional): the
+    share x of each registered tolerance the short events may take (screen f_tr Q^S_j < x * 0.2e-4 nat; margin of
+    U1 M = x * 1e-4 / f) and what is fitted when the short events veto coefficients (A11P_IF_VETOED). Defaults: the
+    reviewer's values (x = 1/2, fit Z only). The refit is the A11 procedure (REVIEW 11.5)."""
+    x = appr.get("a11p_parameters") or {}
+    out = {**A11P_DEFAULTS, **x}
+    try:
+        out["short_event_share"] = float(out["short_event_share"])
+    except (TypeError, ValueError):
+        out["short_event_share"] = float("nan")
+    if not (0.0 < out["short_event_share"] <= 1.0) or out["if_vetoed"] not in A11P_IF_VETOED \
+            or set(x) - set(A11P_DEFAULTS) - {"date", "basis"}:
+        raise SystemExit(f"stage2 refused: a11p_parameters: short_event_share in (0, 1], if_vetoed in "
+                         f"{sorted(A11P_IF_VETOED)}, optionally 'date' and 'basis' (got {x})")
+    out["source"] = "approval file" if x else "defaults of REVIEW 11 (the reviewer's values)"
+    return out
+
+
+def a11p_candidates(prov) -> list:
+    """(row, k) for every coefficient with k >= 1, per row from the top (REVIEW 11.1, 11.3)."""
+    return [(n, k) for n in prov.names for k in range(int(prov.deg[n]), 0, -1)]
+
+
+def _nll_events(model, data) -> np.ndarray:
+    """Per-event NLL at the fixed fold points of the screen (K = 16, seed 12345, batch 128, deterministic sums)."""
+    return metric.test_nll(model, data, K=A11P_K, seed=A11P_SEED, batch=A11P_BATCH,
+                           deterministic_sum=True).astype(np.float64)
+
+
+@torch.no_grad()
+def second_difference(prov, i: int, k: int, evaluate, l0: np.ndarray) -> tuple:
+    """REVIEW 11.2: per-event central second and first differences in the coefficient c = coef[i, k] with
+    h = max(0.1 |c|, 1e-3). The coefficient is stored in float32, so the realised steps h+ = fl(c + h) - c and
+    h- = c - fl(c - h) are used: d2 = 2 [(l+ - l0)/h+ + (l- - l0)/h-] / (h+ + h-) (= (l+ - 2 l0 + l-)/h^2 when the
+    steps are equal), d1 = (l+ - l-)/(h+ + h-). The coefficient is restored exactly."""
+    c = float(prov.coef[i, k])
+    h = max(0.1 * abs(c), 1e-3)
+    prov.coef[i, k] = c + h
+    hp = float(prov.coef[i, k]) - c
+    lp = evaluate()
+    prov.coef[i, k] = c - h
+    hm = c - float(prov.coef[i, k])
+    lm = evaluate()
+    prov.coef[i, k] = c
+    if float(prov.coef[i, k]) != c:
+        raise RuntimeError("second_difference: the coefficient was not restored exactly")
+    d2 = 2.0 * ((lp - l0) / hp + (lm - l0) / hm) / (hp + hm)
+    d1 = (lp - lm) / (hp + hm)
+    return c, h, d2, d1
+
+
+def curvature_autodiff(model, prov, coefs: list, data, K: int = A11P_K, seed: int = A11P_SEED,
+                       batch: int = A11P_BATCH) -> dict:
+    """Exact second derivatives d^2 L / dc^2 (L = mean per-event NLL) by automatic differentiation at fixed fold
+    points (generator on the device of ``data``, seeded as test_nll, the batches of test_nll; accumulated batch by
+    batch), for the check of REVIEW 11.2; and the second difference of the same function in float32 evaluation.
+    {"row[k]": {"autodiff", "second_difference", "h", "rel_diff"}}. The agreement is meaningful for coefficients
+    whose curvature is resolved by the float32 per-event values (|H| h^2 well above ~1e-8 nat on a few hundred
+    events); the screen checks the three most resolved candidates."""
+    model.eval()
+
+    def per_event():
+        gen = torch.Generator(device=data.xyz.device).manual_seed(seed)
+        with torch.no_grad(), metric.deterministic():           # reproducible per-event sums (as the screen)
+            return torch.cat([metric.event_nll(model, b, data.box, K, gen)[0] for b in data.batches(batch)])
+    res = {}
+    for n, k in coefs:
+        i = prov.index(n)
+        gen = torch.Generator(device=data.xyz.device).manual_seed(seed)
+        hsum, ntot = 0.0, 0
+        for b in data.batches(batch):
+            with torch.enable_grad():
+                tot = metric.event_nll(model, b, data.box, K, gen)[0].double().sum()
+                g = torch.autograd.grad(tot, prov.coef, create_graph=True)[0]
+                hsum += float(torch.autograd.grad(g[i, k], prov.coef)[0][i, k])
+            ntot += len(b.lnp)
+        hess = hsum / ntot
+        l0 = per_event().double().cpu().numpy()
+        _, h, d2, _ = second_difference(prov, i, k, lambda: per_event().double().cpu().numpy(), l0)
+        fd = float(d2.mean())
+        ok = math.isfinite(hess) and math.isfinite(fd)
+        res[f"{n}[{k}]"] = {"autodiff": hess if math.isfinite(hess) else None, "second_difference": fd, "h": h,
+                            "rel_diff": (abs(fd - hess) / max(abs(hess), 1e-300)) if ok else None}
+    return res
+
+
+CURVATURE_TOL = 0.02                # REVIEW 11.2: agreement of H_j with automatic differentiation within 2 %
+
+
+def curvature_check(model, prov, rows: list, data, want: int = 3, tries: int = 8) -> dict:
+    """REVIEW 11.2 inside the screen: the most resolved candidates (largest |H_j| h_j^2 in the table of seed 0) are
+    compared with automatic differentiation on ``data`` until ``want`` comparisons with a finite derivative exist
+    (an autodiff second derivative can be non-finite through a branch of the model that the second difference does
+    not see; it is recorded and skipped). passed = ``want`` finite comparisons, each within CURVATURE_TOL."""
+    order = sorted(rows, key=lambda r: -abs(r["H"]) * r["h"] ** 2)[:tries]
+    out = {}
+    for r in order:
+        out.update(curvature_autodiff(model, prov, [(r["row"], r["k"])], data))
+        if sum(1 for v in out.values() if v["rel_diff"] is not None) >= want:
+            break
+    fin = [v for v in out.values() if v["rel_diff"] is not None]
+    return {"coefficients": out, "n_finite": len(fin), "tolerance": CURVATURE_TOL,
+            "passed": bool(len(fin) >= want and all(v["rel_diff"] <= CURVATURE_TOL for v in fin))}
+
+
+def a11p_screen_seed(name: str, model, tr, short: np.ndarray, share: float) -> dict:
+    """The table of REVIEW 11.7 item 1 for one seed: H_j, Q_j = 0.5 |H_j| c_j^2, -g_j c_j, H^S_j, Q^S_j, f_tr Q^S_j and
+    the two pass flags, for every candidate; the model is left bit for bit as it was."""
+    base = model.base if hasattr(model, "base") else model
+    prov = base.provider
+    model.eval()
+    w0 = provenance.weights_sha256(model.state_dict())
+    l0 = _nll_events(model, tr)
+    f_tr = float(short.mean())
+    rows = []
+    for n, k in a11p_candidates(prov):
+        c, h, d2, d1 = second_difference(prov, prov.index(n), k, lambda: _nll_events(model, tr), l0)
+        H, HS, g = float(d2.mean()), float(d2[short].mean()), float(d1.mean())
+        Q, QS = 0.5 * abs(H) * c * c, 0.5 * abs(HS) * c * c
+        rows.append({"row": n, "k": k, "c": c, "h": h, "H": H, "Q": Q, "minus_g_c": -g * c, "H_S": HS, "Q_S": QS,
+                     "f_tr_Q_S": f_tr * QS, "pass_registered": bool(Q < A11P_THRESHOLD),
+                     "pass_short": bool(f_tr * QS < share * A11P_THRESHOLD)})
+    if provenance.weights_sha256(model.state_dict()) != w0:
+        raise RuntimeError(f"a11p screen: the weights of {name} changed during the screen")
+    return {"run": name, "n_train": int(len(l0)), "n_short": int(short.sum()), "f_tr": f_tr,
+            "L": float(l0.mean()), "L_S": float(l0[short].mean()), "n_params": int(model.n_params())
+            if hasattr(model, "n_params") else None, "rows": rows}
+
+
+def a11p_select(tables: dict, flags: tuple) -> list:
+    """REVIEW 11.3 / 11.4: a coefficient passes if all ``flags`` hold on every seed; per row from the top, drop while
+    the coefficient passes and stop at the first that does not. Returns [[row, k], ...]."""
+    seeds = sorted(tables)
+    by = {s: {(r["row"], r["k"]): r for r in tables[s]["rows"]} for s in seeds}
+    order = [(r["row"], r["k"]) for r in tables[seeds[0]]["rows"]]
+    stopped, out = set(), []
+    for n, k in order:
+        if n in stopped:
+            continue
+        if all(all(by[s][(n, k)][f] for f in flags) for s in seeds):
+            out.append([n, k])
+        else:
+            stopped.add(n)
+    return out
+
+
+def prune_of(Z: list, prov_deg: dict) -> dict:
+    """{row: reduced degree} for a set Z of dropped (row, k), each row dropped from the top."""
+    out = {}
+    for n, k in Z:
+        out[n] = min(out.get(n, int(prov_deg[n])), int(k) - 1)
+    return out
+
+
+def a11p_screen(content: list, share: float, params: Optional[dict] = None) -> dict:
+    """REVIEW 11.1-11.4 and 11.7: the screen on A11_s0 and A11_s1 (training events only), the sets Z_0 and Z, the
+    joint cost J, J^S, and the autodiff check; written to runs/<stage>/a11p/screen.json and hashed (decisions.json
+    'stage2_a11p_screen') before any A11p fit. Never overwritten: an existing screen is reused only if its SHA-256
+    is the recorded one and its share equals ``share``."""
+    d = L.out_dir() / A11P_DIR
+    f = d / "screen.json"
+    rec = decisions().get("stage2_a11p_screen")
+    if f.exists():
+        if rec and provenance.sha256_file(f) == rec.get("sha256"):
+            out = json.loads(f.read_text())
+            if out["short_event_share"] != share:
+                raise SystemExit(f"a11p refused: the hashed screen used the share {out['short_event_share']}, the "
+                                 f"approval confirms {share}; nothing is recomputed")
+            return out
+        raise SystemExit(f"a11p refused: {paths.portable(f)} exists but is not the recorded screen; nothing is "
+                         "overwritten")
+    sets, _ = L.data_cpu()
+    short = sets["train"].ev["zb"].numpy().astype(np.float64) < registry.ZB_STRATUM_MM
+
+    def job():
+        dev = L.common.DEVICE
+        tr = sets["train"].to(dev)
+        models_, tables = {}, {}
+        for s in (0, 1):
+            models_[s] = L.rebuild(run_name("A11", s), dev)
+            tables[s] = a11p_screen_seed(run_name("A11", s), models_[s], tr, short, share)
+        base0 = models_[0].base if hasattr(models_[0], "base") else models_[0]
+        prov0 = base0.provider
+        cands = a11p_candidates(prov0)
+        check = curvature_check(models_[0], prov0, tables[0]["rows"],
+                                tr.subset(torch.arange(256, device=tr.off.device)))
+        Z0 = a11p_select(tables, ("pass_registered",))
+        Z = a11p_select(tables, ("pass_registered", "pass_short"))
+        joint = {}
+        for s in (0, 1):
+            m = models_[s]
+            prov = (m.base if hasattr(m, "base") else m).provider
+            l0 = _nll_events(m, tr)
+            keep = {(n, k): float(prov.coef[prov.index(n), k]) for n, k in Z}
+            with torch.no_grad():
+                for n, k in Z:
+                    prov.coef[prov.index(n), k] = 0.0
+            lz = _nll_events(m, tr) if Z else l0
+            with torch.no_grad():
+                for (n, k), c in keep.items():
+                    prov.coef[prov.index(n), k] = c
+            J = lz - l0
+            joint[s] = {"sum_Q_dropped": float(sum(r["Q"] for r in tables[s]["rows"] if [r["row"], r["k"]] in Z)),
+                        "J": float(J.mean()), "J_S": float(J[short].mean())}
+        out = {"spec": "REVIEW.md section 11", "parameters": params, "short_event_share": share,
+               "threshold_nat": A11P_THRESHOLD,
+               "short_threshold_nat": share * A11P_THRESHOLD, "points": {"K": A11P_K, "seed": A11P_SEED,
+                                                                        "batch": A11P_BATCH},
+               "content": content, "n_candidates": len(cands), "tables": {str(s): tables[s] for s in (0, 1)},
+               "Z0": Z0, "Z": Z, "Z0_minus_Z": [z for z in Z0 if z not in Z],
+               "prune": prune_of(Z, prov0.deg), "prune_Z0": prune_of(Z0, prov0.deg),
+               "degrees_after": {n: prune_of(Z, prov0.deg).get(n, int(prov0.deg[n])) for n in prov0.names},
+               "k_A11": int(tables[0]["n_params"]), "k_A11p": int(tables[0]["n_params"]) - len(Z),
+               "joint": {str(s): joint[s] for s in (0, 1)}, "curvature_check": check}
+        del models_, tr
+        return out
+    out = L.on_gpu("a11p screen", job)
+    want = A11P_N_CANDIDATES.get(tuple(sorted(content)))
+    if want is not None and out["n_candidates"] != want:
+        raise SystemExit(f"a11p refused: {out['n_candidates']} candidates, REVIEW 11.1 fixes {want} for {content}")
+    L.write_json(out, f)
+    sha = provenance.sha256_file(f)
+    note_decision("stage2_a11p_screen", {"file": paths.portable(f), "sha256": sha, "Z": out["Z"], "Z0": out["Z0"],
+                                         "k_A11p": out["k_A11p"], "short_event_share": share})
+    log(f"a11p screen: {len(out['Z'])} of {out['n_candidates']} coefficients pass (Z_0: {len(out['Z0'])}); "
+        f"k {out['k_A11']} -> {out['k_A11p']}; screen.json {sha[:16]}...")
+    return out
+
+
+def a11p_specs(content: list, screen: dict, which: str = "Z") -> list:
+    """REVIEW 11.5: A11p_s = the pruned structure fitted by the procedure of A11 (start = the fitted A2s of the seed,
+    copy by name up to the reduced degrees, T_A, seed s), comparator A11_s, step-0 row registered. which = "Z0":
+    the same with Z_0 (A11pz_s, only when the parameter if_vetoed asks for it)."""
+    a11 = {sp.seed: sp for sp in stage2_specs(content) if sp.rung == "A11"}
+    sha = (decisions().get("stage2_a11p_screen") or {}).get("sha256", "")
+    rung, prune, z = ("A11p", screen["prune"], screen["Z"]) if which == "Z" else \
+        ("A11pz", screen["prune_Z0"], screen["Z0"])
+    return [replace(a11[s], name=run_name(rung, s), rung=rung, kwargs={**a11[s].kwargs, "prune": prune},
+                    comparator=run_name("A11", s), init_eval=True,
+                    notes=f"{rung} (REVIEW 11): A11 without {len(z)} coefficients ({which}; screen.json "
+                          f"{sha[:16]}...)")
+            for s in (0, 1)]
+
+
+def a11p_run(content: list, conf: dict) -> None:
+    """REVIEW 10.5 R7 / R9: screen (after A11_s0 and A11_s1 are registered), then the fits with exactly the hashed
+    pruning set, then their guards."""
+    if not content:
+        note_decision("stage2_a11p", {"status": "not applicable: the content is empty (A11 = A2s)"})
+        return
+    miss = [run_name("A11", s) for s in (0, 1) if L.registered_row(run_name("A11", s)) is None]
+    if miss:
+        note_decision("stage2_a11p", {"status": f"not run: {miss} not registered"})
+        log(f"a11p: not run, {miss} not registered")
+        return
+    screen = a11p_screen(content, conf["short_event_share"], conf)
+    rec = decisions().get("stage2_a11p_screen") or {}
+    if provenance.sha256_file(L.out_dir() / A11P_DIR / "screen.json") != rec.get("sha256"):
+        raise SystemExit("a11p refused: screen.json is not the hashed screen")
+    if not (screen.get("curvature_check") or {}).get("passed"):                    # PLAN 23 item 13: hard stop
+        raise SystemExit("STOP (PLAN 23 item 13, screen check): the second differences of the A11p screen do not agree "
+                         f"with automatic differentiation within {CURVATURE_TOL:.0%} on the most resolved candidates "
+                         f"({screen.get('curvature_check')}); no A11p fit; waiting for the user")
+    if not screen["Z"]:
+        note_decision("stage2_a11p", {"status": "no coefficient passes the screen", "parameters": conf})
+        log("a11p: no coefficient passes the screen; nothing is fitted")
+        return
+    specs = a11p_specs(content, screen)
+    if conf["if_vetoed"] == "fit_Z_and_Z0" and screen["Z0"] != screen["Z"]:
+        specs += a11p_specs(content, screen, which="Z0")
+    for sp in specs:
+        init = L.read_json(sp.out_dir / "init.json", {}) or {}
+        got = ((init.get("build_kwargs") or {}).get("prune"))
+        want = sp.kwargs["prune"]
+        if init and got != want:
+            raise SystemExit(f"a11p refused: {sp.name} was started with the pruning set {got}, the hashed screen "
+                             f"gives {want}")
+        run_stage2_spec(sp)
+    note_decision("stage2_a11p", {"status": "fitted", "parameters": conf, "runs": [sp.name for sp in specs],
+                                  "prune": screen["prune"]})
+    phase_stage2_guards(specs, key="stage2_a11p_guard_targets")
+
+
+def run_stage2_spec(sp: Spec) -> dict:
+    """run_spec for a Stage-2 run with the hard stop of PLAN 23 item 13: a Stage-2 run that diverged (criterion (ii)
+    is a failed scoring check) or is blocked stops the phase with a non-zero exit until the user responds."""
+    res = L.run_spec(sp)
+    st = L.status_of(res)
+    if st != "done":
+        why = "; ".join(res.get("criteria") or []) or res.get("blocked_by")
+        raise SystemExit(f"STOP (PLAN 23 item 13): {sp.name} {st} ({why}); Stage 2 halts here and waits for the user "
+                         "(decisions.json, the run's diverged.json)")
+    return res
+
+
+def _stage2_gate() -> tuple:
+    appr, kept, sha, content = stage2_approval()
+    stage2_preconditions(appr)
     note_decision("stage2_approval", {"results_json_sha256": sha, "replication_reading": appr["replication_reading"],
                                       "approved_utc": appr["approved_utc"], "approved_by": appr["approved_by"],
                                       "approval_file_sha256": provenance.sha256_file(L.out_dir() / STAGE2_APPROVAL)})
-    note_decision("stage2_content", {"kept_and_replicated": kept,
-                                     "A11": "A2s (no rerun)" if not kept else f"A2s + {kept}",
-                                     "A11n": (f"A2n (no rerun; in force: {[L.effective(f'A2n_s{s}') for s in (0, 1)]})"
-                                              if not kept else "net version of A11"),
-                                     "lr_net_of_record": _lr_net_or_none(),
-                                     "A11p": "not implemented (pruning by diagonal Fisher information)"})
-    for sp in stage2_specs(kept):
-        L.run_spec(sp)
+    run = content["content"]
+    note_decision("stage2_content", {
+        "kept_and_replicated": kept, "replication_reading": content["replication_reading"],
+        "excluded": content["excluded"], "waivers": content["waivers"],
+        "lr_net_escalation": content["lr_net_escalation"], "a11_content": run,
+        "rule": "content = computed kept-and-replicated list minus the user's exclusions (PLAN 20, REVIEW 10.5 R1)",
+        "A11": "A2s (no rerun)" if not run else f"A2s + {run}",
+        "A11n": (f"A2n (no rerun; in force: {[L.effective(f'A2n_s{s}') for s in (0, 1)]})"
+                 if not run else "net version of A11"),
+        "lr_net_of_record": _lr_net_or_none(), "waiver_checks": content["waiver_checks"],
+        "a11p_parameters": content["a11p_parameters"]})
+    return appr, run, content
+
+
+def phase_stage2():
+    """REVIEW 10.5 R9: fits (A11, then A11k after the memory probe, A11n) -> their guards -> A11p screen -> A11p fits
+    -> their guards -> Stage-2 report. A re-issue on a finished state starts no fit."""
+    appr, run, content = _stage2_gate()
+    specs = stage2_specs(run)
+    for sp in specs:
+        if sp.k_train == 64 and not sp.done():
+            ref = next((x.name for x in specs if x.rung == "A11" and x.seed == sp.seed), None) or "A2s_s0"
+            probe = memory_probe_k64(ref if L.registered_row(ref) is not None else "A2s_s0")
+            if not probe["fits"]:
+                raise SystemExit(f"stage2 stopped before {sp.name}: one k_train = 64 step needs "
+                                 f"{probe['peak_gb']:.2f} GB, more than {MEMORY_HEADROOM:.0%} of the limit "
+                                 f"{probe['limit_gb']} GB (REVIEW 10.5 R2: the batch is part of T_A and is not "
+                                 "changed; report to the user)")
+        run_stage2_spec(sp)
+    phase_stage2_guards(specs)
+    a11p_run(run, content["a11p_parameters"])
+    import run_m2a_report as R
+    R.report_stage2()
+
+
+def phase_a11p():
+    """A11p alone (re-issue after an interruption): the gate again, then the screen (reused if hashed), the fits,
+    their guards and the Stage-2 report."""
+    appr, run, content = _stage2_gate()
+    a11p_run(run, content["a11p_parameters"])
+    import run_m2a_report as R
+    R.report_stage2()
+
+
+def phase_stage2_report():
+    import run_m2a_report as R
+    R.report_stage2()
 
 
 PHASES = {"templates": phase_templates, "parity": phase_parity, "plr": phase_plr, "stage0": phase_stage0,
           "stage1p": phase_stage1p, "stage1x": phase_stage1x,
           "warmstart-check": phase_warmstart_check, "warmstart-rerun": phase_warmstart_rerun, "a2c": phase_a2c,
-          "guards": phase_guards, "report": phase_report, "stage2": phase_stage2}
+          "conditional-controls": phase_conditional_controls,
+          "guards": phase_guards, "report": phase_report, "stage2": phase_stage2, "stage2-report": phase_stage2_report,
+          "a11p": phase_a11p}
 ADDED_PHASES = ("warmstart-check", "warmstart-rerun", "a2c")   # PLAN 17.11; never in DEFAULT_PHASES
+ADDED_PHASES_26NOV = ("conditional-controls",)                  # PLAN 20; never in DEFAULT_PHASES
+STAGE2_PHASES = ("stage2", "stage2-report", "a11p")             # each only on its own
 
 
 # ---------------------------------------------------------------------------------------------------- listing ---------
@@ -1145,6 +1904,54 @@ def print_listing_additions() -> None:
     for x in listing_additions():
         print(f"  + {x['phase']:16} {x['name']:18} {x['rung']:6} {x['seed']:4d} {x['provider']:4} {x['class']:12} "
               f"{x['steps']:6d} {str(x['comparator']):16} {x['condition'] or ''}")
+    print_listing_additions_26nov()
+
+
+def listing_additions_26nov() -> list:
+    """Runs and phases added by the user's decisions of 26 Nov 2026 (PLAN 20); none in the default phase list."""
+    rows = []
+    for sp in a2c_x2_specs((0, 1)):
+        rows.append({"phase": "conditional-controls", "name": sp.name, "rung": sp.rung, "seed": sp.seed,
+                     "provider": sp.provider, "class": sp.cls, "steps": sp.steps, "comparator": sp.comparator,
+                     "condition": "only if a doubled-step rerun pair of that seed passes keep or one-seed equal NLL"})
+    for sp in a2c6k_specs((0, 1)):
+        rows.append({"phase": "conditional-controls", "name": sp.name, "rung": sp.rung, "seed": sp.seed,
+                     "provider": sp.provider, "class": sp.cls, "steps": sp.steps, "comparator": sp.comparator,
+                     "condition": "only if a mixture rung of that seed passes keep or one-seed equal NLL"})
+    for rung, seeds, cmp_, k in (("A11", (0, 1, 2), "A2s_s<seed>", 16), ("A11k", (0, 1), "A2s_s<seed>", 64),
+                                 ("A11n", (0, 1), "A2n_s<seed>*", 16)):
+        for s_ in seeds:
+            rows.append({"phase": "stage2", "name": run_name(rung, s_), "rung": rung, "seed": s_,
+                         "provider": "net" if rung == "A11n" else "poly", "class": "stage2", "steps": 4000,
+                         "comparator": cmp_, "condition": f"approval file; content = computed list minus user "
+                                                          f"exclusions (k_train {k})"})
+    rows.append({"phase": "stage2", "name": "(guards)", "rung": "-", "seed": -1, "provider": "-", "class": "guards",
+                 "steps": 0, "comparator": None, "condition": "every registered Stage-2 run and its comparator, with "
+                                                              "the flagged* arrays (REVIEW 10.5 R4, R6)"})
+    rows.append({"phase": "stage2", "name": "(A11p screen)", "rung": "A11p", "seed": -1, "provider": "poly",
+                 "class": "screen", "steps": 0, "comparator": None,
+                 "condition": "REVIEW 11: 117 passes over the training events per seed after A11_s0, A11_s1; "
+                              "written and hashed before any A11p fit"})
+    for s_ in (0, 1):
+        rows.append({"phase": "stage2", "name": run_name("A11p", s_), "rung": "A11p", "seed": s_, "provider": "poly",
+                     "class": "stage2", "steps": 4000, "comparator": run_name("A11", s_),
+                     "condition": "only if the screen drops a coefficient (Z non-empty); step-0 row registered"})
+    for s_ in (0, 1):
+        rows.append({"phase": "stage2", "name": run_name("A11pz", s_), "rung": "A11pz", "seed": s_,
+                     "provider": "poly", "class": "stage2", "steps": 4000, "comparator": run_name("A11", s_),
+                     "condition": "only if a11p_parameters.if_vetoed = fit_Z_and_Z0 and Z_0 differs from Z"})
+    rows.append({"phase": "stage2", "name": "(guards)", "rung": "-", "seed": -1, "provider": "-", "class": "guards",
+                 "steps": 0, "comparator": None, "condition": "A11p_s<seed> and A11_s<seed>"})
+    return rows
+
+
+def print_listing_additions_26nov() -> None:
+    print("\n# Additions of 26 Nov 2026 (user decisions, PLAN.md section 20; REVIEW.md sections 10, 11) - NOT in the "
+          "default phase list; in this order: conditional-controls, guards (flagged* arrays), report, then stage2 "
+          "alone after the approval (a11p, stage2-report: alone); * = the A2n run in force")
+    for x in listing_additions_26nov():
+        print(f"  + {x['phase']:20} {x['name']:14} {x['rung']:6} {x['seed']:4d} {x['provider']:4} {x['class']:12} "
+              f"{x['steps']:6d} {str(x['comparator']):16} {x['condition'] or ''}")
 
 
 def main(argv=None) -> int:
@@ -1166,8 +1973,10 @@ def main(argv=None) -> int:
         global REPORT_WITHOUT_GUARDS
         REPORT_WITHOUT_GUARDS = True
     phases = list(DEFAULT_PHASES) if (not args.phases or "all" in args.phases) else args.phases
-    if "stage2" in phases and phases != ["stage2"]:
-        raise SystemExit("stage2 runs only on its own (`run_m2a.py stage2`), after the user has seen the Stage-1 table")
+    for ph2 in STAGE2_PHASES:
+        if ph2 in phases and phases != [ph2]:
+            raise SystemExit(f"{ph2} runs only on its own (`run_m2a.py {ph2}`), after the user has seen the Stage-1 "
+                             "table")
     order = list(PHASES)
     phases = sorted(dict.fromkeys(phases), key=order.index)
     L.configure(smoke=args.smoke)

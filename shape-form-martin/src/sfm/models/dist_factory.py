@@ -365,6 +365,25 @@ def _poly_for_component(model, core, degrees: Optional[dict]):
     return PolyProvider.from_legacy(core, names=model.names, defaults=model.defaults, degrees=deg)
 
 
+@torch.no_grad()
+def _prune_rows(poly, prune: dict) -> dict:
+    """Lower the degree of rows of a PolyProvider in place (A11p): mask and coefficients above the new degree are
+    set to zero, ``deg`` follows. Every row named must exist and the new degree must be below the present one."""
+    out = {}
+    for n, d in sorted(prune.items()):
+        if n not in poly.names:
+            raise KeyError(f"prune: '{n}' is not a row of this provider")
+        d, d0 = int(d), int(poly.deg[n])
+        if not 0 <= d < d0:
+            raise ValueError(f"prune: row '{n}' has degree {d0}; the reduced degree must be in [0, {d0 - 1}], got {d}")
+        i = poly.index(n)
+        poly.mask[i, d + 1:] = 0.0
+        poly.coef[i, d + 1:] = 0.0
+        poly.deg[n] = d
+        out[n] = [d0, d]
+    return out
+
+
 def _theta_train():
     f = theta_file()
     if not f.exists():
@@ -383,7 +402,7 @@ def component(ctx: BuildContext, variant: str = "survival_exact", provider: str 
               degrees: Optional[dict] = None, coef_shift: Optional[dict] = None, logit_dh_from_far: bool = False,
               init: str = "none", init_ref: Optional[str] = None, net_from: Optional[str] = None,
               last_ring: bool = False, fit_to_steps: int = 2000, fit_to_lbfgs: int = 500,
-              fit_to_scale_floor="default"):
+              fit_to_scale_floor="default", prune: Optional[dict] = None):
     """ComponentModel of AUDIT 4.1 (module docstring). Keyword arguments beyond the audit's list:
     lat_family_kw      ``family_kw`` of ``legacy_shower_lateral`` (A7l), used with a tuple ``shower_lat``
     degrees            polynomial degrees of new rows (A6b: {"sh_rk": 0})
@@ -396,6 +415,10 @@ def component(ctx: BuildContext, variant: str = "survival_exact", provider: str 
                        other values only in the smoke mode of scripts/run_m2a.py, registered under another stage)
     fit_to_scale_floor "default" = ParamNet.SCALE_FLOOR_ABS (1e-2, fit_to version 3, user decision of 25 Nov 2026);
                        None = fit_to version 2 (used only to rebuild a warm start made before version 3)
+    prune              A11p (REVIEW.md section 11.5): {row: reduced degree} for rows of the polynomial provider,
+                       legacy rows included. The coefficients above the reduced degree are zero and masked (no
+                       gradient, not counted by ``n_params``); a ``start`` copies by name up to the reduced degree.
+                       None (default) leaves the construction unchanged.
     """
     from ..families import build_variant
     from ..families.components import init_shower_long
@@ -448,6 +471,10 @@ def component(ctx: BuildContext, variant: str = "survival_exact", provider: str 
     poly = model.provider
     if provider not in ("poly", "net"):
         raise ValueError("provider must be 'poly' or 'net'")
+    if prune:
+        if provider != "poly" or net_from is not None:
+            raise ValueError("component: prune applies to the polynomial provider only")
+        info["prune"] = _prune_rows(poly, prune)
 
     ref = None
     if not ctx.skip_init:
