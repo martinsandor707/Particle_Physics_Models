@@ -17,6 +17,8 @@ for `warmstart-check warmstart-rerun a2c report` after the present job has ended
 **Third addendum (26 Nov 2026): section 9, re-check of commit `aab7aba` - the six fixes are closed; section 10,
 review of Stage 2 as coded - the runs are as registered, Stage 2 is not ready to run, requirements R1 to R9;
 section 11, the specification of A11p, written before any Stage-2 result exists.**
+**Fourth addendum (26 Nov 2026): section 12, check of the short-event diagnostic (`2c3c8db`) - no physical bug
+specific to the halo; Stage 2 can proceed with the finding recorded for Gate 1.**
 
 ## 0. Files reviewed (SHA-256 of the content in commit `c4f39fd`)
 
@@ -1325,3 +1327,187 @@ events by +20.2 ± 7.7 and +21.8 ± 7.8 (2.6 and 2.8 SE; 106 and 107 of 166 even
 The Stage-1 table shows +8.0 ± 7.2 against A2s because A2s itself is 12 units worse than A2c on this stratum. A7,
 A7s and A8 show the same +22 to +24. The conditions of 11.6 are relative to A11 and cannot repair this; whether it
 matters for the finalist is not for A11p to decide.
+
+## 12. Check of the short-event diagnostic (`short_events/SHORT_EVENTS.md`, commit `2c3c8db`)
+
+Date: 26 Nov 2026. Subject: the diagnostic the user asked for in PLAN 23 item 1, on the finding of 11.10 (A9 worse
+than the control A2c on the 166 short validation events). Everything below is from the registered arrays of the
+machine of record as copied to the laptop, on the CPU, with the reviewer's own code (nothing imported from the
+diagnostic); no model was evaluated, nothing trained, the test split not opened. Units: 1e-4 nat per event,
+mean ± event-paired SE. The scratch directory of sections 9 to 11 was cleared again in the meantime; the scripts of
+this section are in a new one.
+
+### 12.1 Ruling on the user's criterion
+
+**"No physical bug specific to the halo" holds: the diagnostic shows no defect and this check finds none. Stage 2
+can proceed, with the finding recorded for Gate 1 (text in 12.4).**
+
+What is established, and what is not:
+
+- *Established.* The numbers of the diagnostic are right (12.2). The shift is reproducible, not a fold effect, lies in
+  the hit term at deep, wide hits, and the normalisation term favours A9. Rungs without any halo code show a shift
+  of the same size against A2c (A7, A7s, A4). No implementation defect: the recomputed decomposition equals the
+  guard arrays stored on the machine of record, values are finite, the normaliser lies in (0, 1].
+- *Not established.* That the cause is common to these rungs. The diagnostic's sentences "nothing in it is specific
+  to the halo" and "A9 behaves like the null rungs on the same events" are true of the stratum mean only (12.3 a);
+  its explanation by the deep last-ring mass covers a fifth of A9's shift (12.3 c); a halo-specific pathway - the
+  detector halo taking over part of the far-halo weight - is named by the diagnostic itself and is untested. If it
+  is the cause, it is a modelling trade-off (20 units on 1.1 % of the events, 0.22 on the mean, against 4.8 on the
+  rest), not a bug. Two zero-training checks would settle it and belong to Gate 1 (12.4).
+
+### 12.2 Spot-checks
+
+| Quantity (short events unless said) | Diagnostic | This check |
+|---|---|---|
+| A9 - A2c, seed 0 / 1 | +20.18 ± 7.73 / +21.80 ± 7.77 | +20.18 ± 7.73 / +21.80 ± 7.77; others -4.78 ± 0.89 / -4.82 ± 0.90 |
+| per-event correlation of the two seed pairs | 0.999 | 0.9993 |
+| A9 - A7, seed 0 / 1 | -2.44 ± 6.80 / +0.21 ± 6.84 | the same; medians +5.0 / +4.5 |
+| A9 - A8, seed 0 / 1 | -4.02 ± 14.20 / -3.53 ± 14.23 | the same; medians +6.0 / +6.4 |
+| A7 - A2c, A8 - A2c, A4 - A2c (seed 0 / 1) | +22.62 / +21.59, +24.20 / +25.33, +21.83 / +20.17 | the same |
+| A2s doubled schedule, seed 0: x2 - A2s | -44.3 ± 5.6; others +0.70 ± 0.22 | -44.31 ± 5.59; others +0.70 ± 0.22; median -20.3 |
+| the same, seed 1 | -0.7 ± 4.1 | -0.71 ± 4.05; others +0.07 ± 0.24 |
+| A2c - A2s, seed 0 / 1 | -12.14 ± 2.40 / -11.55 ± 2.33 | the same |
+| seed offsets: A2s_s1 - A2s_s0, A2c_s1 - A2c_s0, A9_s1 - A9_s0 | -11.21, -10.62, -9.00 | the same |
+| network column: A9n - A2n, A7n - A2n, A8n - A2n | +19.38 ± 12.37, +28.35 ± 8.98, +48.75 ± 11.35 | the same |
+| K = 1024: A9 - A2s, A9 - A7 (seed 0) | +7.95 ± 7.25, -2.64 ± 6.81 | the same, from the stored K = 1024 arrays |
+| split of A9 - A2s (seed 0): normalisation / hit term | -2.80 ± 1.49 / +10.84 ± 7.20 | the same, **from the G-region arrays stored by the guards phase** (not used by the diagnostic); seed 1: -2.81 ± 1.49 / +13.05 ± 7.27 |
+| split of A9 - A7 (seed 0): normalisation / hit / last ring | -3.12 ± 1.31 / +0.68 ± 6.76 / -4.42 ± 2.30 | the same, from the stored arrays; identity with the registered difference to 1.4e-5 per event |
+| A9r - A9: normalisation / hit | +1.32 ± 0.38 / +82.54 ± 62.92 | the same, from the stored arrays |
+| A12 - A2c, last-ring hits | -217.5 ± 46.6 | stored arrays: A12 - A2s -221.45 ± 47.62; with the diagnostic's A2s - A2c last ring (+3.91) that is -217.5 |
+
+The split of A9 - A2c itself (-3.17 / +23.35) needs A2c, which has no guard arrays; it follows from the verified
+A9 - A2s and the diagnostic's A2c - A2s (+0.37 / -12.51), whose recomputation agrees with the stored arrays in
+every pair that could be compared here (A9 - A2s, A9 - A7, A9r - A9, and the last ring of A12 below). Not recomputed by me: the per-hit regional
+tables, the masses, the parameter moves.
+
+### 12.3 The reasoning
+
+**(a) "Shared with A7 / A8 / the network column, hence not specific to the halo."** The step holds for the size of
+the mean and fails for the events. Per-event shifts against A2c on the 166 short events (seed 0 / seed 1):
+
+| Rung - A2c | Mean | 10 % trimmed mean | Median | Worse by > 1 unit | Share of the mean in the 5 largest abs(d) | Correlation with A9's shift (Pearson / Spearman) |
+|---|---|---|---|---|---|---|
+| A9 | +20.2 / +21.8 | +17.5 / +18.9 | +14.2 / +17.5 | **106 / 107** | +3.1 | 1 |
+| A7 | +22.6 / +21.6 | +19.3 / +18.9 | +5.9 / +4.5 | 92 / 90 | +0.6 | +0.58 / +0.34 |
+| A8 | +24.2 / +25.3 | **+5.9 / +6.5** | -1.7 / -2.5 | 74 / 76 | **+17.6** | **-0.20 / -0.08** |
+| A4 | +21.8 / +20.2 | +14.1 / +12.3 | +10.7 / +10.4 | 97 / 93 | +6.3 | +0.46 / -0.02 |
+| A2s (the start of all of them) | +12.1 | +9.3 | +7.4 | 104 | +3.2 | +0.35 / +0.20 |
+| A9r | +104.0 | +15.5 | +9.0 | 92 | +76.4 | +0.69 / +0.68 |
+| A12 | -131.2 | **0.0** | +0.7 | 82 | -84.7 | +0.04 / -0.15 |
+| A2s doubled schedule | -32.2 | -30.4 | -13.0 | 59 | -2.5 | -0.25 / -0.35 |
+| A8c | -2.5 | -2.1 | -0.5 | 64 | | +0.17 / +0.02 |
+| A7l | +1.0 | +2.5 | +0.7 | 80 | | +0.35 / +0.30 |
+
+Four means between +20 and +25 come from four different event patterns. A8's is five events (trimmed mean +6, more
+events better than worse) and is uncorrelated with A9's; A7's is intermediate; A9's is the broadest - the only one of
+the four rungs A9, A7, A8, A4 that fails a sign test on both seeds (limit 95). About half of that breadth is A2c's own broad gain over the
+common start (A2s against A2c: 104 events worse); against A2s, A9 has 91 and 93 events worse. So: the *size* of the
+shift is no evidence against the halo, since rungs without it reach the same size; equal means are no evidence of a
+common cause either. And the summary sentence "every change of structure started from A2s shows the same shift" is
+not what the diagnostic's own cluster table says (A8c, A7l at zero; A3x, A78 at +47, +66).
+
+**(b) The network column** supports "not specific to the polynomial provider" and nothing more: its SEs are 9 to 12
+and its base A2n is itself -43 ± 16 against A2s on this stratum.
+
+**(c) "The ordering follows the deep last-ring mass": mechanism or correlation?** Both, for different parts.
+For the last-ring hits it is an identity and it checks: the short events have 7.0 % of their energy in the last
+ring, so a change of ln density by x per cent there moves the stratum by 7.0 x units - A12 (+44.5 % of mass, 36.8 %
+in ln): 258 predicted, -217.5 ± 46.6 found; A7 (-1.65 %): 11.6 against +8.7 ± 4.0; A9 (-1.30 %): 9.1 against
++4.2 ± 4.1. But for A9 the
+last ring is a fifth of the hit-term shift (+4.2 of +23.4; against its start A2s it is +0.3 ± 3.9, nothing); the
+rest sits at r = 30 to 663 mm, where the diagnostic's own mass column shows no relation with the outcome (deep-wide
+mass: A9 -0.04 %, A7 +0.29 %, doubled schedule +0.81 %). And the seven-point ordering is an ordering of *means*:
+with trimmed means A12 is at 0.0 and A9r at +15.5 - the extremes of the table are a handful of events with energy
+in the last ring. The last-ring mass explains the heavy tail of the stratum, not the broad shift of A9.
+
+**(d) "The other 14,784 events barely constrain that tail."** Not in energy: the others hold 95 % of all energy at
+z' >= 300 mm, r >= 200 mm (1096 event-equivalents against 61), 92 % at z' >= 600 mm, r >= 200 mm, and two thirds of
+the last-ring energy. What is true is a statement about leverage. Per event the short events carry 36.8 % of
+their energy in that region (others 7.4 %), 25.6 % at z' >= 600 mm, r >= 200 mm (others 3.3 %), 7.0 % in the last
+ring (others 0.17 %); and on the others the terms compensate. From the diagnostic's table (`q_deepwide.json`):
+
+| Pair | Others: deep-wide hits | Others: all other hits | Short: deep-wide hits |
+|---|---|---|---|
+| A2s doubled schedule - A2c, seed 0 | -5.76 ± 0.08 | +6.61 ± 0.16 | -34.6 ± 3.4 |
+| A7 - A2c | -2.10 ± 0.07 | +1.41 ± 0.23 | +29.6 ± 5.5 |
+| A8 - A2c | -1.83 ± 0.18 | +1.83 ± 0.18 | +23.5 ± 10.3 |
+| A9 - A2c | +0.33 ± 0.13 | -4.98 ± 0.86 | +25.4 ± 6.2 |
+
+A redistribution worth ±6 units inside the model costs the others 0.7 in total and moves the short events by -44;
+in A7 and A8 the deep, wide hits of the others *gain* while those of the short events lose, so the two populations
+sit in different parts of the same region. The model has directions along which the objective is flat because the
+bulk's own terms cancel, and the short stratum reads those directions with a gain of 37 units per 1 % of density.
+A9's +21 is 0.7 % of density at the short events' deep, wide hits.
+
+**(e) The doubled schedule** moves the stratum on one seed (-44.3 ± 5.6) and not on the other (-0.7 ± 4.1). It is
+evidence that the level of the base structure on this stratum is not reproducible between trainings, not of a
+schedule effect. The continued-training step A2c - A2s is the opposite case: -12 on both seeds with the same events.
+
+**(f) "+21 is about two run-to-run standard deviations."** The 7.3 is almost entirely an offset between seed 0
+and seed 1 that every polynomial rung shares (-9 to -13) and that cancels in a same-seed pair; it is not the noise
+of the comparison. The comparison itself reproduces to 1.6 units between the seed pairs. The useful statement is
+the third row of that table: unrelated structure changes that are null elsewhere span 0 to +25.
+
+**(g) Checked for a defect by the diagnostic, and adequate:** recomputation against the registered arrays, finite
+values, normaliser, monotone cumulative profile, stored mass monitors, K dependence. One limit: these compare the
+model code with itself. Whether the detector-halo component's mass in front of zb and its density in deep, wide
+cells are *right* is a matter of independent quadrature, which is Gate 1's method. The normalisation term gives a
+place to look: it is -18.3 for the 22 events with zb < 600 mm (A9 has 0.18 % less mass in front of zb there) and
+about -1 for the other short events.
+
+### 12.4 Text for Gate 1 (for the Stage-2 record and the plan)
+
+> **Short events (zb < 1221 mm; 166 of 14,950 validation events).** Against the matched control A2c, A9 - and
+> therefore A11 - is worse on this stratum by +20.2 ± 7.7 (seed 0) and +21.8 ± 7.8 (seed 1), 106 and 107 events
+> worse by more than 1e-4 nat. The shift reproduces between the seed pairs (per-event correlation 0.999) and at
+> K = 1024, lies in the hit term (+23.4 ± 7.7; the normalisation term is -3.2 ± 1.5 in A9's favour) at hits with
+> z' >= 300 mm and r >= 200 mm, and amounts to 0.7 % of model density there. It costs 0.22 on the overall mean and is
+> contained in A9's -4.5 against A2c. A diagnostic on the stored arrays (`results/m2a_dist/short_events/`) and its
+> independent check (`REVIEW.md` section 12) found no implementation defect. The size is not specific to the halo:
+> A7, A7s and A4 are at +20 to +23 against A2c without one. The event pattern is A9's own (correlation with A7's
+> shift 0.58, with A8's -0.20; A9's is the broadest), and one halo-specific pathway - the detector halo taking over
+> far-halo weight that also served deep, wide hits - is plausible and untested. **Open for Gate 1, both without
+> training:** (i) independent quadrature of the detector-halo component: its mass in front of zb for short events
+> (zb from 10 to 1221 mm) and its density in deep, wide cells; (ii) the difference of ln density between A11 and A2c
+> at the short events' deep hits, split by component (shower, far halo, detector halo).
+>
+> **The stratum as a yardstick.** The short events carry 37 % of their energy at z' >= 300 mm, r >= 200 mm (the
+> others 7 %) and 7 % in the last ring (the others 0.2 %): 1 % of model density there is 37 units of the stratum
+> mean, respectively 7. The model can move density in that region at almost no cost on the other 14,784 events,
+> whose own terms compensate (A2s with a doubled schedule, seed 0: -5.8 and +6.6 on the others, net +0.7, and -44 on
+> the short events; seed 1: -0.7). The stratum mean therefore moves by about 10 units between seeds (the same for
+> every polynomial rung, cancelling in same-seed pairs), by -12 under continued training of the unchanged structure
+> (both seeds), by 0 to +25 under structure changes that are null elsewhere, and by -44 or 0 under a doubled
+> schedule. A2c is a reproducible reference, not a privileged one. Differences on this stratum mean something only
+> as same-seed, same-start, same-schedule pairs; their means are heavy-tailed (in A12, A9r and A8 five events carry
+> 65 to 75 % of the mean) and are to be read with the median and the count of events worse. G-bulk excludes exactly
+> this stratum, so no guard covers it.
+
+### 12.5 Bearing on the A11p conditions U1 and U2
+
+No change to the thresholds the user confirmed (screen below 10.3; U1 below 45; U2 at most 95 of 166). Changing
+them now, with the Stage-1 patterns in view, would be tuning. Four things for the record:
+
+1. U1 and U2 compare `A11p_s` with `A11_s` of the same seed, start and schedule - the one kind of comparison that
+   the diagnostic shows to be reproducible on this stratum. The choice of 11.5 (refit from A2s, not continued from
+   A11) matters more than it seemed: a continued-training term alone is worth 12 units here.
+2. In such pairs the two seeds are near-copies (per-event correlation 0.99 and above in every pair of the
+   diagnostic's table 2.2). "On both seeds" is in effect one test: its level is that of a single one (2.5 % for U1,
+   2.6 % for U2), not its square.
+3. Structure changes that are null on the other events have moved this stratum by 0 (A8c, A7l), +20 (A7, A4: pass
+   U1; A4 fails U2 on one seed), +47 and +66 (A3x, A78: fail U1). A pruned model can therefore fail with no visible
+   change elsewhere - that is what the conditions are for - and a pass certifies only "not worse than A11 within the
+   margin". A11 itself is 20 units above A2c, and the margin of 45 admits a further shift of that size (+20 ± 7
+   gives 34 to 37) unless it is broad, which U2 catches (A9 against A2c: 106, 107).
+4. The screen predicts the cost of removing one coefficient at fixed others from a diagonal curvature. (d) shows
+   that after a refit the stratum can move by tens of units along compensated directions, which a diagonal quantity
+   does not see. The screen will veto coefficients of tail rows and errs towards keeping them; its prediction for
+   the stratum after the refit is weak. The acceptance conditions are the operative control, as specified.
+
+### 12.6 What was verified, and how
+
+*By my own computation from registered arrays:* every row of 12.2; the table of (a); the energy shares of (d) and
+12.4 (hit centres and weights of the validation split); the last-ring identity of (c) with the diagnostic's mass
+changes as input. *Taken from the diagnostic's tables:* the regional hit terms, the deep-wide split including the
+table of (d), the model masses, the component shares, the checks of its section 5. *Not done:* a recomputation of
+A2c's parts; any evaluation of a model; the two Gate-1 checks of 12.4.

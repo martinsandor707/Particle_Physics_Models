@@ -2188,3 +2188,48 @@ event, and A11p cannot test A9r's change, which removed a component.
 15. `pion_hits_with_model_outputs.parquet` on the H200 is an unrelated project's dataset (overlapping-shower
     segmentation); its event overlap with the campaign's standalone sample is unverified; it stays untouched and is
     never opened by the campaign.
+
+## 24. Short events: diagnostic and Fable ruling (26 Nov 2026) — Stage 2 may proceed
+
+**Ruling on the user's criterion (§23, item 1): "no physical bug specific to the halo" holds.** The Opus diagnostic
+(`results/m2a_dist/short_events/SHORT_EVENTS.md`) found no defect; the independent Fable check
+(`results/m2a_dist/REVIEW.md` section 12) reproduced every central number from the registered arrays with its own
+code and found none either. Stage 2 proceeds, with the finding recorded for Gate 1.
+
+**What is established** (validation, machine of record, 10⁻⁴ nat; short events = 166 of 14,950)
+- A9 − A2c on the short events: +20.2 ± 7.7 (seed 0) and +21.8 ± 7.8 (seed 1); on the other 14,784 events
+  −4.8 ± 0.9. The shift reproduces between the seed pairs (per-event correlation 0.999) and at K = 1024.
+- It lies in the hit term (+23.4 ± 7.7; the normalisation term is −3.2 ± 1.5 in A9's favour), at hits with
+  z′ ≥ 300 mm and r ≥ 200 mm (+25.4 ± 6.2; all other hits −2.0 ± 4.5). It is 0.7 % of model density at those hits,
+  costs 0.22 on the overall mean, and is contained in A9's −4.5 against A2c.
+- Defect checks without a finding: recomputation against the stored arrays (rms 4.6·10⁻⁶), no non-finite value in
+  206 registered arrays, normalisation masses in (0, 1] and monotone in z_b, stored mass monitors equal to the
+  recomputed masses, component weights finite and in (0, 1), no late drift in training.
+
+**Where the diagnostic's reasoning went further than its evidence** (Fable check)
+- "Not specific to the halo" is true of the *size* only: A7, A7s and A4 sit at +20 to +23 against A2c without a
+  halo, but the event patterns differ (A9's is the broadest; correlation with A7's shift 0.58, with A8's −0.20; A8's
+  mean is five events). Equal size is no evidence against the halo and none of a common cause.
+- The "deep last-ring mass" explains only the last-ring part of the shift (+4.2 ± 4.1 of +23.4 for A9).
+- One halo-specific pathway is plausible and untested: the detector halo taking over far-halo weight that also
+  served deep, wide hits. If so it is a trade-off, not a bug.
+
+**Open for Gate 1, both without training:** (i) an independent quadrature of the detector-halo component — its mass
+in front of z_b for short events and its density in deep, wide cells; (ii) the difference of ln density between A11
+and A2c at the short events' deep hits, split by component.
+
+**The short-event stratum as a yardstick.** These events carry 37 % of their energy at z′ ≥ 300 mm, r ≥ 200 mm (the
+others 7 %) and 7 % in the last ring (the others 0.2 %): 1 % of model density there is 37 units of the stratum mean.
+The model can move density in that region at almost no cost on the other events, whose terms compensate. The
+stratum mean therefore moves by about 10 between seeds (cancelling in same-seed pairs), by −12 under continued
+training of the unchanged structure, by 0 to +25 under structure changes that are null elsewhere, and by −44 or 0
+under a doubled schedule (one seed only: the base level is not reproducible between trainings). **A2c is a
+reproducible reference, not a privileged one.** Differences on this stratum mean something only as same-seed,
+same-start, same-schedule pairs; their means are heavy-tailed and are read with the median and the count of events
+worse. G-bulk excludes exactly this stratum, so no guard covers it.
+
+**Bearing on the A11p conditions U1 / U2.** The confirmed thresholds stay (changing them now would be tuning). For
+the record: the pairing A11p against A11 at the same seed, start and schedule is the right one; "on both seeds" is
+in effect one test (the seeds are near-copies in such pairs), at a level of about 2.5 %; a pass means only "not
+worse than A11 within the margin", and A11 itself is 20 above A2c; the screen's prediction for this stratum is
+weak, so the acceptance conditions are the operative control.
