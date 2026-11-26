@@ -2025,3 +2025,49 @@ registered; final Stage-1 report written. Results: `results/machines/h200-g1056-
 **Process note.** The first results commit of today was made by a command chain that printed a host-detail warning
 for one file and committed anyway; the match was the digit string of the port inside two floating-point numbers. No
 host detail is in the repository. The check now stops the commit and asks for the port only in context.
+
+## 20. User decisions of 26 Nov 2026: the seven open items of §18, and Stage 2 of Track A
+
+**The seven items of §18**
+1. *Further controls.* The conditional rule is accepted, tightened: `A2c_x2` is run only if a doubled-step rerun pair
+   actually passes keep or one-seed equal NLL, and `A2c6k` only if a mixture rung passes keep or one-seed equal NLL.
+   On Stage 1 neither condition is met (A4, A5 and A10 failed decisively; A2c − A2s is about −0.15), so neither is run.
+2. *Divergence.* Only a non-finite final value or an unrecovered fit (frozen last window, or blow-up) counts as
+   diverged. A recovered non-finite validation value in the middle of a run is logged as a warning with its count in
+   the run's metadata, for Gate 1.
+3. *Learning rate of the networks.* If replicate re-runs of the network pilots change `lr_net` without a column below
+   the floor, the change is escalated to the user before the re-runs are used.
+4. *Anchor of the PySR tail rules.* Both the inheriting depth rule and the radial alternative are anchored to the
+   **frozen Track A finalist before any PySR refit** (one immutable object, one hash). C1 is tested against the same
+   reference with δ = 0.
+5. *Tolerances of the tail comparisons.* 10⁻⁵ mm⁻¹ in depth and 10⁻³ in the radial log-log slope: accepted.
+6. *Stage-2 per-profile depth check.* The enforced condition becomes
+   **`rising_stretches(model) ≤ rising_stretches(baseline)` per profile**, replacing the per-profile sign-change
+   condition of §17.13 (which turns "+ −" into "− + −" at a profile boundary for a purely falling correction). Raw
+   sign-change counts, total and per profile, stay printed side by side as a diagnostic.
+7. *Cusp-stall flag.* A diagnostic that triggers a review, not an automatic rejection: every promoted or Pareto-front
+   candidate with the flag gets a mandatory Fable look at its parameter traces and loss curves.
+
+**Stage 2 of Track A (A11) and the A9 guard decision**
+- **A9 enters A11 under a scoped, explicit waiver of G-region for the class `low_abar` only, subject to the Gate 1
+  audit.** Reasons given by the user: A9 is the only replicated primary (−4.67 ± 0.88 and −4.66 ± 0.89 against A2s;
+  −5.15 ± 1.00 in the network column); it passes G-K (−4.65 ± 0.88) and G-bulk (−4.43 ± 0.87) at more than 5 SE; it
+  improves the clean `inner` cells (−1.32 ± 0.61); the normalisation term (−0.04 ± 0.02) and the mass monitors
+  (`beyond_zb`, dead cells) show no gaming. `low_abar` (−2.97 ± 0.53) is by geometry where a backward-cone
+  detector-frame halo has its support, so exceeding the 50 % flagged-share limit through `low_abar` alone does not
+  indicate metric gaming. The G-region failure and the waiver are recorded in `RESULTS.md` and at Gate 1.
+- **A9r does not replace A9 in A11** and does not enter it: it has the same `low_abar` gain (−2.84) while degrading
+  the 166 short events (z_b < 1221 mm) by +91.9 ± 67.2. Fisher pruning (A11p) is to determine systematically which
+  parameters of A11 can be removed without hurting the short events.
+- **The legacy formula (k = 101, validation 18.120407) stays the fallback comparator at Gate 1.** If A11 with A11k and
+  A11p does not meet the "cleaner" bar against it, or fails Gate 1, the legacy formula remains the Track A baseline
+  for PySR.
+- **Order before Stage 2 runs on the H200:** (1) profile and fix the K = 1024 guard bottleneck of the component
+  models (15–35 minutes per run), with bit-equality of the validation arrays shown; (2) the Fable re-check of the
+  review fixes B8-1 … B8-3 and C8-3 … C8-5 (committed as `aab7aba`); (3) Stage 2 — A11, A11k, A11n, A11p — and then
+  Gate 1.
+
+A11p as pre-registered (`AUDIT.md` §4.1): drop the highest-degree coefficients whose removal costs less than 0.2 by
+the diagonal Fisher information on training events, refit, accepted at equal NLL, seeds 0 and 1. The user's addition
+of 26 Nov: the short-event stratum must not be hurt; how this enters the acceptance is specified by Fable before any
+Stage-2 result exists.
