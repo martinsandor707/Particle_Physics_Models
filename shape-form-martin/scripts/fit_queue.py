@@ -53,6 +53,9 @@ def main(argv=None) -> int:
 
     from sfm import machine
     machine.startup("fit_queue.py")                                   # E10 (each fit.py child repeats it)
+    if not machine.is_laptop_of_record():                             # review note N5
+        raise SystemExit("this generic script has no starting-point or recipe check; runs of record on another machine "
+                         "go through scripts/run_m2b_list.py, run_m2b_fit.py or run_m2a.py")
     files = expand(args.configs)
     if not files:
         print("no config files")

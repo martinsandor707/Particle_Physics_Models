@@ -213,6 +213,10 @@ def run_on_gpu(label: str, fn, min_free_mb: float = 3000.0, poll: float = 30.0, 
 ALLOWED_INIT = {**{f"s2_seed{s}": ("from_run", {"run": f"{STAGE}/s1_seed{s}"}) for s in S1_SEEDS},
                 **{n: ("field_mlp_std", {}) for n in CONTROL_NAMES}}
 MLP_STD_REL = "shape-form-proton/results/particles/pion/mlp_std.pt"
+# Review note N5: the recipes of the six pre-registered run_m2b_fit configs, pinned by RunConfig.hash() (the whole TOML
+# except run.notes); run_m2b_fit refuses another recipe under these names and any config file outside the clone.
+PINNED_CONFIG_HASH = {"s2_seed11": "8d3a125f43882cd2", "s2_seed12": "b1aab8a012d31448", "s2_seed13": "0354cc665e06bf4b", "s2_seed14": "f149367fb4431d06",
+                      "s2_seed15": "211322535f0a3e96", "b0h_seed0": "1a36c0c46390a187", "b0h_seed1": "743d82b203f861e6", "b0h_seed2": "2fcce42bec6c90fd"}
 
 
 def input_hashes(sums_file=None) -> dict:
@@ -280,3 +284,14 @@ def check_built_weights(model, init: dict) -> None:
     if w != init["weights_sha256"]:
         raise SystemExit(f"built model weights {w[:12]} differ from the verified starting file "
                          f"({init['weights_sha256'][:12]}); not trained")
+
+
+def check_pinned_config(rc) -> None:
+    """N5: a run of the pre-registered list runs only from its tracked config file with the pinned recipe hash."""
+    cfg_dir = (paths.MARTIN_DIR / "configs").resolve()
+    if not str(Path(rc.source).resolve()).startswith(str(cfg_dir) + "/"):
+        raise SystemExit(f"{rc.name}: config {paths.portable(rc.source)} is not a tracked file of "
+                         "shape-form-martin/configs/ (N5)")
+    want = PINNED_CONFIG_HASH.get(rc.name)
+    if want is not None and rc.hash() != want:
+        raise SystemExit(f"{rc.name}: recipe hash {rc.hash()} differs from the pinned {want} (N5)")

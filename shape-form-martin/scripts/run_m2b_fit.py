@@ -54,6 +54,7 @@ def run_config(path: str) -> dict:
     if done is not None:
         print(f"already done on this machine: {paths.portable(rc.done_file)}")
         return done
+    lib.check_pinned_config(rc)                                              # N5: tracked file, pinned recipe
     init = lib.verify_init(rc.name, rc.model_factory, rc.model_kwargs)        # B2: pre-registered + SHA-256
     print(f"starting point verified: {init['factory']} {init['run'] or ''} file {init['file_sha256'][:12]} weights "
           f"{init['weights_sha256'][:12]} ({init['trained_on']})")

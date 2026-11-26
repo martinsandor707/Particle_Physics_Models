@@ -126,13 +126,23 @@ def _field_mlp_std(ctx):
     return mlp_std_start(ctx.device)
 
 
+def _template(kind: str, device):
+    """Acceptance template by kind: "stored" / "front" / "front_back" from sfm.models.field; "back_corrected" /
+    "full_box" are the Track A templates computed on THIS machine from the training events (read through
+    sfm.models.dist_factory.acceptance_template - one implementation, not duplicated here)."""
+    if kind in ("back_corrected", "full_box"):
+        from .dist_factory import acceptance_template as _track_a_template
+        return _track_a_template(kind, device)
+    return acceptance_template(kind, device)
+
+
 @register("field_acc")
 def _field_acc(ctx, template: str = "stored", base: str = "mlp_std", hidden: int = 32, n_layers: int = 4,
                n_freq: int = 4, warm_steps: int = 500, warm_lr: float = 1e-3, grid_points: int = 64):
     """FieldAcc(base, A): logits + ln A (plan B4). base="mlp_std": start from mlp_std's weights and warm-start the
     wrapper by KL to mlp_std's own map (so training starts from the same function); base="fresh": random init,
-    no warm start."""
-    A = acceptance_template(template, ctx.device)
+    no warm start. ``template`` also accepts the Track A kinds "back_corrected" / "full_box" (``_template``)."""
+    A = _template(template, ctx.device)
     if base == "mlp_std":
         net = mlp_std_start(ctx.device)
     elif base == "fresh":
@@ -174,6 +184,51 @@ def _ensemble(ctx, members: list = (), log_weights: Optional[list] = None, train
     if include_mlp_std:
         ms.insert(0, mlp_std_start(ctx.device).eval())
     return Ensemble(ms, log_weights, trainable_weights)
+
+
+def train_quantile_grid(ctx, n: int = 256) -> torch.Tensor:
+    """n training-momentum quantiles in ln p at the probabilities (i + 1/2) / n (midpoints: never the extreme event,
+    so the grid stays inside the training range that kl_warm_start enforces)."""
+    if ctx.train is None:
+        raise ValueError("a training-momentum quantile grid needs the training set in the build context")
+    lnp = ctx.train.ev["lnp"].detach().cpu().numpy().astype(np.float64)
+    q = np.quantile(lnp, (np.arange(int(n)) + 0.5) / int(n))
+    return torch.as_tensor(q, dtype=torch.float32, device=ctx.device)
+
+
+@register("field_kl")
+def _field_kl(ctx, hidden: int = 32, n_layers: int = 4, n_freq: int = 4, target: str = "mlp_std",
+              grid: int = 256, kl_steps: int = 3000, kl_lr: float = 1e-3):
+    """Fresh ``field(hidden, n_layers)`` (seeded by the caller), warm-started data-free by KL to ``target``
+    ("mlp_std") on ``grid`` training-momentum quantiles (``kl_warm_start``; AUDIT 4.2 B6a/b/c route). Skipped when
+    rebuilding a finished run (``ctx.skip_init``)."""
+    model = field_model(hidden, n_layers, n_freq, device=ctx.device)
+    if target != "mlp_std":
+        raise ValueError("field_kl: the pre-registered target is mlp_std")
+    if not ctx.skip_init and kl_steps > 0:
+        res = kl_warm_start(model, mlp_std_start(ctx.device).eval(), train_quantile_grid(ctx, grid), int(kl_steps),
+                            float(kl_lr), log=ctx.log)
+        model.init_info = {"kl_warm_start": res, "target": target, "grid": int(grid)}
+        ctx.log(f"field_kl({hidden}, {n_layers}) warm start: KL {res['kl_initial']:.4e} -> {res['kl_final']:.4e}")
+    return model
+
+
+@register("field_distill")
+def _field_distill(ctx, start: str, target: str, grid: int = 256, kl_steps: int = 6000, kl_lr: float = 1e-3):
+    """FieldNet(32, 4) carrying the weights of the finished run ``start``, fitted data-free by KL to the finished
+    ensemble run ``target`` on ``grid`` training-momentum quantiles (AUDIT 4.2 B1d). No training data are used.
+    Skipped when rebuilding a finished run (``ctx.skip_init``: the stored weights are loaded afterwards)."""
+    src = load_run(start, ctx)
+    if not isinstance(src, FieldNet):
+        raise ValueError(f"field_distill: start {start!r} is not a FieldNet")
+    model = field_model(src.hidden, src.n_layers, src.n_freq, device=ctx.device)
+    model.load_state_dict(src.state_dict())
+    if not ctx.skip_init and kl_steps > 0:
+        teacher = load_run(target, ctx).eval()
+        res = kl_warm_start(model, teacher, train_quantile_grid(ctx, grid), int(kl_steps), float(kl_lr), log=ctx.log)
+        model.init_info = {"kl_warm_start": res, "start": start, "target": target, "grid": int(grid)}
+        ctx.log(f"field_distill from {start} to {target}: KL {res['kl_initial']:.4e} -> {res['kl_final']:.4e}")
+    return model.train()
 
 
 @register("from_run")

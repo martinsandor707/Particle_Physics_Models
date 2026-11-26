@@ -38,6 +38,9 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     tag = machine.startup("fit.py")                                  # E10: CUDA or a hard failure; TF32 off; caps
+    if not machine.is_laptop_of_record():                             # review note N5
+        raise SystemExit("this generic script has no starting-point or recipe check; runs of record on another machine "
+                         "go through scripts/run_m2b_list.py, run_m2b_fit.py or run_m2a.py")
     gitst = machine.git_state()
     rc = train.load_run_config(args.config)
     print(f"run {rc.stage}/{rc.name}  (config {paths.portable(rc.source)}, hash {rc.hash()})  model {rc.model_factory} "
