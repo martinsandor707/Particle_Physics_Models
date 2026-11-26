@@ -2091,3 +2091,49 @@ Stage-2 result exists.
   available memory, pressure-stall figures) with a warning when a part exceeds 60 s, so that a recurrence can be
   diagnosed. Stage 2 has about a dozen guarded runs; even at the worst rate of that night that would be hours, not a
   blocker.
+
+## 22. Stage 2 of Track A: review, requirements, A11p specification (26 Nov 2026; commit `d0f04b8`)
+
+Report: `results/m2a_dist/REVIEW.md` sections 9 (re-check of `aab7aba`: all six fixes closed), 10 (Stage 2) and 11
+(A11p). **The A11p specification is committed before any Stage-2 fit exists.**
+
+**Stage 2 is not ready to run.** As coded it refuses on the real state (the kept list is [A9, A9r] and their merge
+conflicts), and nothing downstream exists yet: no Stage-2 report, finalist rule, "cleaner" test, Stage-2 guards or
+A11p. The requirements R1–R9 for the worker are in section 10.5; the reviewer re-checks the result before the run.
+
+**What Stage 2 can and cannot show, stated before it runs**
+- A11 with content [A9] **is** A9: in smoke `A11_s0` equals `A9_s0` bit for bit. Seeds 0 and 1 of A11 are therefore a
+  reproducibility check of training on the H200 (the first the campaign will have), not a further replication; only
+  seed 2 is new.
+- A11 alone cannot be "cleaner": A9 is −2.18 ± 1.26 against the formula with 104 constants. The bar can be met only
+  if A11k gains about 0.8 more, or if A11p reaches at most 90 constants (at least 14 coefficients removed) at equal NLL.
+- Finalist rule made mechanical (section 10.4): per seed 0 and 1, the 1-SE rule over A2s, A11, A11k and an accepted
+  A11p; eligible on both seeds; fewest constants wins; A11n is shown but is not a candidate. "Cleaner" has two
+  clauses against the formula's array: at least 3 better (with seed 1 at least 1.5 and the mean at least 3), or at
+  most 90 constants with equal NLL on both seeds. If neither holds, the legacy formula remains the baseline.
+
+**A11p in brief (section 11).** Fisher quantity: the diagonal of the observed information of the training objective
+per stored monomial coefficient (central second difference at fixed fold points, all 69,783 training events);
+predicted cost Q_j = ½|H_j|c_j², threshold 0.2 × 10⁻⁴ nat per training event. Candidates: the 58 coefficients of
+degree ≥ 1; per parameter row from the top degree down, stopping at the first failure; constants, `logit_dh` and the
+halo scalars are never touched, so A11p lowers degrees and cannot remove a component. Screened on `A11_s0` and
+`A11_s1`; a coefficient must pass on both; one shot. Refit by the A11 procedure on the pruned structure. Registered
+acceptance: equal NLL against A11 on both seeds.
+
+**Awaiting the user's confirmation (all concern A11p or the finalist)**
+
+| # | Question | Reviewer's proposal |
+|---|---|---|
+| P1 | How the short events enter A11p (the user's addition of §20) | one principle: the short events may take at most half of each registered tolerance. Screen on the 678 short training events (cost below 10.3 units); acceptance on the 166 short validation events, both seeds: U1, Δ + 2 SE below 45; U2, at most 95 events worse by more than 10⁻⁴ nat. Failing either removes A11p from the finalist candidates. A share of ¼ would give 5.1 and 22.5 |
+| P2 | If the short-event screen vetoes coefficients | the reduced set is fitted; the set under the registered rule alone is recorded, and fitted only if asked (two further fits) |
+| P3 | Refit of A11p | by the A11 procedure from A2s (no continued-training term). Alternative only if preferred: continue from the fitted A11, which needs a matched control of two unregistered fits |
+| P4 | Finalist | if A11n beats every polynomial model by more than 1 SE on both seeds, the choice goes to the user at Gate 1 |
+
+**New finding for the user and Gate 1: A9 against the matched control A2c on the 166 short events
+(z_b < 1221 mm) is worse by +20.2 ± 7.7 (seed 0) and +21.8 ± 7.8 (seed 1), 2.6 and 2.8 SE.** It is a broad shift:
+106 and 107 of the events are worse by more than one unit, and the mean is still +17 without the three largest. The
+Stage-1 table shows only +8.0 ± 7.2 against A2s, because A2s itself is 12 units worse than A2c on these events. A7,
+A7s and A8 show the same +22 to +24, so this looks like a property of the rungs that train on from A2s rather than
+of the halo. A11p's conditions are relative to A11 and cannot repair it. About A9r: of its +83.9 ± 62.9 against A9
+on the short events one single event contributes 62 and the median is −1.3 — the "1.4 SE" is a statement about one
+event, and A11p cannot test A9r's change, which removed a component.
