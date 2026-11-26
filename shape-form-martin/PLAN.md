@@ -1982,3 +1982,46 @@ uncommitted. Detail: `src/sfm/sr/STATUS.md` section 15. Three further points for
 - The worker recommends the **Track A finalist before any PySR refit** as the fixed reference of the depth rule (one
   object, one hash, existing before any equation is seen; C1 is itself a refit and is instead tested against the same
   record with a zero correction). The radial alternative is anchored the same way.
+
+## 19. Track A Stage 1 on the H200 — table available, not yet gated (26 Nov 2026)
+
+**Jobs.** `m2a` ended with exit 0 on 26 Nov, 06:28 UTC: fits 20:41–21:56 UTC (75 min, 68 registered runs), then the
+guards phase, which took 8.5 hours for 27 runs (15–35 minutes per guarded component model at K = 1024; the cause is
+not profiled yet and has to be before Stage 2). Follow-up job `m2a_after` at the re-reviewed code (commit `732039b`,
+Track A files equal to `a05c86e`), 3 minutes: **warm-start check — 0 of 14 network runs to be re-run** (every
+`kl_map` below 10⁻⁴ nat, no target column below the floor, every warm start rebuilt bit for bit); A2c controls
+registered; final Stage-1 report written. Results: `results/machines/h200-g1056-97b197a7/runs/m2a_dist/RESULTS.md`
+(commits `732039b`, `b0c0f1c`). No run diverged; no run was dropped.
+
+**Stage 1, validation, 10⁻⁴ nat, paired SE, n = 14,950. Stage 2 has not been started; no selection has been made.**
+
+| Comparison | Seed 0 | Seed 1 | Rule outcome |
+|---|---|---|---|
+| A0 (formula refitted in the harness) − formula | +0.64 ± 0.74 | +0.65 ± 0.74 | drift rule: continue |
+| A1 (network-predicted parameters) − A0 | +2.93 ± 1.23 | +2.56 ± 1.29 | worse; not converged |
+| A2e (exact cell integration) − A0 | +0.72 ± 0.12 | +0.62 ± 0.11 | slightly worse |
+| A2s (base of Stage 1) − A2e | +1.13 ± 0.28 | +1.12 ± 0.28 | — |
+| A2c (control: A2s trained on) − A2s | −0.16 ± 0.12 | −0.13 ± 0.12 | the common continued-training term is small |
+| **A4** EMG depth profile − A2s | +1.77 ± 0.57 | +1.44 ± 0.58 | not kept (worse) |
+| **A5** generalised gamma − A2s | +6.32 ± 1.24 | +5.93 ± 1.18 | not kept (worse) |
+| **A7** Burr radial body − A2s | −0.51 ± 0.27 | −0.46 ± 0.28 | not kept; equal NLL |
+| **A8** Weibull halo − A2s | −0.06 ± 0.29 | −0.04 ± 0.29 | not kept; equal NLL |
+| **A9** detector-frame halo − A2s | **−4.67 ± 0.88** | **−4.66 ± 0.89** | **kept and replicated** |
+| **A10** pure mixture, K = 3 − A2s | +78.8 ± 4.8 | +87.5 ± 5.0 | not kept (much worse) |
+
+- Exploratory rungs: A9r (reduced halo, 98 constants) −4.63 ± 1.24 and −4.64 ± 1.24, kept and replicated; A12
+  −1.15 ± 0.82; A7s, A7l, A8c, A78 between −0.2 and −0.5 (equal NLL, not kept); A3x +0.37 ± 0.47; A6b +1.07 ± 2.21;
+  A5h +5.0, A3c +6.2, A6i +6.4, A3f +8.0, A6l +9.7, A4t +19.5; mixtures A10-5 +20, A10g +32, A10-4 +44, A10-2 +116.
+  Network column (against A2n): A9n −5.15 ± 1.00; A4n, A7n, A8n null; A5n +3.1; A10n +52.8.
+- **Against the legacy formula, A9 is −2.18 ± 1.26** (the base A2s is itself about +2.5 above the formula). Against the
+  MLP it stays about +21 behind (formula − MLP = +23.24 ± 2.94). It does not meet the plan's "cleaner" criterion
+  (at least 3 better than the formula, or 10 % fewer constants at equal NLL).
+- **Guards for A9 (seed 0):** G-K −4.65 ± 0.88 and G-bulk −4.43 ± 0.87, both passed and resolved. **G-region failed:**
+  71 % of the gain lies in flagged cells, almost all of it in cells with mean acceptance ≤ 0.3 (hit term there
+  −2.97 ± 0.53 of −4.63). That is where a backward-cone halo acts, and it is the region where the metric is only
+  approximately a proper score. Mass monitors unchanged.
+- What this means for the content of A11 and for the Track A finalist is for the user and Gate 1.
+
+**Process note.** The first results commit of today was made by a command chain that printed a host-detail warning
+for one file and committed anyway; the match was the digit string of the port inside two floating-point numbers. No
+host detail is in the repository. The check now stops the commit and asks for the port only in context.
