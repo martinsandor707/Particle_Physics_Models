@@ -78,7 +78,8 @@ __all__ = ["CorrectedModel", "expression_correction", "PolyControl", "c2_monomia
            "control_c2", "audit_control", "audit_verdict", "c2_report", "C2_GOVERNING_LABEL", "C2_DIAGNOSTIC_LABEL",
            "ClipMonitor", "clip_statistics", "constants_inside_sqa", "CLIP_DEFINITIONS", "cusp_hover_statistics",
            "CUSP_EPS_REL", "HOVER_STAGNATION", "extended_ring_grid",
-           "continued_log_density", "tail_criterion_for_baseline", "STAGE_BEFORE", "STAGE_TRANSLATION",
+           "continued_log_density", "tail_criterion_for_baseline", "c1_against_reference", "STAGE_BEFORE",
+           "STAGE_TRANSLATION",
            "STAGE_AFTER",
            "SubstitutedProvider", "fit_candidate", "check_gradients", "register_refit", "refit_summary",
            "RefitNotAllowed", "ENV_ALLOW"]
@@ -929,6 +930,36 @@ def tail_criterion_for_baseline(model_std: nn.Module, model_ext: nn.Module, *, b
                                    f"continuation mismatch on the shared rings {err:.2e}", **kw)
 
 
+def c1_against_reference(c1_std: nn.Module, c1_ext: nn.Module, tail_criterion: Mapping, *, baseline_hash: str,
+                         c1_hash: str, label: str = "C1: baseline refitted alone, same schedule",
+                         stage2: bool = False) -> dict:
+    """The one call for "test C1 against the reference with a zero correction" (PLAN section 20, item 4).
+
+    c1_std, c1_ext   the control C1 - the baseline refitted alone with the candidates' schedule - on its grid, and
+                     the same model built on ``extended_ring_grid(c1_std.grid)`` (as for ``tail_criterion_for_
+                     baseline``); any closed-form baseline with ``components(lnp)`` and ``grid`` works
+    tail_criterion   the record of the reference of record: the frozen Track A finalist BEFORE any PySR refit,
+                     bound to ``baseline_hash``
+    c1_hash          the hash of C1's checkpoint (recorded in the table)
+    The slope table of C1 is made (``reference_kind="refitted_baseline"``: it can never serve as a reference) on the
+    reference's momenta, and ``audit.baseline_against_reference`` applies the inheriting depth rule, the radial rule
+    and (``stage2``) the rising-stretch condition to C1 alone, delta = 0. Returns that result with "passed",
+    "reasons", the measured table under "table" and a three-line "text". If C1 fails, the schedule bends the
+    baseline: print the verdict beside every SR verdict of that schedule."""
+    table = tail_criterion_for_baseline(c1_std, c1_ext, baseline_hash=c1_hash, label=label,
+                                        reference_kind="refitted_baseline",
+                                        momenta_gev=list(tail_criterion["momenta_GeV"]))
+    res = A.baseline_against_reference(tail_criterion, table, baseline_hash=baseline_hash, stage2=stage2)
+    res["table"] = table
+    res["text"] = "\n".join([
+        f"C1 against the reference [{tail_criterion.get('label')}] with delta = 0: "
+        f"{'PASS' if res['passed'] else 'FAIL'}",
+        f"  depth beyond z_90: {res['depth']['n_violations']} of {res['depth']['n_points']} points above "
+        f"max(0, reference slope); radial: {res['radial']['n_violations']} of {res['radial']['n_points']} points",
+        "  " + res["rising_stretches"]["text"].splitlines()[1].strip()] + ["  " + r for r in res["reasons"]])
+    return res
+
+
 # ----------------------------------------------------------------------------------------------------------------------
 # The fit
 # ----------------------------------------------------------------------------------------------------------------------
@@ -957,7 +988,8 @@ def fit_candidate(model: nn.Module, train, val, config, *, label: str, synthetic
                of the refitted baseline: pass ``measured_tail`` (``reference_kind="refitted_baseline"``) or
                ``tail_table_fn(refitted_base_model) -> that record`` (e.g. a closure around
                ``tail_criterion_for_baseline``); without it a jointly refitted finalist is not certified.
-               ``stage2=True`` also enforces sign_changes(model) <= sign_changes(reference) per profile.
+               ``stage2=True`` also enforces rising_stretches(model) <= rising_stretches(reference) for every
+               depth profile beyond z_90 (sign-change counts are reported as a diagnostic).
                The result is ``finalist_certified``; a finalist without it must not enter LOCK.json.
     pre_refit_audit   the JSON of the audit made before the refit (laptop): its stripped gauge terms are carried
                into the record, and compared with what was stripped before translation.
@@ -966,6 +998,11 @@ def fit_candidate(model: nn.Module, train, val, config, *, label: str, synthetic
     ("before refit" from ``pre_refit_audit``, "before translation" from ``expression_correction``, "after refit"
     from the post-refit audit); none of their constants is trained or counted (``k_equation``); ``k_as_written``
     is the count including them.
+    REVIEW TRIGGER, NOT A REJECTION (PLAN section 20, item 7): the cusp-stall flag never changes ``audit_passed``,
+    ``audit_certified`` or ``finalist_certified`` and removes or demotes nothing. A flagged run gets
+    ``requires_fable_review = True`` with ``fable_review_reasons``; every promoted or Pareto-front candidate that
+    carries it needs a Fable look at its parameter traces and loss curves (``review_material``: constants,
+    their gradients and the gradient norm along the run, and the harness's loss history) before it is used.
     Cusp-stall flag (S5 and the user's decision of 25 Nov 2026): ``cusp_stalled`` = ``cusp_stalled_by_clipping``
     (``clip_log`` = ``clip_statistics`` of the run: persistent clipping driven by a constant inside an sqa
     argument, without net movement) OR ``cusp_stalled_by_hover`` (``cusp_hover`` = ``cusp_hover_statistics``: an
@@ -1020,6 +1057,23 @@ def fit_candidate(model: nn.Module, train, val, config, *, label: str, synthetic
                                       model.rh[0].detach().cpu().numpy(), start_values=mon.start)
     by_clip = bool(clip_log["flags"]["cusp_stalled"])
     by_hover = bool(hover is not None and hover["stalling"])
+    review: List[str] = []
+    if by_clip:
+        review.append("cusp-stall flag (clipping): persistent gradient clipping driven by constant(s) " +
+                      str([c_["index"] for c_ in clip_log["per_constant"] if c_["stalled"] and
+                           c_["inside_sqa_argument"]]) + " inside an sqa argument, without net movement")
+    if by_hover:
+        review += [f"cusp-stall flag (clip-independent): {r['node']}: {'; '.join(r['reasons'])}"
+                   for r in hover["nodes"] if r["stalling"]]
+    n_rec = len(mon.total_norm)
+    pick = np.unique(np.linspace(0, max(n_rec - 1, 0), min(n_rec, 512)).round().astype(int)) if n_rec else np.zeros(0, int)
+    material = {"note": "for the review of a flagged candidate: traces of this process's steps (at most 512 points, "
+                        "evenly spaced) and the harness's loss history",
+                "step": (pick + 1).tolist(),
+                "constants": np.array(mon.c_val)[pick].tolist() if n_rec else [],
+                "constant_gradients": np.array(mon.c_grad)[pick].tolist() if n_rec else [],
+                "gradient_norm": [float(mon.total_norm[i]) if math.isfinite(mon.total_norm[i]) else None for i in pick],
+                "loss_history": [{k: h.get(k) for k in ("step", "lr", "train_nll", "val")} for h in res.history]}
     if by_clip:
         warn.append("cusp-stalled: a constant inside an sqa argument drives persistent gradient clipping without "
                     "net movement (see clip_log)")
@@ -1039,7 +1093,9 @@ def fit_candidate(model: nn.Module, train, val, config, *, label: str, synthetic
            "audit_verdict": None, "finalist": None, "finalist_certified": None, "clip_log": clip_log,
            "cusp_stalled": bool(by_clip or by_hover), "cusp_stalled_by_clipping": by_clip,
            "cusp_stalled_by_hover": by_hover, "cusp_hover": hover,
-           "cusp_hover_suspect": None if hover is None else by_hover, "warnings": warn, "registered": False}
+           "cusp_hover_suspect": None if hover is None else by_hover,
+           "requires_fable_review": bool(review), "fable_review_reasons": review, "review_material": material,
+           "warnings": warn, "registered": False}
     refit = model.current_expr() if hasattr(model, "current_expr") else None
     if refit is not None:
         rep = A.audit(refit, audit_box, stage=STAGE_AFTER, carried_stripped=carried, **(audit_kw or {}))
@@ -1081,6 +1137,8 @@ def refit_summary(out: Mapping) -> str:
     cl = out.get("clip_log")
     if cl is not None:
         txt += f" clipped_steps={cl['n_clipped']}/{cl['n_steps']} cusp_stalled={out.get('cusp_stalled')}"
+    if out.get("requires_fable_review"):
+        txt += " REQUIRES_FABLE_REVIEW (diagnostic trigger, not a rejection)"
     if out.get("stripped_gauge_terms"):
         txt += f" stripped_gauge_terms={len(out['stripped_gauge_terms'])}"
     return txt
@@ -1097,6 +1155,12 @@ def register_refit(*args, **kwargs):
       * the governing C2 is tanh(polynomial) (``control_c2(base, k)``, ``role="control"``; S1): only it enters
         Delta(SR) - Delta(C2). The plain polynomial may be registered as a diagnostic row (``role="diagnostic"``)
         with its ``audit_verdict`` beside it (``c2_report``);
+      * ``requires_fable_review`` (the cusp-stall flag) is a review trigger, NOT a rejection (PLAN section 20,
+        item 7): register the row as usual, store the flag, its reasons and ``review_material``, and do not
+        promote such a candidate or use it from the Pareto front before Fable has looked at its parameter traces
+        and loss curves;
+      * the control C1 is tested against the reference with a zero correction: ``c1_against_reference`` (PLAN
+        section 20, item 4); store its verdict with every SR row of the same schedule;
       * store ``stripped_gauge_terms`` (S3) and ``clip_log`` / ``cusp_stalled`` (S5) with the row; a finalist is
         certified against the tail-criterion record of the baseline of record (S4: ``tail_criterion_for_baseline``
         run once for the refitted Track A finalist, bound to its checkpoint hash);

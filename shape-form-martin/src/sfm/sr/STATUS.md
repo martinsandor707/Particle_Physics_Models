@@ -1,12 +1,13 @@
-# `sfm.sr` — status of the math-author modules (25 Nov 2026; updated after the user's decisions on the depth rule and the cusp flag)
+# `sfm.sr` — status of the math-author modules (updated 26 Nov 2026 after the user's decisions of PLAN §20, items 4–7)
 
 Written for whoever continues. All six modules are implemented; each section says what the code does, what was
 verified and what was not. Section 8 holds the decisions and the plan rules they touch (**all eight accepted by
 the user on 25 Nov 2026**); section 12 answers the user's four confirmations; **section 13 builds in the user's
 decisions S1–S5 (PLAN §17.11) and holds the tail-criterion preview for the legacy formula**; section 14 explains
-why the legacy formula fails the absolute depth rule; **section 15 implements the user's decisions on it (inheriting
-depth rule anchored to the fixed reference, Stage-2 sign changes, cusp-stall flag) and is in force where it differs
-from sections 12–14**; section 10 holds
+why the legacy formula fails the absolute depth rule; section 15 implements the user's decisions on it (inheriting
+depth rule anchored to the fixed reference, Stage-2 check, cusp-stall flag); **section 16 implements PLAN §20, items
+4–7 (anchor confirmed, C1 test, rising stretches enforced instead of sign changes, cusp flag as a review trigger) and
+is in force where it differs from sections 12–15**; section 10 holds
 the interfaces for the runner. Where sections 12 and 13 differ, 13 is in force. **Numbers are measured only where they say so.**
 
 ## 1. Status per module
@@ -15,13 +16,13 @@ the interfaces for the runner. Where sections 12 and 13 differ, 13 is in force. 
 |---|---|---|---|
 | `operators.py` | done (first session); `UNCONFIRMED` emptied, `CONFIRMED_WITH_JULIA` added; torch `sqa` / `softplus` gradients fixed (§12.1) | 70 pass | every item of `UNCONFIRMED` is now confirmed against Julia, see §9 |
 | `translate.py` | **done** | 91 pass (`tests/test_sr_translate.py`, 1.3 s) | torch only on demand; checked against real PySR strings, predictions and losses |
-| `audit.py` | **done** | 82 pass (`tests/test_sr_audit.py`, 15 s) | NumPy only; (a) domain, (b) magnitude, (c) numerics; stripped-term log; `tail_check`, `certify_finalist` |
+| `audit.py` | **done** | 83 pass (`tests/test_sr_audit.py`, 18 s) | NumPy only; (a) domain, (b) magnitude, (c) numerics; stripped-term log; `tail_check`, `certify_finalist` |
 | `checks.py` | **done** | 15 pass (`tests/test_sr_checks.py`) | NumPy only; tolerances are arguments with stated defaults |
 | `targets.py` | **done**, not yet run on real data | 18 pass (`tests/test_sr_targets.py`) | constructions tested on synthetic maps; event-level estimators on synthetic showers (CPU child process) |
-| `refit.py` | **done except registration** (stub, by instruction) | 17 pass (`tests/test_sr_refit.py`, CPU child process) | constants recovered on synthetic showers; no real refit run |
+| `refit.py` | **done except registration** (stub, by instruction) | 20 pass (`tests/test_sr_refit.py`, CPU child process) | constants recovered on synthetic showers; no real refit run |
 | `__init__.py` | empty, as `test_sr_package_init_is_empty` requires | | |
 
-Run: `uv run pytest shape-form-martin/tests -q -k "sr_ and not search"` → 297 passed (about 30 s): 293 in the six
+Run: `uv run pytest shape-form-martin/tests -q -k "sr_ and not search"` → 301 passed (about 37 s): 297 in the six
 files of this table plus the 4 of another worker's `tests/test_sr_post.py`, which the same filter selects.
 
 Nothing outside the write set was touched; no git state changed; the test split was not opened; no `*.csv` was
@@ -800,7 +801,7 @@ C1 should instead be *tested* against the same record (its table as `measured_ta
 itself violates the rule, the schedule is responsible, not the equation, and that belongs beside the SR verdict.
 If the user prefers C1 as the reference, it is `reference_kind="c1_refit_only"` and nothing else changes.
 
-### 15.2 Stage-2 sign-change condition
+### 15.2 Stage-2 sign-change condition (superseded by §16.2: rising stretches are enforced, sign changes are a diagnostic)
 
 - **Quantities:** `∂_z′ ln ρ` beyond z_90 along depth, one profile per (momentum, radius); `∂ ln ρ/∂ ln r` for
   r > 200 mm along r, one profile per (momentum, depth row); the seven registered momenta.
@@ -867,3 +868,100 @@ the constants of each step of the final quarter of the run and reports:
 - `refit`: `tail_criterion_for_baseline(…, reference_kind=)` with attribution; `fit_candidate(…, tail_table_fn=,
   stage2=)`; result keys `cusp_stalled_by_clipping`, `cusp_stalled_by_hover`; `cusp_hover` has the new fields.
 - Nothing used by `scripts/sr_post.py` or the search runner changed.
+
+## 16. PLAN §20, items 4–7 (user decisions of 26 Nov 2026) — implemented
+
+### 16.1 Item 4 — the anchor, and C1 against it
+
+Nothing had to change in the rules: `decide_tail_criterion` / `tail_criterion_for_baseline` default to
+`reference_kind="track_a_finalist"` (the frozen finalist before any PySR refit: one object, one hash), both the
+inheriting depth rule and the radial alternative take every bound from that record, and a table of a refitted
+baseline is refused as a reference (§15.1).
+
+**The one call for C1:** `refit.c1_against_reference(c1_std, c1_ext, tail_criterion, baseline_hash=, c1_hash=,
+stage2=False)` — `c1_std` is the control C1 on its grid, `c1_ext` the same model on
+`refit.extended_ring_grid(c1_std.grid)`. It makes C1's slope table (kind `refitted_baseline`) on the reference's
+momenta and applies the depth rule, the radial rule and (with `stage2`) the rising-stretch condition to C1 alone
+with δ = 0; the result has `passed`, `reasons`, the table and a three-line `text`. For a baseline that only exists
+as slope tables the NumPy part is `audit.baseline_against_reference(criterion, measured, baseline_hash=)`.
+- Tests: the legacy preview model against its own record passes (840 rising cells inherited, 0 of 26,432 depth and
+  0 of 36,736 radial points above the bound); synthetic: an identical table passes, a baseline that has learnt to
+  rise fails with zero correction; a refitted table cannot be the reference; a wrong baseline hash is refused.
+- **A consequence to know.** The legacy preview model with all polynomial coefficients scaled by 1.02 — an
+  arbitrary perturbation, not a refit — fails as "C1": 869 depth points and 12,944 of 36,736 radial points, the
+  worst radial one at p = 0.05 GeV, z′ = −129 mm, r ≈ 700 mm, where the slope went from −30.5 to −25.4 in a region
+  that carries no energy. "Not flatter than the fixed reference at every point" has no notion of where the density
+  matters, so with a *jointly refitted* baseline the radial alternative is likely to fail for C1 itself, and then
+  for every candidate of that schedule. The real C1 test will show it; if it does, the options are to freeze the
+  baseline in the PySR refit (`freeze_base=True`: then only the equation enters) or to ask the user for a
+  restriction of the radial comparison. Nothing was changed here.
+
+### 16.2 Item 6 — Stage 2: rising stretches are enforced, sign changes are a diagnostic
+
+- **Enforced** (`tail_check(…, enforce_stage2=True)`, `certify_finalist(…, stage2=True)`, `fit_candidate(…,
+  stage2=True)`): `rising_stretches(model) ≤ rising_stretches(reference)` for every depth profile beyond z_90 —
+  one profile per (registered momentum, radius of the record).
+- **Definition of a rising stretch** (`checks.profile_rising_lobes`), on the profile of finite-difference slopes
+  `∂_z′ ln ρ` on the record's grid: (1) non-finite and exactly-zero slopes are skipped; (2) a lobe is a maximal run
+  of consecutive slopes of one sign; (3) lobes whose largest |slope| is below 1e-5 /mm are dropped; (4) neighbouring
+  surviving lobes of equal sign are merged; (5) a rising stretch is a surviving stretch of positive slope. Model
+  slopes = the refitted baseline's table + the correction evaluated at the nodes. Grid and tolerance belong to the
+  reference's record, which now also stores the reference's counts (`depth.rising_stretches`).
+- **Radial profiles** (`∂ ln ρ/∂ ln r` for r > 200 mm, one profile per momentum and depth row, tolerance 1e-3): the
+  analogous quantity is the number of stretches in which the density *increases with r*. It is counted and
+  reported, **not separately enforced** — the user's decision is worded for the depth check, and both certified
+  radial rules already forbid any radial rise of the model on these segments wherever the reference is monotone (a
+  non-monotone reference cannot be certified against at all). *My reading, for confirmation.*
+- **Diagnostic that decides nothing:** the raw sign-change counts of the same profiles, depth and radial, total, per
+  momentum and per profile, printed side by side (`sign_changes`, `enforced: False`). The old switch
+  `enforce_sign_changes=True` now raises with a pointer to `enforce_stage2`.
+- The modulation cap of `checks.modulation_amplitude` (≤ 4 sign changes of the modulation inside the data range, 0
+  outside) is unchanged.
+- **Tests.** Legacy preview record (rising stretches of the reference per momentum 0, 0, 12, 13, 16, 21, 12 = 74;
+  sign changes 102): `−0.3·tanh(ζ − 2) − 0.1·l1p(ϱ)`, which had more sign changes than the reference in 6 of 392
+  profiles, **is now certified with `stage2=True`** (stretches 54 against 74, no profile exceeding; the diagnostic
+  still shows the 6). An oscillation inside the rising shoulders whose slope is never positive,
+  `−0.104·ζ − 0.0064·sin(16.3ζ) − 0.1·l1p(ϱ)`, passes the audit and the slope rules and **still fails** (33
+  profiles with more stretches). Synthetic: a falling correction on profiles that begin inside the reference's
+  bump adds a sign change in all 287 profiles and no stretch, and passes; the oscillation fails; a ripple of
+  2e-6 /mm is not a stretch.
+
+### 16.3 Item 5 — tolerances
+
+Accepted as they are (1e-5 /mm in depth, 1e-3 in the radial log-log slope); nothing changed.
+
+### 16.4 Item 7 — the cusp-stall flag is a review trigger, not a rejection
+
+- Checked: nothing in `audit`, `checks` or `refit` reads the flag to decide anything (a test asserts that the two
+  audit modules do not mention it); `audit_passed`, `audit_certified` and `finalist_certified` are computed without
+  it, and no function drops or demotes a candidate.
+- `fit_candidate` now returns **`requires_fable_review`** (True for a flagged run) with
+  **`fable_review_reasons`** (which constant, which `sqa` node, clipping or clip-independent), and
+  **`review_material`**: the constants, their gradients and the gradient norm along the run (at most 512 evenly
+  spaced steps) and the harness's loss history. `refit_summary` prints `REQUIRES_FABLE_REVIEW (diagnostic trigger,
+  not a rejection)`; the specification in `register_refit` says to register the row as usual and store the flag.
+- **Rule for the pipeline:** every promoted or Pareto-front candidate that carries `requires_fable_review` needs a
+  Fable look at its parameter traces and loss curves before it is used. The flag has a chance rate of roughly
+  15 % for a depth contour (§15.3), so it is expected to fire on sound fits too.
+- Tests: the parked run (flagged at the default clip norm) and the tight-clip run keep `audit_passed = True` and
+  `audit_certified = True` and carry the field, the reasons and 160 trace points; the three unflagged runs have
+  `requires_fable_review = False`.
+
+### 16.5 Fallback: the legacy formula as the Track A baseline for PySR
+
+Checked on the laptop with the read-only checkpoint (tests skip if it is absent):
+- **Works through `sfm.families.build_variant("legacy_centre", core, logA)`** — the component model that reproduces
+  the legacy map and has `components`, `core_map`, `grid` and a swappable `provider`:
+  `refit.tail_criterion_for_baseline` and `c1_against_reference` (this is what the preview used);
+  `targets.fisher_scores` (finite, positive on 24 synthetic events — the provider swap works on a
+  `ComponentModel`); `refit.SubstitutedProvider` (k 101 → 99 when a cubic row is replaced by a two-constant
+  equation); `refit.CorrectedModel` (k = 101 + k of the equation).
+- **Does not work with the object `sfm.legacy` builds** (`WithAcceptance` around the fitted shape): it has neither
+  `components` nor `provider`. It can only be the `base` of a `CorrectedModel`; for the tail record and for the
+  trajectory targets the `legacy_centre` representation has to be used.
+- Model-agnostic, no assumption: `targets.build_residual_target` and `estimate_response` (arrays and hits),
+  the audit, the controls C1 / C2, the cusp monitor.
+- Assumptions that remain: the baseline must be re-buildable on the extended ring grid with the same parameters
+  (true for `build_variant(..., grid=)`); the acceptance template exists on the standard grid only, so the tail
+  record is of the density before it; the attribution names (`track`, `end`, `shower`, …) are those of the component
+  model; `LastRing.provider` of a Track A wrapper is still unverified.

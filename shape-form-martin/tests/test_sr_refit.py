@@ -337,7 +337,12 @@ def _cpu_suite(out_json: str, tmp: str) -> None:
                                                            out_dir=str(tmp / name)),
                              label=name, synthetic=True, log=None)
         json.dumps(co)
-        cusp[name] = {"flags": co["clip_log"]["flags"], "n_clipped": co["clip_log"]["n_clipped"],
+        cusp[name] = {"review": co["requires_fable_review"], "review_reasons": co["fable_review_reasons"],
+                      "audit_passed": co["audit_passed"], "audit_certified": co["audit_certified"],
+                      "registered": co["registered"], "material_keys": sorted(co["review_material"]),
+                      "material_n": [len(co["review_material"]["step"]), len(co["review_material"]["constants"]),
+                                     len(co["review_material"]["loss_history"])],
+                      "flags": co["clip_log"]["flags"], "n_clipped": co["clip_log"]["n_clipped"],
                       "n_steps": co["clip_log"]["n_steps"], "max_norm": co["clip_log"]["max_norm"],
                       "per_constant": co["clip_log"]["per_constant"], "cusp_stalled": co["cusp_stalled"],
                       "by_clipping": co["cusp_stalled_by_clipping"], "by_hover": co["cusp_stalled_by_hover"],
@@ -376,7 +381,7 @@ def _cpu_suite(out_json: str, tmp: str) -> None:
     if ck.exists():
         import hashlib
         from sfm.families import build_variant, load_legacy_core
-        core, _ = load_legacy_core("cpu")
+        core, _logA = load_legacy_core("cpu")
         std = build_variant("legacy_centre", core, None, device="cpu", dtype=torch.float64)
         ext = build_variant("legacy_centre", core, None, device="cpu", dtype=torch.float64,
                             grid=R.extended_ring_grid(std.grid))
@@ -399,9 +404,41 @@ def _cpu_suite(out_json: str, tmp: str) -> None:
             Path(_os.environ["SFM_SR_PREVIEW_OUT"]).write_text(json.dumps(rec))
         from sfm.sr import checks as K
         K.verify_tail_criterion(rec, h)
-        certs = {eq: A.certify_finalist(eq, tail_criterion=rec, baseline_hash=h, baseline_frozen=True)
+        certs = {eq: A.certify_finalist(eq, tail_criterion=rec, baseline_hash=h, baseline_frozen=True, stage2=True)
                  for eq in ("-0.3 * tanh(zt - 2.0) - 0.1 * l1p(rh)", "-0.3 * tanh(zt - 2.0) + 0.1 * l1p(rh)",
-                            "0.3 * tanh((zt - 2.8) * 3.0) - 0.1 * l1p(rh)")}
+                            "0.3 * tanh((zt - 2.8) * 3.0) - 0.1 * l1p(rh)",
+                            "-0.104 * zt - 0.0064 * sin(zt * 16.3) - 0.1 * l1p(rh)")}
+        # C1 against the reference with delta = 0: the legacy model against itself, and a perturbed copy as "C1"
+        c1_same = R.c1_against_reference(std, ext, rec, baseline_hash=h, c1_hash="c1-identical", stage2=True)
+        pert_std = build_variant("legacy_centre", core, None, device="cpu", dtype=torch.float64)
+        pert_ext = build_variant("legacy_centre", core, None, device="cpu", dtype=torch.float64,
+                                 grid=R.extended_ring_grid(std.grid))
+        with torch.no_grad():
+            for mdl in (pert_std, pert_ext):
+                mdl.provider.coef.mul_(1.02)
+        c1_pert = R.c1_against_reference(pert_std, pert_ext, rec, baseline_hash=h, c1_hash="c1-perturbed")
+        # fallback (PLAN section 20): the legacy formula as the Track A baseline for PySR - what the sr modules need
+        from sfm.sr import targets as TG
+        from test_train import make_showers
+        cm = build_variant("legacy_centre", core, _logA, device="cpu")       # float32, with the acceptance template
+        few = make_showers(24, 5, torch.device("cpu"))
+        fs = TG.fisher_scores(cm, few, [0, 1, 2], K=2, batch=12)
+        corr = R.CorrectedModel(cm, R.expression_correction("0.1 * tanh(zt - 1.0)"))
+        with torch.no_grad():
+            lp = corr(few.ev["lnp"][:4])
+        sub = R.SubstitutedProvider(cm.provider, {cm.provider.names[0]: "0.3 * tanh(x * 2.0)"})
+        raw_legacy = __import__("sfm.legacy", fromlist=["x"]).shapelab.build_final(
+            __import__("sfm.legacy", fromlist=["x"]).C, "pion", str(ck.parent), 0.0, 1.0, metric="std")[0]
+        fallback = {"fisher_shape": list(fs["fisher"].shape), "fisher_finite": bool(np.isfinite(fs["fisher"]).all()),
+                    "fisher_positive": bool((fs["fisher"].mean(0) > 0).all()),
+                    "corrected_shape": list(lp.shape), "corrected_finite": bool(torch.isfinite(lp).all()),
+                    "corrected_sum": float(lp.exp().sum((1, 2)).mean()), "k_total": corr.n_params(),
+                    "k_equation": corr.n_correction(), "provider_names": len(cm.provider.names),
+                    "substituted_k": [cm.provider.n_params(), sub.n_params()],
+                    "has_components": hasattr(cm, "components") and hasattr(cm, "grid"),
+                    "raw_legacy_has_components": hasattr(raw_legacy, "components"),
+                    "raw_legacy_has_provider": hasattr(raw_legacy, "provider"),
+                    "raw_legacy_type": type(raw_legacy).__name__}
         rep["legacy"] = {"record": {k: rec[k] for k in ("label", "baseline_hash", "criterion", "record_hash",
                                                          "covers_r_max", "note", "momenta_GeV", "density", "n_depths",
                                                          "z_range_mm", "reference_kind", "schema")},
@@ -417,17 +454,25 @@ def _cpu_suite(out_json: str, tmp: str) -> None:
                                                                  "baseline_max_per_momentum", "rising_regions")},
                          "match_error": cd["match_error"], "shape": list(cd["log_rho"].shape),
                          "r_max": float(cd["r_mm"][-1]), "wrong_model": wrong, "text": K.format_tail_criterion(rec),
+                         "depth_rising_stretches_per_momentum": np.array(rec["depth"]["rising_stretches"]).sum(1).tolist(),
                          "certify": {eq: {"certified": c["certified"], "reasons": c["reasons"],
+                                          "audit_certified": c["audit_certified"],
                                           "radial": c["tail"]["radial"]["passed"], "depth": c["tail"]["depth"]["passed"],
                                           "depth_absolute": c["tail"]["depth"]["would_pass_absolute_rule"],
                                           "sign": c["tail"]["sign_changes"]["passed"],
                                           "sign_depth": c["tail"]["sign_changes"]["depth"],
-                                          "rising_stretches": c["tail"]["sign_changes"]["depth_rising_stretches"],
+                                          "stretches": c["tail"]["rising_stretches"]["depth"],
+                                          "stretches_enforced": c["tail"]["rising_stretches"]["enforced"],
+                                          "stretch_text": c["tail"]["rising_stretches"]["text"],
                                           "sign_text": c["tail"]["sign_changes"]["text"]}
                                      for eq, c in certs.items()},
-                         "stage2_falls": A.certify_finalist("-0.3 * tanh(zt - 2.0) - 0.1 * l1p(rh)", tail_criterion=rec,
-                                                            baseline_hash=h, baseline_frozen=True,
-                                                            stage2=True)["reasons"]}
+                         "c1_same": {k: c1_same[k] for k in ("passed", "reasons", "text", "tested_baseline_hash")},
+                         "c1_same_points": [c1_same["depth"]["n_reference_rising"], c1_same["depth"]["n_violations"]],
+                         "c1_pert": {"passed": c1_pert["passed"], "n_reasons": len(c1_pert["reasons"]),
+                                     "kind": c1_pert["table"]["reference_kind"], "text": c1_pert["text"],
+                                     "depth_violations": c1_pert["depth"]["n_violations"],
+                                     "radial_violations": c1_pert["radial"]["n_violations"]},
+                         "fallback": fallback}
 
     # trajectory substitution -------------------------------------------------------------------------------------
     prov = PolyProvider(["a", "b"], {"a": 3, "b": 1}, init={"a": [0.1, 0.2, 0.3, 0.4], "b": [1.0, -0.5]})
@@ -652,6 +697,25 @@ def test_constant_parked_on_a_cusp_is_flagged_at_the_default_clip_norm(suite):
     assert c_["persistent"] and c_["stalled"] and c_["n_driven"] > 80 and c_["net_over_path"] < 0.25
 
 
+def test_cusp_flag_is_a_review_trigger_not_a_rejection(suite):
+    """PLAN section 20, item 7: a flagged candidate keeps its audit verdict; it carries ``requires_fable_review``
+    with the reason and the material for the review (parameter traces, loss history)."""
+    c = suite["cusp"]
+    for name in ("default_clip", "tight_clip"):
+        d = c[name]
+        assert d["cusp_stalled"] and d["review"] is True and len(d["review_reasons"]) >= 1
+        assert d["audit_passed"] is True and d["audit_certified"] is True and d["registered"] is False   # untouched
+        assert "REQUIRES_FABLE_REVIEW (diagnostic trigger, not a rejection)" in d["summary"]
+        assert d["material_keys"] == ["constant_gradients", "constants", "gradient_norm", "loss_history", "note", "step"]
+        assert d["material_n"][0] == d["material_n"][1] == 160 and d["material_n"][2] == 2
+    assert "cusp-stall flag (clip-independent)" in c["default_clip"]["review_reasons"][0]
+    assert any("cusp-stall flag (clipping)" in x for x in c["tight_clip"]["review_reasons"])
+    for name in ("contour_between_rows", "no_cusp_in_grid", "sqa_of_rh"):
+        assert c[name]["review"] is False and c[name]["review_reasons"] == [] and "REQUIRES" not in c[name]["summary"]
+    src = (MARTIN / "src" / "sfm" / "sr" / "audit.py").read_text() + (MARTIN / "src" / "sfm" / "sr" / "checks.py").read_text()
+    assert "cusp_stalled" not in src and "requires_fable_review" not in src   # no audit or check reads the flag
+
+
 def test_structural_zeros_are_reported_not_flagged(suite):
     """sqa(rho) towards r = 0, a zero contour of sqa(zeta - c) between rows, an argument without a zero."""
     c = suite["cusp"]
@@ -711,8 +775,8 @@ def test_tail_criterion_of_the_legacy_formula_preview(suite):
     assert "does not continue the baseline" in r["wrong_model"] and r["bytes"] < 3_000_000
     ra = r["radial"]
     assert not ra["baseline_satisfies_limit"] and ra["baseline_monotone"] and -2.0 < ra["baseline_max"] < 0.0
-    assert rec["criterion"] == {"radial": "monotone_and_no_flattening", "depth": "inherit_reference",
-                                "decided_from": rec["criterion"]["decided_from"]}
+    assert rec["criterion"]["radial"] == "monotone_and_no_flattening" and rec["criterion"]["depth"] == "inherit_reference"
+    assert "rising_stretches(model) <= rising_stretches(reference)" in rec["criterion"]["stage2"]
     de = r["depth"]
     assert not de["baseline_falls_everywhere"] and de["n_rising_cells"] > 100 and len(de["z90_mm"]) == 7
     reg = {g["p_GeV"]: g for g in de["rising_regions"]}
@@ -728,21 +792,57 @@ def test_tail_criterion_of_the_legacy_formula_preview(suite):
     assert reg[1.0]["attribution"]["energy_in_rising_cells_inside_grid"] < 2e-3
     assert "removed by leaving out: ['track']" in r["text"] and "3-D density" in r["text"]
     cert = r["certify"]
-    falls, flat, rises = (cert[k] for k in ("-0.3 * tanh(zt - 2.0) - 0.1 * l1p(rh)",
-                                              "-0.3 * tanh(zt - 2.0) + 0.1 * l1p(rh)",
-                                              "0.3 * tanh((zt - 2.8) * 3.0) - 0.1 * l1p(rh)"))
-    assert falls["certified"] and falls["radial"] and falls["depth"]     # inherits both tails
-    assert not falls["depth_absolute"]                                   # which the absolute rule could never pass
+    falls, flat, rises, wiggle = (cert[k] for k in ("-0.3 * tanh(zt - 2.0) - 0.1 * l1p(rh)",
+                                                      "-0.3 * tanh(zt - 2.0) + 0.1 * l1p(rh)",
+                                                      "0.3 * tanh((zt - 2.8) * 3.0) - 0.1 * l1p(rh)",
+                                                      "-0.104 * zt - 0.0064 * sin(zt * 16.3) - 0.1 * l1p(rh)"))
+    # Stage 2 as decided (PLAN section 20, item 6): rising stretches per depth profile are enforced. The purely
+    # falling correction that had more SIGN CHANGES than the reference in 6 of 392 profiles now passes:
+    assert falls["certified"] and falls["radial"] and falls["depth"] and falls["stretches_enforced"]
+    assert falls["stretches"]["n_profiles_exceeding"] == 0 and falls["stretches"]["n_profiles"] == 392
+    assert falls["stretches"]["model_total"] <= falls["stretches"]["reference_total"] == sum(r["depth_rising_stretches_per_momentum"])
+    sd = falls["sign_depth"]                                             # the diagnostic still shows them
+    assert sd["n_profiles_exceeding"] == 6 and sd["model_total"] < sd["reference_total"] and not falls["sign"]
+    assert "decides nothing" in falls["sign_text"] and "REQUIRED" in falls["stretch_text"]
+    assert not falls["depth_absolute"]                                   # the absolute depth rule could never pass
     assert not flat["certified"] and not flat["radial"] and flat["depth"]
     assert not rises["certified"] and not rises["depth"]                 # rises where the reference falls or less
-    assert "model | reference" in falls["sign_text"] and "rising stretches" in falls["sign_text"]
-    # Stage-2 condition, as specified (per profile): this monotonically falling correction has FEWER sign changes
-    # in total than the reference, and still more in a few profiles - where it turns the start of a rising
-    # stretch of the reference into a fall. The count of rising stretches does not have that edge effect.
-    sd = falls["sign_depth"]
-    assert sd["model_total"] < sd["reference_total"] and 0 < sd["n_profiles_exceeding"] < 20 and not falls["sign"]
-    assert falls["rising_stretches"]["n_profiles_exceeding"] == 0
-    assert any("sign changes (depth)" in x for x in r["stage2_falls"])
+    # an oscillation inside the rising shoulders of the baseline (its slope is never positive): the audit and the
+    # slope rules are met, the rising-stretch condition is not
+    assert wiggle["audit_certified"] and wiggle["depth"] and wiggle["radial"] and not wiggle["certified"]
+    assert wiggle["stretches"]["n_profiles_exceeding"] > 0 and "rising stretches (depth)" in " ".join(wiggle["reasons"])
+
+
+def test_c1_is_tested_against_the_reference_with_a_zero_correction(suite):
+    """PLAN section 20, item 4: one call, ``refit.c1_against_reference``."""
+    r = suite["legacy"]
+    if r is None:
+        pytest.skip("legacy formula checkpoint not present")
+    same = r["c1_same"]                                                  # the reference against itself: inherits all
+    assert same["passed"] and same["reasons"] == [] and same["tested_baseline_hash"] == "c1-identical"
+    assert r["c1_same_points"][0] == r["depth"]["n_rising_cells"] and r["c1_same_points"][1] == 0
+    assert same["text"].splitlines()[0].endswith("PASS") and "rising stretches" not in same["text"].splitlines()[0]
+    pert = r["c1_pert"]                                                  # all coefficients scaled by 1.02: another model
+    assert pert["kind"] == "refitted_baseline" and isinstance(pert["passed"], bool)
+    assert pert["passed"] == (pert["n_reasons"] == 0) and "C1 against the reference" in pert["text"]
+    assert pert["passed"] == (pert["depth_violations"] == 0 and pert["radial_violations"] == 0)
+
+
+def test_legacy_formula_as_fallback_baseline(suite):
+    """PLAN section 20: if the Track A Stage-2 model does not pass Gate 1, the legacy formula is the baseline for
+    PySR. Everything in sfm.sr works with it THROUGH ``sfm.families.build_variant("legacy_centre", ...)`` (the same
+    map, with ``components``, ``grid`` and a swappable ``provider``); the object that ``sfm.legacy`` builds has
+    none of the three and can only serve as the ``base`` of a ``CorrectedModel``."""
+    r = suite["legacy"]
+    if r is None:
+        pytest.skip("legacy formula checkpoint not present")
+    f = r["fallback"]
+    assert f["has_components"] and f["provider_names"] > 20
+    assert f["fisher_shape"] == [24, 3] and f["fisher_finite"] and f["fisher_positive"]      # targets.fisher_scores
+    assert f["corrected_shape"] == [4, 128, 32] and f["corrected_finite"] and abs(f["corrected_sum"] - 1.0) < 1e-4
+    assert f["k_equation"] == 2 and f["k_total"] == f["substituted_k"][0] + 2                # baseline k + equation k
+    assert f["substituted_k"][0] == 101 and f["substituted_k"][1] < 101 + 2                  # legacy k = 101
+    assert f["raw_legacy_has_components"] is False and f["raw_legacy_has_provider"] is False
 
 
 def test_gauge_terms_are_stripped_and_float64_is_enforced(suite):

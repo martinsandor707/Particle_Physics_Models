@@ -748,42 +748,81 @@ def test_a_joint_refit_cannot_bend_the_baseline_to_pass():
         A.tail_check(eq, steep, measured=other_grid)
 
 
-def test_stage2_sign_changes_per_profile():
-    """Stage 2: counts of model and reference side by side, and sign_changes(model) <= sign_changes(reference) as a
-    pass condition per profile - a downward oscillation inside a region where the reference rises passes the
-    slope rule (it never rises faster) and is caught here."""
+def test_stage2_rising_stretches_per_profile():
+    """Stage 2 (PLAN section 20, item 6): the ENFORCED condition is rising_stretches(model) <=
+    rising_stretches(reference) for every depth profile beyond z_90; the raw sign-change counts are printed beside
+    it and decide nothing."""
     steep, halo, TC = _records()
     rising = TC.record("rising")                                            # each depth profile: one bump, - + -
     quiet = "-0.3 * tanh(zt - 4.0) - 0.1 * l1p(rh)"
-    r = A.tail_check(quiet, rising, enforce_sign_changes=True)
-    sc = r["sign_changes"]
-    assert r["passed"] and sc["passed"] and sc["enforced"] and sc["depth"]["n_profiles"] == 7 * 41
-    assert sc["depth"]["reference_total"] == 2 * 7 * 41 and sc["depth"]["model_total"] <= sc["depth"]["reference_total"]
-    assert sc["radial"]["n_profiles"] == 7 * 128 and sc["radial"]["model_total"] == sc["radial"]["reference_total"] == 0
-    assert sc["tolerance"] == {"depth_per_mm": 1e-5, "radial_loglog": 1e-3,
-                               "counting": "per profile on this record's grid; lobes below the tolerance dropped"}
-    lines = sc["text"].splitlines()
-    assert "model | reference" in lines[0] and lines[1].split()[0] == "depth" and lines[2].split()[0] == "radial"
-    # d f / d zt = -0.78 (1 + cos(40 zt)) <= 0: never rises faster than the reference, but flips its slope's sign
+    r = A.tail_check(quiet, rising, enforce_stage2=True)
+    rs, sc = r["rising_stretches"], r["sign_changes"]
+    assert r["passed"] and rs["passed"] and rs["enforced"] and rs["depth"]["n_profiles"] == 7 * 41
+    assert rs["depth"]["reference_total"] == 7 * 41 and rs["depth"]["model_total"] <= 7 * 41      # one stretch each
+    assert rs["radial"]["n_profiles"] == 7 * 128 and rs["radial"]["reference_total"] == 0 and not rs["radial"]["enforced"]
+    assert "for confirmation" in rs["radial"]["note"] and "positive slope" in rs["definition"]
+    assert rs["tolerance"] == {"depth_per_mm": 1e-5, "radial_loglog": 1e-3}
+    assert sc["enforced"] is False and sc["decides"] == "nothing (diagnostic)"
+    assert sc["depth"]["reference_total"] == 2 * 7 * 41 and "model | reference" in sc["text"]
+    lines = rs["text"].splitlines()
+    assert "REQUIRED" in lines[0] and lines[1].split()[0] == "depth" and "[reported, not enforced]" in lines[2]
+    # an oscillation inside a rising shoulder of the reference: d f / d zt = -0.78 (1 + cos(40 zt)) <= 0 never rises
+    # faster than the reference (the certified slope rule is met), but splits its one rising stretch into several
     wiggle = "-0.78 * zt - 0.0195 * sin(zt * 40.0)"
-    r = A.tail_check(wiggle, rising, enforce_sign_changes=True)
-    sc = r["sign_changes"]
-    assert r["depth"]["passed"] and r["radial"]["passed"]                    # the certified slope rules are met
-    assert not sc["passed"] and not r["passed"] and sc["depth"]["n_profiles_exceeding"] > 0
-    assert sc["depth"]["worst_profile"]["model"] > sc["depth"]["worst_profile"]["reference"] == 2
-    assert sc["depth"]["model_total"] > sc["depth"]["reference_total"] and "sign changes (depth)" in " ".join(r["reasons"])
+    r = A.tail_check(wiggle, rising, enforce_stage2=True)
+    rs = r["rising_stretches"]
+    assert r["depth"]["passed"] and r["radial"]["passed"] and not rs["passed"] and not r["passed"]
+    assert rs["depth"]["n_profiles_exceeding"] == 7 * 41 and rs["depth"]["worst_profile"]["reference"] == 1
+    assert rs["depth"]["worst_profile"]["model"] >= 2 and "rising stretches (depth)" in " ".join(r["reasons"])
     loose = A.tail_check(wiggle, rising)                                     # Stage 1: reported, not enforced
-    assert loose["passed"] and not loose["sign_changes"]["passed"] and not loose["sign_changes"]["enforced"]
-    assert "reported, not enforced" in loose["sign_changes"]["text"]
+    assert loose["passed"] and not loose["rising_stretches"]["passed"] and not loose["rising_stretches"]["enforced"]
+    assert "not enforced" in loose["rising_stretches"]["text"]
+    # a purely falling correction on profiles that BEGIN inside the reference's rising stretch (z_90 at 1180 mm):
+    # it turns "+ -" into "- + -" - one more sign change, the same single rising stretch. It passes.
+    late = TC.K.decide_tail_criterion(TC.baseline("rising"), TC.Z, TC.RN, TC.MOM, np.full(7, 1180.0),
+                                      baseline_hash="hash-of-rising", label="z_90 inside the bump",
+                                      reference_kind="synthetic")
+    assert np.all(np.array(late["depth"]["sign_changes"]) == 1) and np.all(np.array(late["depth"]["rising_stretches"]) == 1)
+    falling = "-0.06 * tanh((zt - 4.585) * 20.0)"
+    r = A.tail_check(falling, late, enforce_stage2=True)
+    assert r["passed"] and r["rising_stretches"]["depth"]["n_profiles_exceeding"] == 0
+    assert r["sign_changes"]["depth"]["n_profiles_exceeding"] == 7 * 41       # the diagnostic shows it, decides nothing
+    assert r["sign_changes"]["depth"]["worst_profile"] == {"p_GeV": 0.05, "r_mm": pytest.approx(TC.RN[0]),
+                                                           "model": 2, "reference": 1}
+    assert A.tail_check(wiggle, late, enforce_stage2=True)["rising_stretches"]["passed"] is False
     # the certificate takes the condition with stage2=True
     c1 = A.certify_finalist(quiet, tail_criterion=rising, baseline_hash="hash-of-rising", baseline_frozen=True, stage2=True)
-    assert c1["certified"] and c1["stage2"] and c1["tail"]["sign_changes"]["enforced"]
-    # a ripple below the tolerance is not counted: 2e-6 / mm against 1e-5 / mm
-    tiny = A.tail_check("-0.3 * tanh(zt - 4.0) + 0.00001 * sin(zt * 40.0)", rising, enforce_sign_changes=True)
-    assert tiny["sign_changes"]["depth"]["passed"]
-    # radial: an oscillation in r on a monotone reference adds sign changes of d ln rho / d ln r
-    rwig = A.tail_check("0.9 * sin(l1p(rh) * 12.0)", steep, enforce_sign_changes=True)
-    assert not rwig["sign_changes"]["radial"]["passed"] and rwig["sign_changes"]["radial"]["reference_total"] == 0
+    assert c1["certified"] and c1["stage2"] and c1["tail"]["rising_stretches"]["enforced"]
+    # a ripple below the tolerance is not a stretch: 2e-6 / mm against 1e-5 / mm
+    tiny = A.tail_check("-0.3 * tanh(zt - 4.0) + 0.00001 * sin(zt * 40.0)", rising, enforce_stage2=True)
+    assert tiny["rising_stretches"]["passed"]
+    # radial: an oscillation in r adds radial rising stretches - reported - and fails the certified radial rule anyway
+    rwig = A.tail_check("0.9 * sin(l1p(rh) * 12.0)", steep, enforce_stage2=True)
+    assert rwig["rising_stretches"]["radial"]["model_total"] > 0 == rwig["rising_stretches"]["radial"]["reference_total"]
+    assert not rwig["radial"]["passed"] and rwig["rising_stretches"]["depth"]["passed"]
+    with pytest.raises(ValueError, match="superseded"):                       # the old switch is gone
+        A.tail_check(quiet, rising, enforce_sign_changes=True)
+
+
+def test_baseline_alone_against_the_reference():
+    """PLAN section 20, item 4: C1 (the baseline refitted alone) is tested against the same fixed reference with a
+    zero correction."""
+    steep, halo, TC = _records()
+    same = TC.record("halo", reference_kind=TC.K.MEASURED_KIND)
+    ok = A.baseline_against_reference(halo, same, baseline_hash="hash-of-halo", stage2=True)
+    assert ok["passed"] and ok["reasons"] == [] and ok["correction"].startswith("zero")
+    assert ok["depth"]["n_violations"] == 0 and ok["radial"]["n_violations"] == 0 and ok["rising_stretches"]["passed"]
+    assert ok["depth"]["equation_sup_dz_per_mm"] == 0.0 and ok["tested_table"] == same["record_hash"]
+    bent = TC.record("rising", reference_kind=TC.K.MEASURED_KIND)            # more training made the baseline rise
+    bad = A.baseline_against_reference(halo, bent, baseline_hash="hash-of-halo", stage2=True)
+    assert not bad["passed"] and bad["depth"]["n_violations"] > 0 and not bad["rising_stretches"]["passed"]
+    assert bad["depth"]["worst"]["equation_sup"] == 0.0 and bad["depth"]["worst"]["refitted_baseline"] > 0
+    with pytest.raises(ValueError, match="cannot be the reference"):
+        A.baseline_against_reference(bent, same, baseline_hash="hash-of-rising")
+    with pytest.raises(ValueError, match="belongs to baseline"):
+        A.baseline_against_reference(halo, same, baseline_hash="hash-of-steep")
+    with pytest.raises(ValueError, match="baseline_hash is required"):
+        A.baseline_against_reference(halo, same, baseline_hash="")
 
 
 # ----------------------------------------------------------------------------------------------------------------------

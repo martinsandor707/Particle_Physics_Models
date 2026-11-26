@@ -207,9 +207,18 @@ def profile_sign_changes(slopes, tol: float) -> np.ndarray:
 
 
 def profile_rising_lobes(slopes, tol: float) -> np.ndarray:
-    """Number of rising stretches per profile along the last axis: lobes as in ``profile_sign_changes`` (same
-    skipping of zeros, same tolerance), counting those with positive slope. Unlike the number of sign changes it
-    does not depend on whether a profile happens to begin inside a rising stretch."""
+    """Number of RISING STRETCHES per profile along the last axis - the quantity of the enforced Stage-2 condition
+    (PLAN section 20, item 6): rising_stretches(model) <= rising_stretches(reference) per depth profile.
+
+    Definition, on a profile of finite-difference slopes on a fixed grid:
+      1. non-finite and exactly-zero entries are skipped;
+      2. a lobe is a maximal run of consecutive remaining entries of one sign;
+      3. lobes whose largest |slope| is below ``tol`` are dropped (1e-5 / mm for d ln rho / d z', 1e-3 for
+         d ln rho / d ln r: ``SIGN_TOL_DEPTH_PER_MM``, ``SIGN_TOL_RADIAL``);
+      4. neighbouring surviving lobes of equal sign are merged (they were separated only by a dropped lobe);
+      5. a rising stretch is a surviving stretch of positive slope; the result is their number.
+    Unlike the number of sign changes it does not depend on whether a profile happens to begin inside a rising
+    stretch: "+ -" and "- + -" both have one."""
     a = np.asarray(slopes, dtype=np.float64)
     flat = a.reshape(-1, a.shape[-1])
     out = np.zeros(len(flat), dtype=np.int64)
@@ -258,8 +267,10 @@ def decide_tail_criterion(log_rho, z_mm, r_mm, momenta_gev, z90_mm, *, baseline_
     d_z' ln rho_model <= max(0, d_z' ln rho_reference), point by point. Every cell in which the reference itself
     rises is logged (``depth.rising_cells``: momentum index, depth interval index, radius index, slope) and
     summarised per momentum (``depth.rising_regions``), so that a reviewer can check them against the physics.
-    Sign changes (Stage 2): ``radial.sign_changes`` / ``depth.sign_changes`` count them per profile with
-    ``profile_sign_changes`` (tolerances ``SIGN_TOL_*``) on this record's own grid.
+    Stage 2: ``depth.rising_stretches`` / ``radial.rising_stretches`` hold the reference's number of rising
+    stretches per profile (``profile_rising_lobes``, tolerances ``SIGN_TOL_*``, this record's own grid) - the
+    enforced condition compares the model's with them per depth profile; ``*.sign_changes`` hold the raw
+    sign-change counts (``profile_sign_changes``), a diagnostic.
 
     The record holds the full slope tables, is self-hashed (``verify_tail_criterion``) and cannot be chosen or
     edited per equation."""
@@ -341,7 +352,8 @@ def decide_tail_criterion(log_rho, z_mm, r_mm, momenta_gev, z90_mm, *, baseline_
                    "fraction_above_limit": float(np.mean(sl[fin] > slope_limit)) if fin.any() else float("nan"),
                    "baseline_satisfies_limit": satisfies, "baseline_monotone": bool(gmax < 0.0),
                    "n_nonfinite": int((~fin).sum()),
-                   "sign_changes": profile_sign_changes(sl, SIGN_TOL_RADIAL).tolist()},
+                   "sign_changes": profile_sign_changes(sl, SIGN_TOL_RADIAL).tolist(),
+                   "rising_stretches": profile_rising_lobes(sl, SIGN_TOL_RADIAL).tolist()},
         "depth": {"z90_mm": z90.tolist(), "k0": k0, "r_nodes_mm": r[jr].tolist(), "dz_per_mm": _r9(dz),
                   "baseline_max": dmax,
                   "baseline_max_at": {"p_GeV": float(mom[wj]), "z_mm": [float(z[wk]), float(z[wk + 1])],
@@ -352,9 +364,13 @@ def decide_tail_criterion(log_rho, z_mm, r_mm, momenta_gev, z90_mm, *, baseline_
                                                                   "z_nodes k and k + 1)", "radius index", "slope / mm"],
                   "rising_regions": regions,
                   "sign_changes": [profile_sign_changes(np.where(beyond[j], dz[j], np.nan).T, SIGN_TOL_DEPTH_PER_MM).tolist()
-                                   for j in range(P)]},
+                                   for j in range(P)],
+                  "rising_stretches": [profile_rising_lobes(np.where(beyond[j], dz[j], np.nan).T,
+                                                            SIGN_TOL_DEPTH_PER_MM).tolist() for j in range(P)]},
         "criterion": {"radial": "loglog_slope_le_limit" if satisfies else "monotone_and_no_flattening",
                       "depth": DEPTH_RULE,
+                      "stage2": "rising_stretches(model) <= rising_stretches(reference) per depth profile beyond "
+                                "z_90; sign-change counts are a diagnostic",
                       "decided_from": "the fixed reference baseline alone (delta = 0); not selectable per equation"},
     }
     rec["record_hash"] = _tail_record_hash(rec)

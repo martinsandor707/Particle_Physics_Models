@@ -79,7 +79,8 @@ Tail check (PLAN 17.11, S4, and the user's decision on the depth rule; ``tail_ch
     never from a jointly refitted baseline: a joint refit cannot bend its own bound. Radial: "d ln rho / d ln r <=
     -2 on r in [200, 1500] mm" if the reference satisfies it, otherwise "not flatter than the reference" (which is
     monotone). Depth: beyond z_90, d ln rho_model / d z' <= max(0, d ln rho_reference / d z'), point by point.
-    Stage 2 adds sign_changes(model) <= sign_changes(reference) per profile. The record carries the reference's
+    Stage 2 adds rising_stretches(model) <= rising_stretches(reference) per depth profile (sign-change counts are a
+    diagnostic). Tolerances of the comparisons with the reference: 1e-5 / mm, 1e-3. The record carries the reference's
     slope tables and the cells where it rises itself, and is bound to the baseline's hash.
 
 Limits of the statement: real arithmetic with the constants as parsed; library functions assumed accurate to 64 ulp;
@@ -104,6 +105,7 @@ __all__ = ["OVERFLOW_CAP", "TAU_REL", "MIN_FRAC", "LIMIT_NAT", "audit_box", "enc
            "magnitude_bound", "audit", "audit_trajectory", "AuditReport", "drop_gauge_terms", "oscillation_expr",
            "RAW_LIMIT_NAT", "ROUNDING_TOL_NAT", "FLOAT32_TOL_NAT", "rounding_error_bound", "numerics",
            "tail_slopes", "certify_finalist", "canonical_gauge_form", "gauge_term_records", "tail_check",
+           "baseline_against_reference",
            "FLAT_SLACK", "RADIAL_CRITERIA"]
 
 OVERFLOW_CAP = 1e30          # eight decades below the float32 limit 3.4e38
@@ -1469,7 +1471,7 @@ def _sup_chunks(prog: _Prog, lo: np.ndarray, hi: np.ndarray, j: int, kind: str, 
 
 def tail_check(expr: Union[str, T.Expr], criterion: Mapping, box: Optional[Mapping] = None, *,
                measured: Optional[Mapping] = None, baseline_frozen: Optional[bool] = None,
-               enforce_sign_changes: bool = False) -> dict:
+               enforce_stage2: bool = False, enforce_sign_changes: Optional[bool] = None) -> dict:
     """The tail part of a finalist's certificate (PLAN 17.11, S4, and the user's decision on the depth rule).
 
     ``criterion`` is the record of ``checks.decide_tail_criterion`` for the FIXED reference baseline (the Track A
@@ -1503,14 +1505,30 @@ def tail_check(expr: Union[str, T.Expr], criterion: Mapping, box: Optional[Mappi
     The certificate holds for the model's finite-difference slopes on the record's grid, at those momenta; the
     baselines enter numerically (their tables), not as enclosures.
 
-    EVALUATED, not certified - sign changes (Stage 2, PLAN section 7): the model's finite-difference slopes on the
-    record's grid (refitted baseline's table plus the correction evaluated at the nodes) are counted per profile
-    with ``checks.profile_sign_changes`` - d ln rho / d z' beyond z_90 along depth at each (momentum, radius),
-    d ln rho / d ln r for r > 200 mm along r at each (momentum, depth row) - and compared, PROFILE BY PROFILE,
-    with the reference's counts: sign_changes(model) <= sign_changes(reference). The grid and the tolerances
-    belong to the record, so the count cannot be changed by choosing a resolution. Reported always (side by
-    side); a pass condition with ``enforce_sign_changes=True`` (Stage 2).
-    Returns {"passed", "radial", "depth", "sign_changes", "reference", "reasons"}."""
+    EVALUATED, not certified - the Stage-2 shape condition (PLAN section 7 and section 20, item 6). The model's
+    finite-difference slopes on the record's grid are the refitted baseline's table plus the correction evaluated
+    at the nodes. Per profile - d ln rho / d z' beyond z_90 along depth at each (momentum, radius) - the number of
+    RISING STRETCHES is counted with ``checks.profile_rising_lobes`` and compared with the reference's:
+
+        rising_stretches(model) <= rising_stretches(reference)      for every depth profile.
+
+    A rising stretch: skip non-finite and exactly-zero slopes; a lobe is a maximal run of consecutive slopes of
+    one sign; lobes whose largest |slope| is below the tolerance (1e-5 / mm in depth) are dropped; neighbouring
+    surviving lobes of equal sign are one stretch; a rising stretch is a surviving stretch of positive slope. The
+    grid and the tolerance belong to the record, so the count cannot be changed by choosing a resolution. It is a
+    pass condition with ``enforce_stage2=True`` (``certify_finalist(stage2=True)``), reported otherwise.
+    Radial profiles (d ln rho / d ln r for r > 200 mm along r at each (momentum, depth row)): the analogous
+    quantity - stretches in which the density increases with r, tolerance 1e-3 - is counted and reported, but NOT
+    separately enforced: the user's decision is worded for the depth check, and both radial slope rules above
+    already forbid any radial rise of the model on these segments wherever the reference is monotone (a reference
+    that is not monotone cannot be certified against at all). Reading of this module, for confirmation.
+    The raw sign-change counts of the same profiles (``checks.profile_sign_changes``), total and per profile, are
+    printed side by side as a DIAGNOSTIC that decides nothing: a purely falling correction can add a sign change
+    where a profile begins inside a rising stretch of the reference ("+ -" becomes "- + -").
+    Returns {"passed", "radial", "depth", "rising_stretches", "sign_changes", "reference", "reasons"}."""
+    if enforce_sign_changes:
+        raise ValueError("enforce_sign_changes is superseded (PLAN section 20, item 6): the enforced Stage-2 "
+                         "condition counts rising stretches - pass enforce_stage2=True; sign changes are a diagnostic")
     from . import checks as _checks                        # NumPy only; imported here to avoid a module cycle
 
     e = T.parse(expr) if isinstance(expr, str) else expr
@@ -1660,50 +1678,63 @@ def tail_check(expr: Union[str, T.Expr], criterion: Mapping, box: Optional[Mappi
     mdz = Dm + np.diff(Fz, axis=1) / np.diff(z)[None, :, None]
     Fr = f_at(z[None, :, None], rn[None, None, :], xs[:, None, None])                 # (P, NZ, ni + 1)
     mdr = Rm + np.diff(Fr, axis=2) / np.diff(np.log(rn))[None, None, :]
-    sc: dict = {"tolerance": dict(tol), "enforced": bool(enforce_sign_changes), "quantity": {
-        "depth": "d ln rho / d z' beyond z_90, along depth at each (momentum, radius)",
-        "radial": "d ln rho / d ln r for r > 200 mm, along r at each (momentum, depth row)"}}
-    cm = np.stack([_checks.profile_sign_changes(np.where(beyond[j], mdz[j], np.nan).T, tol["depth_per_mm"])
-                   for j in range(P)])
-    cr = np.stack([_checks.profile_sign_changes(np.where(beyond[j], Dref[j], np.nan).T, tol["depth_per_mm"])
-                   for j in range(P)])
-    cmr = _checks.profile_sign_changes(mdr, tol["radial_loglog"])
-    crr = _checks.profile_sign_changes(Rref, tol["radial_loglog"])
-    for key, m_, r_, axis_names, coords in (("depth", cm, cr, ("p_GeV", "r_mm"), (mom, rd)),
-                                            ("radial", cmr, crr, ("p_GeV", "z_mm"), (mom, z))):
+    quantity = {"depth": "d ln rho / d z' beyond z_90, along depth at each (momentum, radius)",
+                "radial": "d ln rho / d ln r for r > 200 mm, along r at each (momentum, depth row)"}
+    depth_prof_m = [np.where(beyond[j], mdz[j], np.nan).T for j in range(P)]
+    depth_prof_r = [np.where(beyond[j], Dref[j], np.nan).T for j in range(P)]
+
+    def compare(m_, r_, axis_names, coords):
         more = m_ > r_
         wi = np.unravel_index(int(np.argmax(m_ - r_)), m_.shape)
-        sc[key] = {"model_total": int(m_.sum()), "reference_total": int(r_.sum()), "n_profiles": int(m_.size),
-                   "n_profiles_exceeding": int(more.sum()), "passed": bool(not more.any()),
-                   "model_per_momentum": m_.sum(1).tolist(), "reference_per_momentum": r_.sum(1).tolist(),
-                   "worst_profile": {axis_names[0]: float(coords[0][wi[0]]), axis_names[1]: float(coords[1][wi[1]]),
-                                     "model": int(m_[wi]), "reference": int(r_[wi])}}
-    # reported beside it, not enforced: the number of rising stretches per depth profile, which - unlike the number
-    # of sign changes - does not change when a profile merely begins inside a rising stretch of the reference
-    lm = np.stack([_checks.profile_rising_lobes(np.where(beyond[j], mdz[j], np.nan).T, tol["depth_per_mm"])
-                   for j in range(P)])
-    lr_ = np.stack([_checks.profile_rising_lobes(np.where(beyond[j], Dref[j], np.nan).T, tol["depth_per_mm"])
-                    for j in range(P)])
-    sc["depth_rising_stretches"] = {"model_total": int(lm.sum()), "reference_total": int(lr_.sum()),
-                                    "n_profiles_exceeding": int((lm > lr_).sum()), "enforced": False}
+        return {"model_total": int(m_.sum()), "reference_total": int(r_.sum()), "n_profiles": int(m_.size),
+                "n_profiles_exceeding": int(more.sum()), "passed": bool(not more.any()),
+                "model_per_momentum": m_.sum(1).tolist(), "reference_per_momentum": r_.sum(1).tolist(),
+                "worst_profile": {axis_names[0]: float(coords[0][wi[0]]), axis_names[1]: float(coords[1][wi[1]]),
+                                  "model": int(m_[wi]), "reference": int(r_[wi])}}
+
+    # ---- enforced for Stage 2: rising stretches per depth profile; radial counted and reported ---------------------
+    rs: dict = {"tolerance": {"depth_per_mm": tol["depth_per_mm"], "radial_loglog": tol["radial_loglog"]},
+                "quantity": quantity, "enforced": bool(enforce_stage2),
+                "definition": "per profile on the record's grid: non-finite and zero slopes skipped; lobes = maximal "
+                              "runs of one sign; lobes with largest |slope| below the tolerance dropped; equal-sign "
+                              "neighbours merged; a rising stretch = a surviving stretch of positive slope",
+                "condition": "rising_stretches(model) <= rising_stretches(reference) for every depth profile"}
+    rs["depth"] = compare(np.stack([_checks.profile_rising_lobes(v, tol["depth_per_mm"]) for v in depth_prof_m]),
+                          np.stack([_checks.profile_rising_lobes(v, tol["depth_per_mm"]) for v in depth_prof_r]),
+                          ("p_GeV", "r_mm"), (mom, rd))
+    rs["radial"] = dict(compare(_checks.profile_rising_lobes(mdr, tol["radial_loglog"]),
+                                _checks.profile_rising_lobes(Rref, tol["radial_loglog"]), ("p_GeV", "z_mm"), (mom, z)),
+                        enforced=False, note="reported; not separately enforced: the certified radial slope rule "
+                                             "already forbids a radial rise of the model where the reference is "
+                                             "monotone (reading of this module, for confirmation)")
+    rs["passed"] = bool(rs["depth"]["passed"])
+    # ---- diagnostic only: raw sign-change counts of the same profiles ----------------------------------------------
+    sc: dict = {"tolerance": dict(tol), "enforced": False, "decides": "nothing (diagnostic)", "quantity": quantity}
+    sc["depth"] = compare(np.stack([_checks.profile_sign_changes(v, tol["depth_per_mm"]) for v in depth_prof_m]),
+                          np.stack([_checks.profile_sign_changes(v, tol["depth_per_mm"]) for v in depth_prof_r]),
+                          ("p_GeV", "r_mm"), (mom, rd))
+    sc["radial"] = compare(_checks.profile_sign_changes(mdr, tol["radial_loglog"]),
+                           _checks.profile_sign_changes(Rref, tol["radial_loglog"]), ("p_GeV", "z_mm"), (mom, z))
     sc["passed"] = bool(sc["depth"]["passed"] and sc["radial"]["passed"])
-    sc["text"] = "\n".join(
-        ["sign changes, model | reference (per profile: model <= reference required" +
-         (")" if enforce_sign_changes else "; reported, not enforced)")] +
-        [f"  {key:6s} total {sc[key]['model_total']:5d} | {sc[key]['reference_total']:5d}   profiles exceeding "
-         f"{sc[key]['n_profiles_exceeding']} of {sc[key]['n_profiles']}   per momentum {sc[key]['model_per_momentum']} | "
-         f"{sc[key]['reference_per_momentum']}" for key in ("depth", "radial")] +
-        [f"  rising stretches in depth (reported): {sc['depth_rising_stretches']['model_total']} | "
-         f"{sc['depth_rising_stretches']['reference_total']}   profiles exceeding "
-         f"{sc['depth_rising_stretches']['n_profiles_exceeding']}"])
+
+    def lines(d, keys):
+        return [f"  {key:6s} total {d[key]['model_total']:5d} | {d[key]['reference_total']:5d}   profiles exceeding "
+                f"{d[key]['n_profiles_exceeding']} of {d[key]['n_profiles']}   per momentum "
+                f"{d[key]['model_per_momentum']} | {d[key]['reference_per_momentum']}" for key in keys]
+    rs["text"] = "\n".join(
+        ["rising stretches, model | reference (per depth profile: model <= reference " +
+         ("REQUIRED)" if enforce_stage2 else "- Stage-2 condition, reported here, not enforced)")] +
+        lines(rs, ("depth",)) + [ln + "   [reported, not enforced]" for ln in lines(rs, ("radial",))])
+    sc["text"] = "\n".join(["sign changes, model | reference (diagnostic: decides nothing)"] +
+                           lines(sc, ("depth", "radial")))
+    out["rising_stretches"] = rs
     out["sign_changes"] = sc
-    if enforce_sign_changes and not sc["passed"]:
-        for key in ("depth", "radial"):
-            if not sc[key]["passed"]:
-                wp = sc[key]["worst_profile"]
-                reasons.append(f"sign changes ({key}): {sc[key]['n_profiles_exceeding']} profile(s) have more sign "
-                               f"changes than the reference (worst: {wp['model']} against {wp['reference']} at {wp})")
-    out["passed"] = bool(out["depth"]["passed"] and rad["passed"] and (sc["passed"] or not enforce_sign_changes))
+    if enforce_stage2 and not rs["passed"]:
+        wp = rs["depth"]["worst_profile"]
+        reasons.append(f"rising stretches (depth): {rs['depth']['n_profiles_exceeding']} profile(s) have more rising "
+                       f"stretches beyond z_90 than the reference (worst: {wp['model']} against {wp['reference']} at "
+                       f"p = {wp['p_GeV']:g} GeV, r = {wp['r_mm']:.0f} mm)")
+    out["passed"] = bool(out["depth"]["passed"] and rad["passed"] and (rs["passed"] or not enforce_stage2))
     out["reasons"] = reasons
     return out
 
@@ -1725,8 +1756,9 @@ def certify_finalist(expr: Union[str, T.Expr], box: Optional[Mapping[str, Tuple[
          the one in the record, and the record's own hash must be intact - otherwise ``ValueError``). A table of a
          jointly refitted baseline is refused as the reference; it belongs in ``measured_tail``, where it supplies
          the model side. ``baseline_frozen``: True if the baseline was not refitted (then no table is needed).
-      3. ``stage2=True``: the sign-change condition of the Stage-2 gate is enforced as well -
-         sign_changes(model) <= sign_changes(reference), profile by profile.
+      3. ``stage2=True``: the Stage-2 shape condition is enforced as well -
+         rising_stretches(model) <= rising_stretches(reference) for every depth profile beyond z_90 (PLAN section
+         20, item 6); the raw sign-change counts are reported beside it and decide nothing.
 
     Returns {"certified", "audit_certified", "tail", "reasons", "audit", "equation", "hash", "baseline_hash",
     "tail_criterion_hash", "reference"}. Without ``tail_criterion`` the tail check cannot be evaluated and
@@ -1762,7 +1794,7 @@ def certify_finalist(expr: Union[str, T.Expr], box: Optional[Mapping[str, Tuple[
                            "(checks.decide_tail_criterion on the machine that holds the baseline)")
         else:
             tail = dict(tail_check(e, tail_criterion, box, measured=measured_tail, baseline_frozen=baseline_frozen,
-                                   enforce_sign_changes=stage2), evaluated=True)
+                                   enforce_stage2=stage2), evaluated=True)
             reasons += tail["reasons"]
     return {"certified": bool(rep.passed and tail.get("passed", False)), "audit_certified": bool(rep.passed),
             "tail": tail, "reasons": reasons, "audit": rep.to_json(), "equation": T.to_string(e),
@@ -1772,6 +1804,33 @@ def certify_finalist(expr: Union[str, T.Expr], box: Optional[Mapping[str, Tuple[
                 "kind": tail_criterion.get("reference_kind"), "label": tail_criterion.get("label"),
                 "baseline_hash": tail_criterion.get("baseline_hash"),
                 "measured_table": None if measured_tail is None else measured_tail.get("record_hash")}}
+
+
+def baseline_against_reference(criterion: Mapping, measured: Mapping, *, baseline_hash: str,
+                               stage2: bool = False) -> dict:
+    """Test a baseline WITHOUT any correction (delta = 0) against the fixed reference: the control C1 (the baseline
+    refitted alone with the candidates' schedule), or any jointly refitted baseline taken by itself.
+
+    criterion   the record of the reference of record - the frozen Track A finalist before any PySR refit (PLAN
+                section 20, item 4) - bound to ``baseline_hash``
+    measured    the slope table of the baseline to test, made on the same grid with
+                ``checks.decide_tail_criterion(..., reference_kind="refitted_baseline")`` (for a closed-form model:
+                ``refit.c1_against_reference`` builds it and calls this function)
+    Runs ``tail_check`` with the zero correction: the inheriting depth rule, the radial rule and (``stage2``) the
+    rising-stretch condition, all on the baseline's own slopes. If C1 fails, the schedule bends the baseline, not
+    the equation: report it beside every SR verdict. Returns the ``tail_check`` result plus the two record hashes."""
+    from . import checks as _checks
+
+    if not baseline_hash:
+        raise ValueError("baseline_hash is required: the reference is bound to one baseline")
+    _checks.verify_tail_criterion(criterion, baseline_hash, as_reference=True)
+    _checks.verify_tail_criterion(measured, as_reference=False)
+    res = tail_check(T.const(0.0, fixed=True), criterion, measured=measured, baseline_frozen=False,
+                     enforce_stage2=stage2)
+    res.update(correction="zero (delta = 0): the tested baseline alone", stage2=bool(stage2),
+               tested_table=measured.get("record_hash"), tested_label=measured.get("label"),
+               tested_baseline_hash=measured.get("baseline_hash"))
+    return res
 
 
 def audit_trajectory(expr: Union[str, T.Expr], x_range: Tuple[float, float] = O.TRAJECTORY_BOX,

@@ -175,6 +175,8 @@ def test_tail_criterion_is_decided_from_the_baseline_alone():
         assert [Z[k] > z90 >= Z[k - 1] for k, z90 in zip(rec["depth"]["k0"], Z90)] == [True] * 7
         assert np.array(rec["depth"]["sign_changes"]).shape == (7, 41) and np.array(rec["radial"]["sign_changes"]).shape == (7, 128)
         assert np.sum(rec["depth"]["sign_changes"]) == 0 and np.sum(rec["radial"]["sign_changes"]) == 0
+        assert np.array(rec["depth"]["rising_stretches"]).shape == (7, 41) and np.sum(rec["depth"]["rising_stretches"]) == 0
+        assert np.array(rec["radial"]["rising_stretches"]).shape == (7, 128) and "rising_stretches(model) <=" in rec["criterion"]["stage2"]
         assert "not selectable per equation" in rec["criterion"]["decided_from"]
         assert len(__import__("json").dumps(rec)) < 2_000_000
     txt = K.format_tail_criterion(halo)
@@ -261,6 +263,8 @@ def test_where_the_reference_rises_is_logged():
     assert de["rising_regions"][2]["attribution"] == {"removed_by": ["track"], "comment": "Bragg"}
     assert "attribution" not in de["rising_regions"][0]
     assert np.all(np.array(de["sign_changes"]) == 2)                         # one bump per depth profile: - + -
+    assert np.all(np.array(de["rising_stretches"]) == 1)                     # ... which is one rising stretch
+    assert np.all(np.array(record("bump")["radial"]["rising_stretches"]) == 1)
     assert rec["radial"]["baseline_monotone"] and not record("bump")["radial"]["baseline_monotone"]
     assert np.all(np.array(record("bump")["radial"]["sign_changes"]) == 2)
     txt = K.format_tail_criterion(rec)
