@@ -254,8 +254,9 @@ def test_batch1_runs_recognised_and_sources_verified_on_the_h200_records(monkeyp
         if (H200 / "runs" / "m2a_dist" / "templates" / "full_box.pt").exists():
             t = D.verify_template("full_box")                           # the Track A record of the H200
             assert t["track_a_record"] and len(t["file_sha256"]) == 64
-        rs = registry.reference_set(need_guards=True)                   # licensed by a passing parity record
-        assert rs.manifest["parity"]["verdict"] == "PASS"
+        if list((H200 / "refsets").glob("*/mlp_val_nll.npy")):        # per-event arrays: laptop repository only
+            rs = registry.reference_set(need_guards=True)               # licensed by a passing parity record
+            assert rs.manifest["parity"]["verdict"] == "PASS"
     finally:
         lib.live_stream_id.cache_clear()
 
@@ -302,28 +303,146 @@ def test_guard_log_refusal_is_a_hard_stop(monkeypatch, tmp_path):
         D.check_guard_log()
 
 
-# ---- review of 43ccfd6: B1 (guard decision), B2 (rerun pairs), B3 (promotion scope), A2 (ii) ---------------------------
+# ---- review of 43ccfd6 and the Fable rulings (REVIEW.md 9.1): B1, J-a, J-b, B2, B3, I11, I12, I13, I17, B1d, I4, A2 ----
+def _row(d):
+    return {"passed": d.passed, "checks": d.checks, "numbers": d.numbers, "flags": d.flags}
+
+
 def test_b1_guard_pass_test_follows_the_definition():
     """persistence margin = mean(guard - 0.5 main), gains negative: passes when the margin is <= 0 (the guard keeps at
-    least half the gain), resolved only at 2 SE. A gain that fully survives passes; a pure artefact fails."""
+    least half the gain), resolved only at 2 SE (review 5.2, the two synthetic cases). J-a: three values."""
     from sfm import stats
     rng = np.random.default_rng(3)
     main = -6e-4 + rng.normal(0, 2e-4, 20000)
-    survives = main + rng.normal(0, 5e-5, 20000)                       # the guard keeps 100 % of the gain
-    artefact = rng.normal(0, 5e-5, 20000)                              # the guard keeps 0 %
-    d1 = stats.guard_persistence(main, survives)
-    d0 = stats.guard_persistence(main, artefact)
+    survives = main + rng.normal(0, 5e-5, 20000)                       # P: the guard keeps 100 % of the gain
+    artefact = rng.normal(0, 5e-5, 20000)                              # F: the guard keeps 0 %
+    d1, d0 = stats.guard_persistence(main, survives), stats.guard_persistence(main, artefact)
     assert d1.numbers["margin"] <= 0 and d0.numbers["margin"] > 0
-    as_row = lambda d: {"passed": d.passed, "checks": d.checks, "numbers": d.numbers, "flags": d.flags}  # noqa: E731
-    g1, g0 = R.guard_decision(as_row(d1)), R.guard_decision(as_row(d0))
-    assert g1["passed"] and g1["resolved"] and g1["ok"]
-    assert not g0["passed"] and not g0["ok"]
-    weak = stats.guard_persistence(main[:30], main[:30] * 0.55)          # a pass that is not resolved
-    gw = R.guard_decision(as_row(weak))
-    assert gw["ok"] == R.rule_guard_part(gw["passed"], gw["resolved"])   # J-a: one place decides
+    g1, g0 = R.guard_decision(_row(d1)), R.guard_decision(_row(d0))
+    assert (g1["passed"], g1["resolved"], g1["verdict"]) == (True, True, "passed")
+    assert (g0["passed"], g0["resolved"], g0["verdict"]) == (False, True, "failed")
+    noise = rng.normal(0, 2e-4, 30)
+    noise = noise - noise.mean() - 1e-5                                # margin -1e-5 with SE ~ 3.6e-5
+    weak = stats.guard_persistence(main[:30], 0.5 * main[:30] + noise)   # a pass that is not resolved
+    gw = R.guard_decision(_row(weak))
+    assert gw["passed"] and not gw["resolved"] and gw["verdict"] == "undecided"
 
 
-def test_b2_rerun_pair_of_record_and_b3_scope(monkeypatch):
+def test_j_a_j_b_three_values_and_the_g_region_sign():
+    from sfm import stats
+    assert [R.rule_guard_part(p, r) for p, r in ((True, True), (False, True), (True, False), (False, False))] == \
+        ["passed", "failed", "undecided", "undecided"]
+    rng = np.random.default_rng(5)
+    main = -6e-4 + rng.normal(0, 1e-5, 20000)                          # a resolved gain
+    for share, want in ((0.2, "passed"), (0.8, "failed"), (0.5, "undecided")):
+        flagged = share * main + rng.normal(0, 1e-6, 20000)
+        margin = stats.paired(flagged - 0.5 * main, np.zeros_like(main))  # >= 0 iff share <= 1/2 (gains negative)
+        v = R.rule_g_region(float(main.mean()), margin)
+        assert v["verdict"] == want, (share, v)
+    assert R.rule_g_region(+1e-4, stats.paired(np.full(10, 1.0), np.zeros(10)))["passed"] is False   # no gain
+    assert R.combine_guards(["passed", "passed", "passed"]) == "passed"
+    assert R.combine_guards(["passed", "undecided", "passed"]) == "undecided"
+    assert R.combine_guards(["undecided", "failed", None]) == "failed"
+    assert R.combine_guards(["passed", "passed", None]) == "not evaluated"
+
+
+@pytest.mark.skipif(not (H200 / "registry.jsonl").exists(), reason="H200 machine directory not present")
+def test_guard_verdicts_on_the_real_h200_rows():
+    """REVIEW.md 9.2: E5_s2 (passed, unresolved) is undecided; b0h_seed0 and s2_seed15 (failed, resolved) fail."""
+    rows = {}
+    for ln in (H200 / "registry.jsonl").read_text().splitlines():
+        r = json.loads(ln)
+        if r.get("stage") == "m2b_mlp" and r.get("guards"):
+            rows[r["name"]] = r
+    for name, want in (("E5_s2", "undecided"), ("b0h_seed0", "failed"), ("s2_seed15", "failed")):
+        g = rows[name]["guards"]["vs_mlp"]
+        assert R.guard_decision(g["gk_persistence"])["verdict"] == want, name
+        assert R.guard_decision(g["bulk_persistence"])["verdict"] == want, name
+
+
+def test_i13_replication_literal_with_the_alternative_column():
+    p0 = {"mean": -6e-4, "z": -4.0}
+    rep = R.rule_replication(p0, {"mean": -3e-4, "z": -2.0}, {"mean": -5.5e-4, "z": -2.5})
+    assert rep["replicated"] and not rep["replicated_alternative_se"] and rep["disagree"]   # -> to the user
+    rep = R.rule_replication(p0, {"mean": -3e-4, "z": -2.0}, {"mean": -5.5e-4, "z": -3.1})
+    assert rep["replicated"] and rep["replicated_alternative_se"] and not rep["disagree"]
+    assert not R.rule_replication(p0, {"mean": -2.4e-4, "z": -2.0}, {"mean": -6e-4, "z": -4})["replicated"]  # half
+    assert not R.rule_replication(p0, {"mean": -3e-4, "z": -2.0}, {"mean": -4.9e-4, "z": -4})["replicated"]  # mean
+    assert not R.rule_replication({"mean": +1e-4, "z": 1}, {"mean": -6e-4, "z": -5},
+                                  {"mean": -6e-4, "z": -5})["same_sign"]
+    assert rep["constants"] == {"half": -2.5e-4, "mean": -5e-4, "alternative_z": -3.0}
+    assert R.rule_replication(p0, None, None) is None
+
+
+def test_i11_primary_comparison_option_i_with_the_other_readings_beside_it():
+    assert R.I11_READING == "i"
+    v = R.rule_primary_comparison({"mean": -4e-4, "z": -2.5}, {"mean": -2e-4, "z": -1.5}, {"mean": -3.5e-4, "z": -2.3})
+    assert v["option_i"] is False and v["option_iii"] is True and v["counts"] is False      # (i) decides
+    assert R.between_note(-4e-4) == "between −3 and −5" and R.between_note(-6e-4) is None
+    assert R.between_note(-2e-4) is None
+    v = R.rule_primary_comparison({"mean": -6e-4, "z": -3.5}, {"mean": -3e-4, "z": -2}, {"mean": -5.5e-4, "z": -3.2})
+    assert v["option_i"] and v["option_iii"] and v["counts"] and not v["replication_disagree"]
+    assert v["option_ii"].startswith("descriptive")
+
+
+def test_i12_part_c_against_numpy():
+    rng = np.random.default_rng(7)
+    ref = _ta(18 + rng.normal(0, 0.1, 5000))
+    ctrls = {n: _ta(ref.values + off + rng.normal(0, 3e-4, 5000)) for n, off in
+             zip(lib.CONTROL_NAMES, (1.0e-4, 1.04e-4, 0.31e-4))}
+    run = _ta(ref.values - 0.5e-4 + rng.normal(0, 3e-4, 5000))
+    b0 = R.b0_mean(ctrls)
+    p = R.parts(run, ref, b0, ctrls)
+    d = run.values.astype(np.float64) - np.mean([c.values.astype(np.float64) for c in ctrls.values()], axis=0)
+    z = d.mean() / (d.std(ddof=1) / np.sqrt(len(d)))
+    assert abs(p["vs_b0"]["mean"] - d.mean()) < 1e-12 and abs(p["vs_b0"]["z"] - z) < 1e-9
+    assert p["c_b0"] == bool(z < -1)
+    assert set(p["vs_controls"]) == set(lib.CONTROL_NAMES)
+    sd = np.std([(c.values.astype(np.float64) - ref.values).mean() for c in ctrls.values()], ddof=1)
+    assert abs(R.controls_seed_sd(ctrls, ref) - sd) < 1e-12
+
+
+def test_i17_one_se_eligibility_on_both_seeds():
+    rng = np.random.default_rng(11)
+    base = 18 + rng.normal(0, 0.1, 4000)
+    def near():                                                        # Delta 1e-5 < SE ~ 1.6e-5: eligible
+        n = rng.normal(0, 1e-3, 4000)
+        return base + 1e-5 + (n - n.mean())
+    k = {"B6a": 3841, "B6b": 4897, "B6c": 13825}
+    mk = lambda arrs: [(c, f"{c}_s", k[c], a) for c, a in zip(("B6a", "B6b", "B6c"), arrs)]  # noqa: E731
+    o = R.rule_one_se({0: mk([base, base + 0.01, near()]), 1: mk([base + 0.01, near(), base])})
+    assert o["per_seed"][0]["eligible"] == ["B6a", "B6c"] and o["per_seed"][1]["eligible"] == ["B6b", "B6c"]
+    assert o["per_seed"][0]["selected"] == "B6a" and o["per_seed"][1]["selected"] == "B6b"
+    assert o["eligible_on_both_seeds"] == ["B6c"] and o["combined"] == "B6c" and o["per_seed_selections_differ"]
+    o = R.rule_one_se({0: mk([base, base + 0.01, base + 0.01]), 1: mk([base + 0.01, base + 0.01, base])})
+    assert o["combined"] is None and o["statement"].startswith("no automatic selection - to Gate 1")
+    o = R.rule_one_se({0: mk([base, None, base]), 1: mk([base, base, base])})
+    assert o["statement"].startswith("not evaluated")
+
+
+def test_promotion_values_and_the_b1d_anomaly():
+    ok = {"a_gain": True, "b_z": True, "c_b0": True}
+    rep = {"replicated": True}
+    assert R.promotion(ok, rep, "passed", False) == "promoted"
+    assert R.promotion(ok, rep, "undecided", False).startswith("undecided - Gate 1")      # J-a
+    assert R.promotion(ok, rep, None, False).startswith("undecided - Gate 1")
+    assert R.promotion(ok, rep, "failed", False).startswith("not promoted")
+    assert R.promotion(ok, {"replicated": False}, "passed", False) == "not promoted"
+    assert R.promotion({**ok, "c_b0": None}, rep, "passed", False) == "not promoted"     # B0 incomplete
+    assert R.promotion(ok, rep, "passed", True).startswith("anomaly - Gate 1")           # ruling B1d
+    assert R.b1d_anomaly(ok, {"a_gain": False, "b_z": False, "c_b0": True})
+    assert not R.b1d_anomaly(ok, ok) and not R.b1d_anomaly({**ok, "a_gain": False}, None)
+    assert R.B1D_REPLICATION_LABEL == "replicated over starting networks (one teacher)"
+
+
+def test_rulings_listed_with_their_status():
+    for k in ("I11", "I12", "I13", "I17", "J-a", "J-b", "B1d", "I4"):
+        assert k in R.RULINGS and R.RULINGS[k]["function"]
+    assert "confirm" in R.RULINGS["I11"]["status"] and "confirm" in R.RULINGS["I4"]["status"]
+    assert R.I4_OPTION == "alpha"
+
+
+def test_b2_rerun_pair_of_record_and_b3_scope():
     sm = dict(D.spec_map())
     for n in ("B2b_s0", "B2a_s0"):
         x = D.x2_spec(sm[n])
@@ -331,11 +450,106 @@ def test_b2_rerun_pair_of_record_and_b3_scope(monkeypatch):
     assert R.pair_of_record("B2b_s0", "B2a_s0", sm) == ("B2b_s0_x2", "B2a_s0_x2", True)
     assert R.pair_of_record("B2c_s0", "B2a_s0", sm) == ("B2c_s0", "B2a_s0", False)   # converged: originals
     assert R.pair_of_record("B2b_s1", "B2a_s1", sm) == ("B2b_s1", "B2a_s1", False)
-    assert R.superseded(sm) == {"B2b_s0", "B2a_s0"}
+    rec = R.records(sm)
+    assert rec["B2b"] == ["B2b_s0_x2", "B2b_s1"] and rec["B2c"] == ["B2c_s0", "B2c_s1"]   # mixed for B2b
+    assert rec["B1d"] == ["B1d_m11", "B1d_m12"]
+    pairs = R.comparison_pairs(sm, rec)
+    assert [(r, c) for _, r, c, _ in pairs["B2b"]] == [("B2b_s0_x2", "B2a_s0_x2"), ("B2b_s1", "B2a_s1")]
+    lab = R.labels(sm, rec, pairs)
+    assert lab["B2b_s0"].startswith("not converged, NOT used by the rules")
+    assert lab["B2a_s0"].startswith("comparator of record for") and "B2c_s0" in lab["B2a_s0"] \
+        and "B4f_s0" in lab["B2a_s0"]                                   # the converged primaries keep the original
+    assert "B2b_s1" not in lab and "B2a_s1" not in lab
     assert R.record_name("B2b_s0", sm) == "B2b_s0_x2" and R.record_name("B2b_s1", sm) == "B2b_s1"
     assert sm["B2b_s0_x2"].rung == "B2b" and sm["B2b_s0_x2"].cls == "rerun"
-    for k in ("I11", "I12", "I13", "I17", "J-a", "J-b"):
-        assert k in R.PENDING_RULINGS                                    # every judgement item in one place
+
+
+def test_a2_i_scoring_check_is_a_hard_stop(monkeypatch):
+    """Fable ruling 9.1, A2 (i) boundary case: the fit's last validation mean and the registry's mean of the same
+    weights must agree to 1e-6; a finite fit value with a non-finite registry score is a failed scoring check."""
+    ok = D.scoring_check("x", 18.1180805, 18.1180805)
+    assert ok["consistent"] and ok["abs_diff"] == 0.0
+    D.scoring_check("x", 18.1180805, 18.1180805 + 9e-7)
+    with pytest.raises(D.HardStop, match="differ by"):
+        D.scoring_check("x", 18.1180805, 18.1180805 + 2e-6)
+    with pytest.raises(D.HardStop, match="non-finite"):
+        D.scoring_check("x", 18.1180805, reg_error="3 non-finite per-event validation NLL(s)")
+    with pytest.raises(D.HardStop):
+        D.scoring_check("x_ema", float("nan"), 18.1)
+    both = D.scoring_check("x_ema", float("nan"), reg_error="non-finite")
+    assert both["consistent"] is None                                  # the stream's own outcome: a divergence
+    monkeypatch.setattr(D.registry, "live_stream", lambda: {"points": {"K": 64, "seed": 12345, "batch": 128,
+                                                                         "fold": "iid"}})
+    D.configure(False)
+    D.check_scoring_settings(D.fit_config(D.spec_map()["B2a_s0"]))     # the fit validates on the registry's points
+    with pytest.raises(D.HardStop, match="cannot be made"):
+        D.check_scoring_settings(replace(D.fit_config(D.spec_map()["B2a_s0"]), k_val=16))
+
+
+def test_i4_alpha_kl_record_and_beta_prepared_outside_the_default_list():
+    lines = ["field_distill from a to b: KL 1.2000e-01 -> 3.0000e-03", "  warm start step     0  KL 1.200e-01",
+             "  warm start step  1200  KL 9.000e-03"]
+    k = D.kl_record(lines, {"kl_warm_start": {"kl_initial": 0.12, "kl_final": 0.003, "steps": 6000}})
+    assert k["trajectory"] == [{"step": 0, "kl": 0.12}, {"step": 1200, "kl": 0.009}] and k["final"] == 0.003
+    assert len(k["log_lines"]) == 3
+    comp = D.companion_specs()
+    assert [(s.name, s.kwargs["start"], s.kwargs["kl_steps"], s.cls, s.data_free) for s in comp] == [
+        ("B1d_m11_kl12000", "s2_seed11", 12000, "companion", True),
+        ("B1d_m12_kl12000", "s2_seed12", 12000, "companion", True)]
+    assert "b1d_companions" not in D.DEFAULT_PHASES and "b1d_companions" in D.PHASES
+    assert D.PHASE_ORDER.index("b1d_companions") == D.PHASE_ORDER.index("b1d") + 1
+    assert set(D.DEFAULT_PHASES) == set(D.PHASE_ORDER) - {"b1d_companions"}
+    D.check_companion_pins()                                           # pinned in the committed file
+    assert not (set(D.companion_map()) & set(D.spec_map()))            # never part of the list
+    rng = np.random.default_rng(2)
+    a6 = _ta(18 + rng.normal(0, 0.1, 3000))
+    assert R.rule_b1d_convergence(a6, _ta(a6.values + 0.3e-4))["of_record"] == "6000"
+    assert R.rule_b1d_convergence(a6, _ta(a6.values - 0.7e-4))["of_record"] == "12000"
+
+
+@pytest.mark.skipif(not (H200 / "registry.jsonl").exists(), reason="H200 machine directory not present")
+def test_report_functions_against_numpy_on_the_real_h200_arrays():
+    """REVIEW.md 5.3 / 9.2 numbers from the real H200 batch-1 arrays (validation only; CPU; read-only)."""
+    rows = {}
+    for ln in (H200 / "registry.jsonl").read_text().splitlines():
+        r = json.loads(ln)
+        if r.get("stage") == "m2b_mlp" and r.get("stream"):
+            rows[r["name"]] = r
+    arr = lambda n: registry.row_array(rows[n], results_dir=paths.REPO_RESULTS)  # noqa: E731
+    need = ["E5_s2", "s2_seed13", "s2_seed14", *lib.CONTROL_NAMES]
+    if not all((paths.REPO_RESULTS / rows[n]["val_nll_path"]).exists() for n in need if n in rows):
+        pytest.skip("H200 arrays not present")
+    rs = sorted((H200 / "refsets").glob("*/mlp_val_nll.npy"))
+    ref = provenance.load_tagged(rs[0], expect_machine_id=H200.name)
+    ctrls = {n: arr(n) for n in lib.CONTROL_NAMES}
+    b0 = R.b0_mean(ctrls)
+    e5 = R.parts(arr("E5_s2"), ref, b0, ctrls)
+    assert round(e5["vs_mlp"]["mean"] * 1e4, 4) == -0.8258 and round(e5["vs_mlp"]["se"] * 1e4, 4) == 1.3548
+    assert round(e5["vs_b0"]["mean"] * 1e4, 4) == -1.6155 and round(e5["vs_b0"]["z"], 3) == -1.140
+    c2 = R.parts(arr("b0h_seed2"), ref, b0, ctrls)
+    assert round(c2["vs_b0"]["mean"] * 1e4, 4) == -0.4761 and round(c2["vs_b0"]["z"], 3) == -1.209
+    assert round(R.controls_seed_sd(ctrls, ref) * 1e4, 2) == 0.41
+    both = R.two_seed(arr("s2_seed14"), arr("s2_seed13"), ref)
+    assert round(both["mean"] * 1e4, 4) == 1.1350 and round(both["se"] * 1e4, 4) == 1.3963
+    m = np.mean([arr("s2_seed14").values.astype(np.float64), arr("s2_seed13").values], axis=0) - ref.values
+    assert abs(both["mean"] - m.mean()) < 1e-12
+
+
+def test_driver_run_as_a_script_is_one_module_instance(tmp_path):
+    """Run as a script the driver is __main__; the report imports it as run_m2b_list. Both must be the same module
+    (one CTX, one HardStop class), else the guards phase reads the wrong stage and a hard stop raised in the report
+    is not exit 3 (found by the smoke on the H200 test copy)."""
+    import subprocess
+    code = (f"import sys, runpy\nsys.path.insert(0, {str(MARTIN / 'scripts')!r})\n"
+            "sys.argv = ['run_m2b_list.py', '--help']\n"
+            f"try:\n    runpy.run_path({str(MARTIN / 'scripts' / 'run_m2b_list.py')!r}, run_name='__main__')\n"
+            "except SystemExit:\n    pass\n"
+            "import run_m2b_list_report as R\n"
+            "m = sys.modules['run_m2b_list']\n"
+            "print('SAME', R.D is m, m.__name__, R.D.HardStop is m.HardStop)\n")
+    env = {**os.environ, "SFM_OUT_ROOT": str(tmp_path / "out")}
+    out = subprocess.run([sys.executable, "-B", "-c", code], capture_output=True, text=True, env=env, timeout=300)
+    assert "SAME True __main__ True" in out.stdout, out.stdout[-2000:] + out.stderr[-2000:]
 
 
 def test_a2_dirty_clone_at_the_end_is_a_hard_stop(monkeypatch, tmp_path, capsys):

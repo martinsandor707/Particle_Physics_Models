@@ -51,16 +51,19 @@ Given (batch 1, recognised as done, never re-run): S2-11..15, B0 = `b0h_seed0..2
 E6). Closed: B7 (PLAN section 14). Primaries: B1 (done), B1d, B2b, B2c, B4f, B6c. **31 runs, 159,000 training steps**
 plus KL warm starts (B1d 2 × 6000, B6 6 × 3000, B4 4 × 500) and any convergence reruns.
 
-Rules applied by `scripts/run_m2b_list_report.py` (written before any result of this list exists):
-- promotion (PLAN 6, AUDIT 4.0), each part in its own column: (a) Δ `mlp_std` ≤ −5; (b) ≤ −3 SE; (c) better than B0
-  by more than 1 SE (z of Δ against the per-event mean of exactly `b0h_seed0..2` < −1; with fewer than three controls
-  the part is "B0 incomplete"); (d) replication by the second seed; (e) guards passed (G-K and G-bulk persistence
-  margins from the registry's guard columns, G-region ≤ 50 % of the gain in deep / border / Ā ≤ 0.3 cells, G-mass
-  reported). Promoted = all five.
-- primary comparisons B1d vs `mlp_std`, B2b − B2a, B2c − B2a, B4f − B2a, B6c − B6a (same seed, two-seed mean);
+Rules applied by `scripts/run_m2b_list_report.py`: the pre-registered text in the readings ruled by the second
+reviewer (`results/m2b_mlp/REVIEW.md` section 9.1; implementation in section 9 below):
+- promotion of a MODEL against `mlp_std` only, each part in its own column: (a) Δ ≤ −5; (b) ≤ −3 SE; (c) z of the
+  paired Δ against the per-event mean of exactly `b0h_seed0..2` < −1 (Δ against each control and the controls' seed
+  sd beside it; "B0 incomplete" with fewer than three controls); (d) seed 1 Δ ≤ −2.5 with the same sign and two-seed
+  mean ≤ −5 (alternative column with ≤ −3 SE, deciding nothing); (e) G-K, G-bulk, G-region with three values each
+  (passed / failed / undecided at 2 SE). Promoted = all five passed; (e) undecided = "undecided - Gate 1".
+- primary comparisons B1d vs `mlp_std`, B2b − B2a, B2c − B2a, B4f − B2a, B6c − B6a (same seed, two-seed mean), a
+  statement of their own (option (i) as ruled, awaiting the user's confirmation; options (iii) and (ii) printed);
   everything else labelled exploratory / comparator / diagnostic; nulls and negative results as measured.
-- 1-SE rule for B6 per seed; B3 EMA − last; B-ceil last iterate and trajectory minimum; secondary columns
-  p < 2 GeV / ≥ 2 GeV and contained / side-leaking (never selection criteria); guard numbers in their own table.
+- 1-SE rule for B6 per seed, then eligibility on both seeds; B3 EMA − last; B-ceil last iterate and trajectory
+  minimum; secondary columns p < 2 GeV / ≥ 2 GeV and contained / side-leaking (never selection criteria); guard
+  numbers in their own table.
 - convergence (AUDIT 4.0): a primary whose validation mean moved by ≥ 0.5 over its last 1000 steps is rerun once with
   doubled steps together with its comparator (`<name>_x2`; recipes pinned as well).
 - divergence (PLAN section 20, item 2; 17.11): diverged iff the last validation mean is not finite, the registry finds
@@ -77,20 +80,22 @@ Rules applied by `scripts/run_m2b_list_report.py` (written before any result of 
 | I1 | B1d "2 starts" | **decided by the user (26 Nov 2026, PLAN section 23 item 7):** the starts are `s2_seed11` and `s2_seed12`, in this fixed seed order, never picked by a validation score; the two starts are the two replicates (part (d) of B1d compares `B1d_m12` with `B1d_m11`). Replaces the earlier reading "best / second-best member by validation mean", which put validation selection into a primary comparison |
 | I2 | how the starting members are chosen | **decided by the user:** by the fixed seed order above; no registered value of any member is read to choose (test `test_no_validation_number_decides_what_is_trained`) |
 | I3 | "256 training-momentum quantiles" (B1d, B6) | quantiles of the training ln p at probabilities (i + ½)/256 (midpoints, so the grid stays inside the training range that `kl_warm_start` enforces) |
-| I4 | B1d training | data-free: the factory's KL fit is the whole training; no validation trajectory, so the convergence rule is not applied to B1d |
+| I4 | B1d training / convergence | data-free: the factory's KL fit is the whole training. **Ruling (REVIEW 9.1): cannot be checked as written; with the user.** Option (alpha) implemented: no convergence statement, the KL trajectory (initial, final, the five logged lines) stored in `init.json` / `model.pt` / `done.json` and printed; option (beta) prepared as the phase `b1d_companions` (not in the default list) |
 | I5 | B1f "B1d + 3000 steps" | **by the user's principle:** from the first B1d replicate, `B1d_m11` (started from `s2_seed11`). AUDIT 4.2 registers no other rule; its text is: "B1f \| does data fine-tuning undo it \| B1d + 3000 steps, 3e-4 → 3e-5, K = 16 \| T_B otherwise \| 0 \| 3,841 \| 2 min \| exploratory \| drifts back by 1–3". One run, seed 0 |
 | I6 | B3 "EMA streams of B2a, B2b, B2c" | each EMA state registered as `<run>_ema` (exploratory) and compared with its own last iterate. B3s ("with EMA") also gets an EMA row |
 | I7 | unspecified settings of B3s and B-ceil | taken from T_B (batch 256 given, `k_val` 64, selection last, weight decay as stated, dedicated folds, EMA 0.999; no EMA row for B-ceil) |
 | I8 | B-ceil `train_fraction` | the first round(f N) events of a permutation of the training split seeded with the run seed (0), in storage order; the index SHA-256 is recorded |
 | I9 | B-ceil "minimum over the trajectory" | the minimum of the K = 64 validation means of the fit history (every 100 steps); printed as a diagnostic, not paired, optimistic by construction |
 | I10 | comparator of B2a, B3s, B6a, B-ceil | `mlp_std` (B2a also against B0, as "B2a − B0 within ±1" asks); B1f against `B1d_m11` |
-| I11 | rule for the primary comparisons | the Track B thresholds (−5 and −3 SE) and the AUDIT 4.0 replication rule are applied to the comparison against the comparator; the promotion rule itself is against `mlp_std` |
-| I12 | "better than B0 by > 1 SE" | z of the paired Δ against the per-event mean of the three controls below −1 |
-| I13 | replication (AUDIT 4.0) | seed 1 Δ ≤ −2.5 with the same sign, and the two-seed mean (per-event mean of the two runs against the reference) meets (a) and (b) |
+| I11 | rule for the primary comparisons | **Ruled (REVIEW 9.1), option (i), needs the user's confirmation:** two separate statements - promotion of a model against `mlp_std` only; a comparison counts iff seed-0 Δ ≤ −5 and ≤ −3 SE with replication on the comparison. Options (iii) and (ii) printed, deciding nothing |
+| I12 | "better than B0 by > 1 SE" | **Ruled:** z of the paired Δ against the per-event mean of the three controls below −1 (no between-seed term); Δ against each control and the controls' seed sd printed as description |
+| I13 | replication (AUDIT 4.0) | **Ruled:** the Δ part only, both clauses: seed 1 Δ ≤ −2.5 with the same sign, two-seed mean ≤ −5; the version with ≤ −3 SE is a labelled alternative; a disagreement on a promotion row or a primary comparison goes to the user |
 | I14 | guards | only for runs meeting (a)-(c) on a seed, plus the other seed of that rung (AUDIT 4.2 note); G-region computed with the Track A implementation (`run_m2a.g_region_compute`, imported read-only) with `mlp_std`'s arrays as reference |
 | I15 | convergence rerun of a comparator shared by two primaries | `B2a_sX_x2` once (B2b and B2c both use it) |
 | I16 | B4 templates | front = `abar_front.pt`, stored = `abar.pt` (both checked against `transfer/SHA256SUMS`), full_box = the Track A template of the H200 (checked against its `templates.json`) |
-| I17 | 1-SE (B6) | per seed among B6a, B6b, B6c (fewest weights within one paired SE of the best; `registry.select_1se`) |
+| I17 | 1-SE (B6) | **Ruled:** per seed (`stats.one_se_select` over B6a, B6b, B6c, pairs of record), then eligibility on both seeds; the eligible capacity with the fewest weights; none: "no automatic selection - to Gate 1" |
+| J-a | unresolved G-K / G-bulk | **Ruled:** three values (passed and resolved / failed and resolved / undecided); undecided is neither promoted nor rejected, listed for Gate 1 |
+| J-b | G-region | **Ruled:** passed iff main < 0 and mean(flagged − ½ main) ≥ 0; resolved at 2 SE; three values; normalisation term and decomposition residual printed |
 
 ### 3a. Sweep: where does a validation value decide something? (26 Nov 2026, after the user's decision)
 
@@ -125,9 +130,11 @@ waiting for the user` and **exit code 3** (recorded under `stops` in `list_decis
   guard log other than the tolerated Parquet-reader import).
 Not a hard stop: a guard RULE that is not passed (a reported outcome); a diverged run (labelled as decided in PLAN
 section 20 item 2 - exploratory: recorded, the job continues; primary / comparator / diagnostic: "diverged - awaiting
-diagnosis", the job continues); too little free GPU memory (exit code 4, `STOPPED (resources)`, resumable). A
-non-finite per-event NLL at registration is treated as a divergence of the run (a property of the trained model), not
-as a failed scoring check - flagged for the reviewer.
+diagnosis", the job continues); too little free GPU memory (exit code 4, `STOPPED (resources)`, resumable).
+*Scoring, boundary case (Fable ruling A2 (i)):* the fit's last validation mean and the registry's mean of the same
+weights (main and EMA row) must agree to 1e-6; a finite fit value with a non-finite registry score, or a larger
+difference, is a hard stop. A candidate's own non-finite outcome (non-finite last validation mean, non-finite KL in a
+warm start, a non-finite score of the data-free B1d, which has no validation inside its fit) stays a divergence.
 
 ## 4. Code (all new or changed for this list)
 
@@ -205,6 +212,10 @@ step cost (measured ratio on the laptop).
 | report | - | < 1 min |
 | **total** | | **about 50-65 min without reruns; up to about 1 h 50 min with every rerun** |
 
+**Second estimate (the second reviewer, REVIEW.md 9.2):** 35-45 minutes plus reruns, with the 0.6 s per K = 64
+validation pass measured in PLAN section 21 for a component model on the H200 (the table above assumes 1.0-1.6 s).
+Either way more than the 25 minutes first stated.
+
 ## 6. Laptop dry-run evidence (26 Nov 2026; scratch output root, guard active, pristine mode)
 
 - `--list` prints the 31 runs of section 2 (159,000 training steps) and the given batch-1 runs. On the laptop the
@@ -263,7 +274,7 @@ step cost (measured ratio on the laptop).
 | **B1** G-K / G-bulk pass test inverted | the report takes the registry's `passed` (margin = guard − ½ main ≤ 0, gains negative) and prints `resolved` beside it; combination in `rule_guard_part` (J-a pending) | `test_b1_guard_pass_test_follows_the_definition` (a surviving gain passes, an artefact fails) |
 | **B2** convergence reruns unused | where `<name>_x2` exists, the pair of record is (`<name>_x2`, `<comparator>_x2`) for the promotion parts, the primary comparisons, replication, the 1-SE rule and the guard candidates (the driver's guards phase sees the reruns); the original is printed as "not converged, NOT used by the rules" (as in the Track A report) | `test_b2_rerun_pair_of_record_and_b3_scope` |
 | **B3** promotion printed for every run | "promoted" only for the primaries' runs of record; others "n/a (<class>)" / "n/a (not used)" | same test; smoke report |
-| **B4**, I11, I12, I13, I17, J-a, J-b | NOT decided here: each is one function with the behaviour implemented so far (`rule_primary_comparison`, `rule_better_than_b0`, `rule_replication`, `rule_one_se`, `rule_guard_part`, `rule_g_region`), listed in `PENDING_RULINGS` and printed at the end of the report; waiting for the rulings | `PENDING_RULINGS` test |
+| **B4**, I11, I12, I13, I17, J-a, J-b | ruled afterwards by the second reviewer (REVIEW.md 9.1); implemented as section 9 describes | section 9 |
 | review note beside B1d (d) | "both runs distil the same teacher (E5) on the same grid; the second start tests only the sensitivity to the start" | smoke report |
 | C5 | B1 retention printed only for a resolved B1 gain (|z| ≥ 2) | smoke report |
 | C6 | G-region: decomposition identity check (hard stop), resolution flag and normalisation term in the table | by reading; smoke guards earlier |
@@ -281,3 +292,73 @@ report on these rows prints the B1d note, "n/a (exploratory)" for B1f and the pe
 (B1-B3, rule functions): `scripts/run_m2b_list_report.py` (its tests are in the same test file; the driver's two-line
 change for B2 - `phase_guards` uses `rep.all_specs()` - is in `run_m2b_list.py`). Not touched: `scripts/run_m2a*.py`,
 `src/sfm/models/dist_factory.py`, `src/sfm/registry.py`, `src/sfm/metric.py`, `common.py`.
+
+## 9. Fable rulings (`REVIEW.md` section 9.1) - implementation, evidence, re-check list (26 Nov 2026, evening)
+
+Every ruling acts on the report (`scripts/run_m2b_list_report.py`, one function each, listed in `RULINGS` and
+printed at the end of the report); the driver changed only for A2 (i), I4 and two defects found by the smokes. The
+31 list recipes and the 12 rerun recipes are unchanged (hashes identical); the pin file gained `companion_recipes`.
+
+| ruling | implementation | test |
+|---|---|---|
+| **I11** [confirm] | `rule_primary_comparison`: statement Q, option (i) - counts iff seed-0 Δ ≤ −5 and ≤ −3 SE and replication (I13) on the comparison; promotion (statement P) stays against `mlp_std`; never combined ("promoted as a model; the mechanism is not shown" where it applies). Option (iii) (−3 / −2 SE, half −1.5, mean −3) in its own column, option (ii) = the Δ ± SE columns, both deciding nothing; neutral note "between −3 and −5". The user's answer changes only `I11_READING` | `test_i11_primary_comparison_option_i_with_the_other_readings_beside_it` |
+| **I12** | `rule_better_than_b0` unchanged (paired SE against the per-event B0 mean, z < −1); beside it Δ against each control and the controls' seed sd (ddof 1) | `test_i12_part_c_against_numpy`; real H200 arrays: E5 vs B0 −1.6155 (z −1.140), `b0h_seed2` vs B0 −0.4761 (z −1.209), seed sd 0.41 |
+| **I13** / B4 | `rule_replication`: seed 1 Δ ≤ −2.5 with the sign of seed 0 and two-seed mean ≤ −5 (Δ part only); alternative column "and two-seed mean ≤ −3 SE"; a disagreement on a promotion row or a primary comparison is listed for the user; a row passing on seed 1 only is printed, not promoted | `test_i13_replication_literal_with_the_alternative_column` |
+| **I17** | `rule_one_se`: per seed `stats.one_se_select` over B6a, B6b, B6c (pairs of record), eligibility on both seeds, fewest weights; "no automatic selection - to Gate 1" | `test_i17_one_se_eligibility_on_both_seeds` |
+| **J-a** | `rule_guard_part`: passed / failed / undecided from the registry's `passed` and `resolved`; `promotion()`: (a)-(d) with an undecided guard = "undecided - Gate 1" (neither promoted nor rejected) | `test_b1_guard_pass_test_follows_the_definition` (the two synthetic cases of review 5.2 and an unresolved pass); `test_guard_verdicts_on_the_real_h200_rows` (E5_s2 undecided, `b0h_seed0` and `s2_seed15` failed) |
+| **J-b** | `rule_g_region`: passed iff main < 0 and mean(flagged − ½ main) ≥ 0, resolved at 2 SE, three values. **Sign:** the ruling's text (≥ 0) is used; it is opposite to G-K because here at most half of the gain may come from flagged cells (share ≤ ½ ⟺ flagged ≥ ½ main ⟺ margin ≥ 0 with gains negative). Guard table: margin (z), normalisation term, decomposition residual (recomputed by the report against the registered array; the driver's identity check is now stored in `g_region.json`) | `test_j_a_j_b_three_values_and_the_g_region_sign` |
+| **B1d** | (d) on the two starts, labelled "replicated over starting networks (one teacher)" with the note that it does not replicate E5; B1d − E5 (paired) for both starts in place of the retained fraction; `b1d_anomaly`: a B1d run meeting (a)-(c) while E5 does not → "anomaly - Gate 1" | `test_promotion_values_and_the_b1d_anomaly` |
+| **A2 (i)**, boundary case | `run_m2b_list.scoring_check`: the fit's last validation mean (and `val_ema` for the EMA row) against the registry's mean of the same weights; non-finite in the registry with a finite fit value, or a difference > 1e-6, is a hard stop (exit 3). Why like with like (`SCORING_CHECK_NOTE`): both K = 64, the same fold points (CUDA generator seeded 12345, batches of 128 in storage order; `train.val_nll` is the loop of `common.test_nll`), both inside `metric.deterministic()`, the same weights (selection last, validated at step = steps); only inference vs grad mode differ (identical numbers). `check_scoring_settings` stops if the fit's K / seed / batch / fold differ from the registry's points. Checked at registration (driver) and again for every finished run before any table (report). Data-free B1d: not applicable (no validation inside its KL fit), a non-finite score stays a divergence | `test_a2_i_scoring_check_is_a_hard_stop`; both smokes: 40 fits, largest difference 0.0 (bit-identical, as expected) |
+| **B3** | kept "n/a (<class>)" for every non-primary row (clearer than a promotion verdict on exploratory rows: the class is in its own column and the verdict cannot be read as a test) and added the multiplicity sentence | smoke report |
+| **I4** [confirm] | option (alpha) implemented: the build's KL lines are captured by the driver (no factory changed) and stored with initial / final KL in `init.json`, `model.pt` (data-free runs) and `done.json`; the report prints them; no convergence statement. Option (beta) prepared: `B1d_m11_kl12000`, `B1d_m12_kl12000` (12,000 KL steps, pinned), phase `b1d_companions` NOT in the default phases; `rule_b1d_convergence` (|Δ(12000 − 6000)| < 0.5) applied only with `I4_OPTION = "beta"` | `test_i4_alpha_kl_record_and_beta_prepared_outside_the_default_list`; H200 smoke |
+| run time | the second reviewer's estimate (35-45 min plus reruns) added beside the per-phase table (section 5) | - |
+
+**Defects found by the smokes and fixed (driver):**
+- *Two module instances.* Run as a script the driver is `__main__`; the report (and, since e7d3524, the guards phase
+  through `rep.all_specs()`) imported it again as `run_m2b_list`, a second copy with its own `CTX` and its own
+  `HardStop` class. Effects: in the smoke mode the guards phase looked under stage `m2b_mlp` (FileNotFoundError →
+  hard stop); in any mode a hard stop raised inside the report would not have been exit 3. Fix: the driver registers
+  itself as `run_m2b_list` when run as a script. Test `test_driver_run_as_a_script_is_one_module_instance`.
+- *Forced guard evaluation in the smoke mode* now uses the runs of record of B2b (the rerun where it exists), and a
+  convergence rerun of `B2b_s0` is forced in the smoke mode only (`SMOKE_FORCED_RERUN`), so the rerun path always runs.
+
+**Evidence.**
+- Laptop, clean export (`git archive` of HEAD + the six files of this work; ignored inputs copied without any `*test*`
+  file; file-access guard on, pristine mode; laptop GPU through the lock) - run before the module-instance fix:
+  two-step reference set (parity PASS, then created), two members re-scored, smoke job with injected divergences
+  (`B5f_s0` exploratory, `B2a_s1` comparator, `B6c_s1` primary) stopped with `stop_job.sh` inside the fit of `B3s_s0`
+  (exit 143), resumed (`[B3s_s0] resuming from step 30 of 120`) through b6, bceil and converge, then the guards phase
+  stopped with exit 3 and the last line `HARD STOP ... guard: guard evaluation of B2b_s0 failed: FileNotFoundError ...
+  runs/m2b_mlp/B2b_s0/model.pt` (the module-instance defect); `b1d_companions report` and `--list` exit 0. No file
+  written inside the export clone; guard log only `pyarrow` lines; campaign files unchanged.
+- H200 test copy (slot `tb`, working tree as synced, root `t2`, after the fix): members re-scored (PASS); smoke job
+  with the same three injected divergences stopped inside the fit of `B4s_s0` (exit 143), resumed (`[B4s_s0] resuming
+  from step 30 of 60`) and finished all twelve phases, exit 0: `B5f_s0` "diverged", `B2a_s1` and `B6c_s1` "diverged -
+  awaiting diagnosis", the job continued; five primaries not converged → `_x2` reruns with their comparators; guards
+  on the runs of record of B2b (`B2b_s0_x2`, `B2b_s1`: guarded rows and G-region arrays, three-valued verdicts,
+  decomposition residual 1e-5); the report reads the rerun pairs (originals labelled "not converged, NOT used by the
+  rules", the mixed pair `B2b_s0_x2 + B2b_s1` named), 1-SE on `B6a_s0_x2`, `B6b_s0`, `B6c_s0_x2`; scoring check over
+  40 fits, largest difference 0.0. Then `b1d_companions report` (exit 0; companions registered, (beta) comparison
+  printed, not applied), `--list` and the report as its own script (exit 0). Guard log: only `pyarrow` lines.
+- Tests: `tests/test_run_m2b_list.py` 27 on the H200 test copy: 26 passed, 1 skipped (the real-array test needs the
+  laptop's per-event arrays); on the laptop without the GPU the four laptop-only tests pass (real H200 arrays against
+  numpy, real H200 guard rows, dirty clone at the end, one module instance). With the related files on the H200: 89
+  passed, 1 skipped, 1 failed - `test_review_fixes.py:342` asserts git-state fields and the test copy is not a git
+  repository (environment; passes on the laptop).
+
+**Re-check list of REVIEW.md 9.3, where to look:**
+1. scope - diff against `43ccfd6`: `scripts/run_m2b_list.py`, `scripts/run_m2b_list_report.py`,
+   `configs/m2b/list_recipes.json`, `tests/test_run_m2b_list.py`, `scripts/run_m2b_lib.py` (`finish`, `CLONE_DIRTY_EXIT`),
+   this file. No factory, `common.py`, `registry.py`, `metric.py`, `train.py`, `provenance.py` change. Track A
+   helpers: at HEAD `g_region_compute`, `_g_region_static`, `_g_region_masks`, `template_dir`, `acceptance_template`,
+   `exit_depth` are identical to `43ccfd6`; in the working tree the Track A worker's UNCOMMITTED change adds timing
+   arguments to `g_region_compute` (`timing=None, run=""`, `L.PartTimer` blocks; call and return unchanged) - if it is
+   committed before the H200 pulls, it is to be reviewed again (the H200 smoke above ran with it, the laptop export
+   without it).
+2. A1 - `B1D_START_ORDER`, H200-records test. 3. A2 - scoring check above; dirty clone exit 3 (laptop test). 4-7, 12 -
+   the rule functions and their tests above. 8 - B3 above. 9 - I4 (alpha) / (beta) above. 10-11 - evidence above.
+
+**Staging (explicit paths):** `shape-form-martin/scripts/run_m2b_list.py`, `shape-form-martin/scripts/run_m2b_list_report.py`,
+`shape-form-martin/configs/m2b/list_recipes.json`, `shape-form-martin/tests/test_run_m2b_list.py`,
+`shape-form-martin/results/m2b_mlp/STATUS.md`. (`scripts/run_m2b_lib.py` is unchanged since e7d3524.)
+

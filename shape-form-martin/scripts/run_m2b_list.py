@@ -34,10 +34,19 @@ Phases (default order): verify b1d b1f b2 b3s b4 b5 b6 bceil converge guards rep
     guards    registry.evaluate(guards=True) (G-K, G-bulk, G-mass) and G-region arrays for every run that meets the
               promotion parts (a)-(c) on a seed, for its other seed, and G-region arrays of mlp_std as reference
     report    scripts/run_m2b_list_report.py: the pre-registered rules applied to the registered arrays
+Prepared, NOT in the default phases (runs only when named):
+    b1d_companions  I4 option (beta) of the Fable ruling (REVIEW.md 9.1; the choice is with the user): one data-free
+              companion per B1d run with 12,000 KL steps (B1d_m11_kl12000, B1d_m12_kl12000; pinned). Under option
+              (alpha), the one implemented, B1d has no convergence statement; its KL trajectory (the logged lines and
+              the initial / final KL) is stored in init.json, model.pt and done.json and printed by the report.
 
 Hard stops (user, PLAN section 23 item 13): a failed parity, reference, scoring, guard or file-access / deferred-file
 check ends the job at once with exit code 3 and the last line "HARD STOP (PLAN.md section 23, item 13) - ..."; too
 little free GPU memory ends it with exit code 4 ("STOPPED (resources)", resumable). See results/m2b_mlp/STATUS.md 3b.
+Scoring check (Fable ruling A2 (i), boundary case): the fit's last validation mean and the registry's mean of the same
+weights (main and EMA row) must agree to 1e-6; a finite fit value with a non-finite registry score is a hard stop, not
+a divergence (SCORING_CHECK_NOTE). A candidate's own non-finite outcome (non-finite last validation mean, non-finite KL
+in its warm start, the data-free B1d with a non-finite score) stays a recorded divergence.
 No validation value chooses what is trained: selection "last" everywhere, fixed B1d/B1f starts; validation values
 only drive pre-registered rules on what is re-run (convergence) or reported (guards, 1-SE) and the divergence labels.
 Never re-run, re-pair or changed: the runs registered by batch 1 (recognised by their rows on the live stream). The
@@ -64,6 +73,10 @@ from typing import Optional
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+if __name__ == "__main__":
+    # ONE module instance: the report (and the guards phase through it) imports this file as "run_m2b_list"; without
+    # this alias it would get a second copy with its own CTX (stage, smoke flag) and its own HardStop class
+    sys.modules.setdefault("run_m2b_list", sys.modules[__name__])
 import run_m2b_lib as lib  # noqa: E402
 
 import numpy as np  # noqa: E402
@@ -76,13 +89,22 @@ common = train.C
 REAL_STAGE, SMOKE_STAGE = "m2b_mlp", "m2b_smoke"
 SMOKE_ENV = "SFM_M2B_SMOKE"
 SMOKE_DIV = 100
+SMOKE_FORCED_RERUN = "B2b_s0"       # smoke mode only: treated as not converged, so the rerun path runs end to end
 PIN_FILE = paths.MARTIN_DIR / "configs" / "m2b" / "list_recipes.json"
 DEFAULT_PHASES = ("verify", "b1d", "b1f", "b2", "b3s", "b4", "b5", "b6", "bceil", "converge", "guards", "report")
+# I4 option (beta) of the Fable ruling (REVIEW.md 9.1) is PREPARED as its own phase and is NOT in the default list:
+# it runs only when named (the choice between (alpha) and (beta) is with the user)
+PHASE_ORDER = ("verify", "b1d", "b1d_companions", "b1f", "b2", "b3s", "b4", "b5", "b6", "bceil", "converge", "guards",
+               "report")
 PRIMARY_RUNGS = ("B1", "B1d", "B2b", "B2c", "B4f", "B6c")             # AUDIT 4.2: the six primaries
 CONVERGED_MOVE, CONVERGENCE_WINDOW = 0.5e-4, 1000                     # AUDIT 4.0
 BLOWUP_NAT, FROZEN_FRACTION = 1.0, 0.5
 # promotion rule (PLAN 6 / AUDIT 4.0), nat per event
 PROMO_GAIN, PROMO_Z, B0_Z = -5e-4, -3.0, -1.0
+# A2 (i) boundary case (Fable ruling, REVIEW.md 9.1): the fit's last validation mean and the registry's mean of the
+# same weights are two scorings of one thing; a larger difference is a failed scoring check (hard stop)
+SCORING_TOL = 1e-6
+COMPANION_SUFFIX, COMPANION_KL_FACTOR = "_kl12000", 2                 # I4 (beta): 12,000 instead of 6,000 KL steps
 
 
 class HardStop(RuntimeError):
@@ -255,6 +277,27 @@ def x2_spec(s: Spec) -> Spec:
                    replicate_of=None, ema_row=False, notes=f"convergence rerun of {s.name} (doubled steps)")
 
 
+def companion_specs() -> list:
+    """I4 option (beta) of the Fable ruling (REVIEW.md 9.1), PREPARED, NOT in the default phases: one unconditional
+    data-free companion per B1d run with 12,000 instead of 6,000 KL steps, nothing else changed. No validation number
+    decides whether they run (phase ``b1d_companions``, only when named). Under (beta) the 6,000-step run is of
+    record iff |Delta(12,000 - 6,000)| < 0.5e-4 on the registered arrays, else the 12,000-step run (the report);
+    B1f starts from the 6,000-step run in either case ("B1d + 3000 steps")."""
+    out = []
+    for s in build_list():
+        if s.rung == "B1d":
+            out.append(replace(s, name=f"{s.name}{COMPANION_SUFFIX}", cls="companion",
+                               kwargs={**s.kwargs, "kl_steps": COMPANION_KL_FACTOR * int(s.kwargs["kl_steps"])},
+                               replicate_of=None,
+                               notes=f"I4 option (beta): companion of {s.name} with 12,000 KL steps (prepared; runs "
+                                     "only when the phase b1d_companions is named)"))
+    return out
+
+
+def companion_map() -> dict:
+    return {s.name: s for s in companion_specs()}
+
+
 # ----------------------------------------------------------------------------------------------------------------------
 # pinned recipes (review note N5): the spec above may only run with the hashes recorded in the tracked pin file
 # ----------------------------------------------------------------------------------------------------------------------
@@ -278,6 +321,13 @@ def check_pins(specs) -> None:
         hard_stop("recipe pin", "the pin file must be the tracked file inside the clone")
 
 
+def check_companion_pins() -> None:
+    pins = pinned().get("companion_recipes", {})
+    bad = [(s.name, s.recipe_hash(), pins.get(s.name)) for s in companion_specs() if pins.get(s.name) != s.recipe_hash()]
+    if bad:
+        hard_stop("recipe pin", f"I4 companion recipes differ from the pinned file: {bad}")
+
+
 def write_pins() -> None:
     if not machine.is_laptop_of_record() or paths.pristine_mode():
         raise SystemExit("--pin runs on the laptop of record only (the file is committed from there)")
@@ -285,7 +335,8 @@ def write_pins() -> None:
     out = {"source": "scripts/run_m2b_list.py build_list() - AUDIT 4.2", "n": len(specs),
            "recipes": {s.name: s.recipe_hash() for s in specs},
            "x2_recipes": {x2_spec(s).name: x2_spec(s).recipe_hash() for s in specs
-                          if s.cls in ("primary", "comparator") and not s.data_free}}
+                          if s.cls in ("primary", "comparator") and not s.data_free},
+           "companion_recipes": {s.name: s.recipe_hash() for s in companion_specs()}}
     PIN_FILE.write_text(json.dumps(out, indent=1, sort_keys=True) + "\n")
     print(f"pinned {len(specs)} recipes in {paths.portable(PIN_FILE)}")
 
@@ -556,6 +607,85 @@ def diagnosis(name: str) -> Optional[dict]:
     return {**d, "valid": bool(ok)}
 
 
+SCORING_CHECK_NOTE = (
+    "Fable ruling A2 (i), boundary case (REVIEW.md 9.1): the fit's last validation mean and the registry's mean of the "
+    "same weights are two scorings of one thing. They are computed alike: K = 64 (FitConfig.k_val = registry.EVAL_K), "
+    "the same fold points (generator on the data's CUDA device seeded 12345, batches of 128 in storage order: "
+    "train.val_nll is the loop of common.test_nll, metric.event_nll at its defaults is common.event_nll), both inside "
+    "sfm.metric.deterministic() (the fit's TRAINING runs non-deterministically, its validation does not), and the same "
+    "weights (selection 'last': the fit validates the final iterate at step == steps and saves exactly that state; "
+    "the EMA row is the saved EMA state, validated the same way as 'val_ema'). Remaining differences: "
+    "inference_mode (fit) vs grad mode (registry) - identical numbers - and the float64 mean of the same float32 "
+    "array. So they must agree to 1e-6 nat per event; a finite fit value with a non-finite registry score, or a "
+    "larger difference, is a failed scoring check (hard stop). Not applicable to the data-free B1d runs (no "
+    "validation inside their KL fit): there a non-finite registry score stays a recorded divergence (a candidate's "
+    "outcome).")
+
+
+def check_scoring_settings(cfg) -> None:
+    """The comparison of SCORING_CHECK_NOTE is like with like only if the fit validates on the registry's points."""
+    pts = registry.live_stream()["points"]
+    want = {"K": registry.EVAL_K, "seed": registry.EVAL_SEED, "batch": registry.EVAL_BATCH, "fold": "iid"}
+    have = {"K": cfg.k_val, "seed": cfg.val_seed, "batch": cfg.val_batch, "fold": "iid"}   # train.val_nll: iid
+    live = {k: pts.get(k) for k in want}
+    if have != want or live != want:
+        hard_stop("scoring", f"the fit validates with {have}, the registry scores with {want} (live stream {live}): "
+                  "the two scorings would not be of the same points; the scoring-consistency check cannot be made")
+
+
+def scoring_check(name: str, fit_value, reg_value=None, reg_error: Optional[str] = None) -> dict:
+    """Compare the fit's last validation mean with the registry's mean of the same weights (SCORING_CHECK_NOTE).
+    Returns the record; raises HardStop("scoring") on any disagreement. Both non-finite: the run's (or EMA stream's)
+    own outcome, returned with consistent=None for the caller to record as a divergence."""
+    fin = fit_value is not None and math.isfinite(float(fit_value))
+    if reg_error is not None:
+        if fin:
+            hard_stop("scoring", f"{name}: the fit's last validation mean {float(fit_value):.6f} is finite, the "
+                      f"registry finds non-finite per-event NLLs for the same weights ({reg_error})")
+        return {"fit_last_val": None, "registry_val_mean": None, "consistent": None,
+                "note": "non-finite in the fit and in the registry: the run's own outcome (recorded divergence)"}
+    if not fin:
+        hard_stop("scoring", f"{name}: the registry's mean {reg_value} is finite, the fit's last validation mean of the "
+                  f"same weights is {fit_value}")
+    d = abs(float(fit_value) - float(reg_value))
+    if d > SCORING_TOL:
+        hard_stop("scoring", f"{name}: the fit's last validation mean {float(fit_value):.9f} and the registry's mean "
+                  f"{float(reg_value):.9f} of the same weights differ by {d:.3e} > {SCORING_TOL:g}")
+    return {"fit_last_val": float(fit_value), "registry_val_mean": float(reg_value), "abs_diff": d,
+            "tolerance": SCORING_TOL, "consistent": True}
+
+
+KL_LINE = "warm start step"
+
+
+def kl_record(lines: list, init_info) -> Optional[dict]:
+    """I4 option (alpha): the KL trajectory of a warm start / distillation as logged by models.field.kl_warm_start
+    (a line every steps // 5 steps, 3 significant digits) plus the initial and final KL of the factory's init_info.
+    Copied into init.json, model.pt (data-free runs) and done.json; read by the report."""
+    import re
+    traj = []
+    for ln in lines or []:
+        m = re.search(r"warm start step\s+(\d+)\s+KL\s+(\S+)", ln)
+        if m:
+            try:
+                traj.append({"step": int(m.group(1)), "kl": float(m.group(2))})
+            except ValueError:
+                traj.append({"step": int(m.group(1)), "kl": None})
+    kw = (init_info or {}).get("kl_warm_start") if isinstance(init_info, dict) else None
+    if not traj and not kw and not lines:
+        return None
+    return {"initial": (kw or {}).get("kl_initial"), "final": (kw or {}).get("kl_final"), "steps": (kw or {}).get("steps"),
+            "trajectory": traj, "log_lines": list(lines or [])}
+
+
+def latest_init(s: Spec) -> Optional[dict]:
+    """The init record of the build whose weights the run carries: the last of init.json, init_rebuild<k>.json."""
+    files = [s.out_dir / "init.json"] + sorted(s.out_dir.glob("init_rebuild*.json"),
+                                               key=lambda p: int(p.stem.replace("init_rebuild", "") or 0))
+    files = [f for f in files if f.exists()]
+    return read_json(files[-1]) if files else None
+
+
 def _inject(s: Spec, steps: int):
     names = [x for x in os.environ.get("SFM_M2B_INJECT_DIVERGENCE", "").split(",") if x]
     if s.name not in names:
@@ -636,17 +766,25 @@ def run_spec(s: Spec) -> dict:
         resuming = (s.out_dir / train.CHECKPOINT).exists() or (s.out_dir / train.MODEL_FILE).exists()
         sources = verify_sources(s, kw)                                  # before the factory reads any weights
         train.seed_everything(s.seed)
-        ctx = models.BuildContext(device=dev, train=tr_full, seed=s.seed, log=log, skip_init=resuming,
+        kl_lines = []
+
+        def build_log(msg):                                              # I4 (alpha): keep the KL lines of the build
+            if " KL " in str(msg):
+                kl_lines.append(str(msg).strip())
+            log(msg)
+        ctx = models.BuildContext(device=dev, train=tr_full, seed=s.seed, log=build_log, skip_init=resuming,
                                   results_dir=paths.REPO_RESULTS)
         try:
             model = models.build(s.factory, ctx, **kw)
         except FloatingPointError as err:                                # non-finite KL in a warm start / distillation
-            return record_divergence(s, [f"non-finite KL in the factory's warm start: {err}"])
+            return record_divergence(s, [f"non-finite KL in the factory's warm start: {err}"],
+                                     extra={"kl": kl_record(kl_lines, None)})
         init_file = s.out_dir / "init.json"
         rec = {"spec": asdict(s), "recipe_hash": s.recipe_hash(), "build_kwargs": kw,
                "init_info": getattr(model, "init_info", None), "sources_verified": sources,
                "train_subset": subset, "n_params": models.count_params(model),
                "weights_sha256_at_start": provenance.weights_sha256(model.state_dict()),
+               "kl": kl_record(kl_lines, getattr(model, "init_info", None)) if not resuming else None,
                "machine_id": lib.MACHINE.id, "batch": CTX.batch}
         if not init_file.exists():
             write_json(rec, init_file)
@@ -655,21 +793,23 @@ def run_spec(s: Spec) -> dict:
             while (s.out_dir / f"init_rebuild{k}.json").exists():
                 k += 1
             write_json({**rec, "rebuilt_after_restart": True}, s.out_dir / f"init_rebuild{k}.json")
-        init = read_json(init_file)
         meta_model = {"factory": s.factory, "kwargs": kw}
         if s.data_free:                                                  # B1d: the KL fit was the training
             mf = s.out_dir / train.MODEL_FILE
-            if not mf.exists():
+            if not mf.exists():                                          # this build's weights, this build's record
                 train.atomic_save({"state": {k: v.detach().clone() for k, v in model.state_dict().items()},
                                    "meta": {"model": meta_model, "spec": asdict(s), "stage": CTX.stage},
-                                   "machine_tag": lib.MACHINE.to_dict(), "init_info": init.get("init_info"),
-                                   "saved_utc": datetime.now(timezone.utc).isoformat()}, mf)
+                                   "machine_tag": lib.MACHINE.to_dict(), "init_info": rec["init_info"],
+                                   "kl": rec["kl"], "saved_utc": datetime.now(timezone.utc).isoformat()}, mf)
+                kl = rec["kl"]
             else:
                 model = models.load_run(f"out:{os.path.relpath(s.out_dir, paths.OUT_RESULTS)}", ctx)
+                kl = torch.load(mf, map_location="cpu", weights_only=False).get("kl")
             res, history, warn = None, [], []
             model_path = mf
         else:
             cfg = fit_config(s)
+            check_scoring_settings(cfg)
             res = train.fit(model, tr, va, cfg, meta=_jsonable({"model": meta_model, "spec": asdict(s),
                                                                 "stage": CTX.stage, "sources": sources,
                                                                 "train_subset": subset}),
@@ -678,6 +818,7 @@ def run_spec(s: Spec) -> dict:
             if crit:
                 return record_divergence(s, crit, res)
             history, model_path = res.history, res.model_path
+            kl = (latest_init(s) or {}).get("kl")                         # the build the fit started from
         meta = {"k": models.count_params(model), "seed": s.seed, "config": {"spec": asdict(s), "build_kwargs": kw,
                                                                             "fit": (fit_config(s).result_dict()
                                                                                     if not s.data_free else None)},
@@ -686,13 +827,19 @@ def run_spec(s: Spec) -> dict:
                 "trained_on": {"machine_id": lib.MACHINE.id, "source": "trained in this job",
                                "init_from": sources},
                 "notes": s.notes or None, "warnings": warn or None}
+        fit_last = history[-1].get("val") if history else None
         r = row(s.name, ckpt=model_path)
         if r is None:
             try:
                 r = registry.evaluate(model, s.name, CTX.stage, val, meta=meta)
             except FloatingPointError as err:
+                if not s.data_free:                  # A2 (i) boundary case: a finite fit value -> hard stop
+                    scoring_check(s.name, fit_last, reg_error=str(err))
                 return record_divergence(s, ["non-finite per-event validation NLL at registration"], res,
-                                         eval_error=str(err))
+                                         eval_error=str(err), extra={"kl": kl})
+        checks = {"note": SCORING_CHECK_NOTE,
+                  "main": (scoring_check(s.name, fit_last, r["val_mean"]) if not s.data_free
+                           else "not applicable: data-free run (no validation inside the KL fit)")}
         ema = None
         if s.ema_row and not s.data_free:
             obj = torch.load(model_path, map_location=dev, weights_only=False)
@@ -701,18 +848,24 @@ def run_spec(s: Spec) -> dict:
                                                                     skip_init=True, results_dir=paths.REPO_RESULTS),
                                      **kw)
                 m_ema.load_state_dict(obj["ema_state"])
+                fit_last_ema = history[-1].get("val_ema") if history else None
                 ema = row(f"{s.name}_ema", ckpt=model_path)
                 if ema is None:
                     try:
                         ema = registry.evaluate(m_ema, f"{s.name}_ema", CTX.stage, val,
                                                 meta={**meta, "rung": "B3", "cls": "exploratory", "comparator": s.name,
                                                       "notes": f"EMA stream (decay {s.ema_decay}) of {s.name} (B3)"})
-                    except FloatingPointError as err:   # a candidate's score (orchestrator ruling A2 (i)): recorded
+                    except FloatingPointError as err:
+                        # a finite val_ema in the fit: failed scoring check (hard stop, Fable ruling 9.1); non-finite
+                        # there too: the EMA stream's own outcome, recorded (orchestrator ruling A2 (i))
+                        checks["ema"] = scoring_check(f"{s.name}_ema", fit_last_ema, reg_error=str(err))
                         warn = list(warn) + [f"EMA row {s.name}_ema: non-finite per-event NLL ({err}); recorded as "
                                              "diverged, not registered"]
                         record_decision("diverged", f"{s.name}_ema", {"criteria": ["non-finite EMA score"],
                                                                       "status": "diverged", "cls": "exploratory"})
                         ema = None
+                if ema is not None:
+                    checks["ema"] = scoring_check(f"{s.name}_ema", fit_last_ema, ema["val_mean"])
         log(f"[{s.name}] registered: val {r['val_mean']:.6f}  vs mlp {r['vs_mlp']['mean'] * 1e4:+.2f} +- "
             f"{r['vs_mlp']['se'] * 1e4:.2f}e-4" + (f"; EMA {ema['val_mean']:.6f}" if ema else ""))
         done = {"name": s.name, "stage": CTX.stage, "smoke": CTX.smoke, "rung": s.rung, "cls": s.cls,
@@ -721,6 +874,7 @@ def run_spec(s: Spec) -> dict:
                 "val_mean": r["val_mean"], "k": r["k"], "checkpoint_sha256": r.get("checkpoint_sha256"),
                 "weights_sha256": r.get("weights_sha256"), "val_nll_sha256": r.get("val_nll_sha256"),
                 "ema_row": ({"name": ema["name"], "val_mean": ema["val_mean"]} if ema else None),
+                "scoring_check": checks, "kl": kl,
                 "sources_verified": sources, "train_subset": subset, "job_seconds": time.time() - t0,
                 "machine_tag": lib.MACHINE.to_dict(), "stream_id": lib.live_stream_id(), "batch": CTX.batch,
                 "finished_utc": datetime.now(timezone.utc).isoformat(timespec="seconds")}
@@ -815,8 +969,10 @@ def phase_converge() -> dict:
             res[s.name] = {"available": False, "reason": "history shorter than the window"}
             continue
         move = abs(float(last["val"]) - float(prev["val"]))
-        conv = move < CONVERGED_MOVE
-        res[s.name] = {"available": True, "move": move, "window_steps": last["step"] - prev["step"], "converged": conv}
+        forced = CTX.smoke and s.name == SMOKE_FORCED_RERUN          # smoke only: exercise the rerun path
+        conv = move < CONVERGED_MOVE and not forced
+        res[s.name] = {"available": True, "move": move, "window_steps": last["step"] - prev["step"], "converged": conv,
+                       **({"forced_in_the_smoke_mode": True} if forced else {})}
         if not conv:
             for t in (s, sm.get(s.comparator)) if s.comparator in sm else (s,):
                 x = x2_spec(t)
@@ -834,8 +990,8 @@ def phase_guards() -> dict:
     import run_m2b_list_report as rep
     specs = rep.all_specs()                                            # the list + registered x2 reruns (B2)
     cands = rep.guard_candidates(sm=specs)
-    if CTX.smoke and not cands:
-        cands = [n for n in ("B2b_s0",) if row(n)]                     # exercise the path in the smoke mode
+    if CTX.smoke and not cands:                                        # exercise the path in the smoke mode, on
+        cands = [n for n in rep.records(specs)["B2b"] if row(n)]       # the runs of record of B2b (reruns if any)
     out = {}
     for n in cands:
         s = specs.get(n)
@@ -894,11 +1050,12 @@ def g_region(name: str, model, val, val_cpu) -> dict:
                                         seed=pts0["seed"], batch=pts0["batch"], subset=f"g_region:{cls}")
             ta = provenance.save_tagged(d / f"g_region_{cls}.npy", a, pts, st["machine"], label=f"{label}:{cls}")
             out[cls] = {"path": paths.portable(ta.path), "sha256": ta.sha256}
-        write_json({"name": label, "arrays": out}, d / "g_region.json")
+        write_json({"name": label, "arrays": out, "identity": comp.get("identity")}, d / "g_region.json")
         return out
     def checked(comp, registered, label):
         """The decomposition must add up to the per-event NLL, and that NLL must equal the registered array
-        (tolerance check: every event within 1e-4, mean within 1e-6); otherwise a hard stop (guard check)."""
+        (tolerance check: every event within 1e-4, mean within 1e-6); otherwise a hard stop (guard check). The
+        residuals are stored in the marker (the report prints them, finding C6)."""
         a = comp["arrays"]
         recon = a["flagged"] + a["inner"] + a["normalisation"]
         resid = float(np.abs(recon - comp["parts_nll"].astype(np.float64)).max())
@@ -906,6 +1063,8 @@ def g_region(name: str, model, val, val_cpu) -> dict:
         if resid > 1e-4 or not tc["strict_pass"]:
             hard_stop("guard", f"G-region of {label}: decomposition residual {resid:.2e}, against the registered array "
                       f"max {tc['max_abs']:.2e} / mean {tc['mean_diff']:.2e}")
+        comp["identity"] = {"decomposition_residual_max": resid, "vs_registered_max_abs": float(tc["max_abs"]),
+                            "vs_registered_mean_diff": float(tc["mean_diff"]), "tolerance": "1e-4 per event"}
         return comp
 
     ref_marker = out_dir() / "_mlp_std_reference" / "g_region" / "g_region.json"
@@ -920,10 +1079,18 @@ def g_region(name: str, model, val, val_cpu) -> dict:
 
 def phase_report() -> None:
     import run_m2b_list_report as rep
-    rep.main(["--smoke"] if CTX.smoke else [])
+    rep.run(["--smoke"] if CTX.smoke else [])                         # a failed check raises HardStop -> exit 3
+
+
+def phase_b1d_companions() -> list:
+    """I4 option (beta), prepared, not in the default phases: the two 12,000-KL-step companions of B1d."""
+    check_companion_pins()
+    smoke_prep()
+    return [run_spec(s) for s in companion_specs()]
 
 
 PHASES = {"verify": phase_verify, "b1d": lambda: (smoke_prep(), run_rungs(("B1d",))),
+          "b1d_companions": phase_b1d_companions,
           "b1f": lambda: run_rungs(("B1f",)), "b2": lambda: run_rungs(("B2a", "B2b", "B2c")),
           "b3s": lambda: run_rungs(("B3s",)), "b4": lambda: run_rungs(("B4f", "B4s", "B4x")),
           "b5": lambda: run_rungs(("B5f",)), "b6": lambda: run_rungs(("B6a", "B6b", "B6c")),
@@ -967,6 +1134,11 @@ def print_list() -> None:
               f"{', '.join(other):<34} {str(s.comparator):<12} {status(s)}")
     print(f"\n{len(build_list())} runs; {total:,} training steps (+ KL warm starts: B1d 2 x 6000, B6 6 x 3000, B4 4 x 500); "
           "convergence reruns of non-converged primaries come on top (doubled steps, with their comparators)")
+    print("\nPrepared, NOT in the default phases (I4 option (beta), with the user; phase b1d_companions only when named):")
+    for s in companion_specs():
+        print(f"{s.name:<22} {s.rung:<7} {s.cls:<12} {s.seed:>4} {s.steps:>6} {s.k_train:>3} {s.fold:<10} "
+              f"{'from ' + s.kwargs['start'] + ', KL ' + str(s.kwargs['kl_steps']):<34} {str(s.comparator):<12} "
+              f"{status(s)}")
 
 
 TOLERATED_GUARD_REASON = "import of a Parquet reader while the guard is active"   # pandas probes pyarrow; tolerated
@@ -1042,7 +1214,7 @@ def _main(argv=None) -> int:
     if "verify" not in phases:
         check_pins(build_list())
     check_guard_log()
-    for p in [x for x in DEFAULT_PHASES if x in phases]:
+    for p in [x for x in PHASE_ORDER if x in phases]:
         log(f"=== phase {p}")
         PHASES[p]()
         check_guard_log()

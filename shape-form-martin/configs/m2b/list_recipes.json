@@ -1,4 +1,8 @@
 {
+ "companion_recipes": {
+  "B1d_m11_kl12000": "c33200dea0c47d42",
+  "B1d_m12_kl12000": "162e95204814ccc4"
+ },
  "n": 31,
  "recipes": {
   "B1d_m11": "140ce00214024b02",
