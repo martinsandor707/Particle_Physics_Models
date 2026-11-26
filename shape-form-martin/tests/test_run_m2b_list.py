@@ -80,8 +80,12 @@ def test_list_matches_audit_4_2():
                for s in bc)
     b1d = rungs["B1d"][0]
     assert b1d.data_free and b1d.kwargs["kl_steps"] == 6000 and b1d.kwargs["grid"] == 256
+    # user decision (PLAN section 23 item 7): fixed, validation-blind starts; B1f from the first replicate
+    assert [(s.name, s.kwargs["start"], s.replicate_of) for s in rungs["B1d"]] == [
+        ("B1d_m11", "s2_seed11", None), ("B1d_m12", "s2_seed12", "B1d_m11")]
     b1f = rungs["B1f"][0]
     assert (b1f.steps, b1f.lr, b1f.lr_end, b1f.k_train) == (3000, 3e-4, 3e-5, 16)
+    assert b1f.kwargs == {"run": "<B1d_m11>"} and b1f.comparator == "B1d_m11"
     assert not (set(names) & D.BATCH1_NAMES)
     assert {s.name for s in L if s.ema_row} == {f"{r}_s{x}" for r in ("B2a", "B2b", "B2c", "B3s") for x in (0, 1)}
 
@@ -89,7 +93,7 @@ def test_list_matches_audit_4_2():
 def test_pins_are_current_and_enforced(monkeypatch):
     D.check_pins(D.build_list())                                      # the committed pin file is up to date
     changed = [replace(s, steps=s.steps + 1) if s.name == "B2b_s0" else s for s in D.build_list()]
-    with pytest.raises(SystemExit):
+    with pytest.raises(D.HardStop):                                    # a hard stop (PLAN 23 item 13)
         D.check_pins(changed)
     x = D.x2_spec(D.spec_map()["B2b_s0"])
     assert x.steps == 12000 and x.comparator == "B2a_s0_x2" and x.cls == "rerun"
@@ -130,7 +134,7 @@ def test_divergence_rules():
     assert any("blow-up" in c for c in crit)
     sm = D.spec_map()
     assert D.status_label(sm["B3s_s0"]) == "diverged"
-    for n in ("B2b_s0", "B2a_s0", "Bceil_k6_wd0_f25", "B1d_best"):
+    for n in ("B2b_s0", "B2a_s0", "Bceil_k6_wd0_f25", "B1d_m11"):
         assert D.status_label(sm[n]) == "diverged - awaiting diagnosis"
 
 
@@ -236,14 +240,16 @@ def test_batch1_runs_recognised_and_sources_verified_on_the_h200_records(monkeyp
         for names in D.GIVEN.values():
             for n in names:
                 assert D.given_row(n) is not None, n                     # batch-1 rows on the H200 stream
-        rank = D.member_ranking()
-        assert sorted(rank) == [f"s2_seed{s}" for s in lib.S1_SEEDS]
-        s = D.spec_map()["B1d_best"]
-        kw = D.resolve(s)
-        assert kw["start"] == lib.member(rank[0]) and kw["target"].endswith("runs/m2b_mlp/E5_s2")
-        if (H200 / "runs" / "m2b_mlp" / "E5_s2" / "model.pt").exists():
-            src = D.verify_sources(s, kw)                                # SHA-256 against the H200 rows
-            assert src["start"]["name"] == rank[0] and src["target"]["name"] == "E5_s2"
+        assert D.registered_members() == [f"s2_seed{s}" for s in lib.S1_SEEDS]    # seed order, no ranking
+        for name, member in (("B1d_m11", "s2_seed11"), ("B1d_m12", "s2_seed12")):
+            s = D.spec_map()[name]
+            kw = D.resolve(s)
+            assert kw["start"] == lib.member(member) and kw["target"].endswith("runs/m2b_mlp/E5_s2")
+            if (H200 / "runs" / "m2b_mlp" / "E5_s2" / "model.pt").exists():
+                src = D.verify_sources(s, kw)                            # SHA-256 against the H200 rows
+                assert src["start"]["name"] == member and src["target"]["name"] == "E5_s2"
+        kw = D.resolve(D.spec_map()["B1f_s0"])
+        assert kw["run"].endswith("runs/m2b_mlp/B1d_m11")
         assert D.status(D.spec_map()["B2a_s0"]) == "pending"            # nothing of the list ran there yet
         if (H200 / "runs" / "m2a_dist" / "templates" / "full_box.pt").exists():
             t = D.verify_template("full_box")                           # the Track A record of the H200
@@ -252,3 +258,93 @@ def test_batch1_runs_recognised_and_sources_verified_on_the_h200_records(monkeyp
         assert rs.manifest["parity"]["verdict"] == "PASS"
     finally:
         lib.live_stream_id.cache_clear()
+
+
+def test_no_validation_number_decides_what_is_trained(monkeypatch):
+    """The B1d / B1f starts do not depend on any registered validation value (user decision, PLAN 23 item 7):
+    resolve() gives the same starts whatever the members' rows say."""
+    calls = []
+    monkeypatch.setattr(D, "given_row", lambda n: calls.append(n) or {"val_mean": {"s2_seed11": 9.0}.get(n, 1.0)})
+    monkeypatch.setattr(D, "ensemble_ref", lambda: "out:machines/x/runs/m2b_mlp/E5_s2")
+    D.configure(False)
+    a = D.resolve(D.spec_map()["B1d_m11"])["start"]
+    monkeypatch.setattr(D, "given_row", lambda n: {"val_mean": {"s2_seed11": 0.0}.get(n, 1.0)})
+    b = D.resolve(D.spec_map()["B1d_m11"])["start"]
+    assert a == b == lib.member("s2_seed11") and not calls              # no row consulted for the choice
+    assert not hasattr(D, "member_ranking")
+
+
+def test_hard_stop_exit_code_and_last_line(monkeypatch, capsys):
+    """PLAN section 23 item 13: a failed check ends the job with exit code 3 and a clear last line."""
+    monkeypatch.setattr(D, "_main", lambda argv=None: D.hard_stop("reference", "unit test: source SHA-256 differs"))
+    monkeypatch.setattr(D, "record_decision", lambda *a, **k: None)
+    assert D.main([]) == D.HARD_STOP_EXIT
+    last = capsys.readouterr().out.strip().splitlines()[-1]
+    assert last.startswith("HARD STOP (PLAN.md section 23, item 13) - reference: unit test") and "waiting" in last
+    monkeypatch.setattr(D, "_main", lambda argv=None: (_ for _ in ()).throw(registry.ReferenceSetDisputed("x")))
+    assert D.main([]) == D.HARD_STOP_EXIT
+    assert "reference check failed" in capsys.readouterr().out.strip().splitlines()[-1]
+    monkeypatch.setattr(D, "_main", lambda argv=None: (_ for _ in ()).throw(machine.InsufficientGPUMemory("full")))
+    assert D.main([]) == D.RESOURCE_EXIT
+
+
+def test_guard_log_refusal_is_a_hard_stop(monkeypatch, tmp_path):
+    from sfm import guard
+    f = tmp_path / "guard.log"
+    monkeypatch.setattr(guard, "guard_log_path", lambda: f)
+    pid = os.getpid()
+    f.write_text(f"t\tpid {pid}\tx.py\tpyarrow\t{D.TOLERATED_GUARD_REASON}\n")
+    D.check_guard_log()                                                # the tolerated pandas probe
+    f.write_text(f.read_text() + f"t\tpid {pid + 1}\tx.py\t<area>/other\topen: refused\n")
+    D.check_guard_log()                                                # another process: not this job's
+    f.write_text(f.read_text() + f"t\tpid {pid}\tx.py\t<area>/other\topen: inside the guarded area\n")
+    with pytest.raises(D.HardStop):
+        D.check_guard_log()
+
+
+# ---- review of 43ccfd6: B1 (guard decision), B2 (rerun pairs), B3 (promotion scope), A2 (ii) ---------------------------
+def test_b1_guard_pass_test_follows_the_definition():
+    """persistence margin = mean(guard - 0.5 main), gains negative: passes when the margin is <= 0 (the guard keeps at
+    least half the gain), resolved only at 2 SE. A gain that fully survives passes; a pure artefact fails."""
+    from sfm import stats
+    rng = np.random.default_rng(3)
+    main = -6e-4 + rng.normal(0, 2e-4, 20000)
+    survives = main + rng.normal(0, 5e-5, 20000)                       # the guard keeps 100 % of the gain
+    artefact = rng.normal(0, 5e-5, 20000)                              # the guard keeps 0 %
+    d1 = stats.guard_persistence(main, survives)
+    d0 = stats.guard_persistence(main, artefact)
+    assert d1.numbers["margin"] <= 0 and d0.numbers["margin"] > 0
+    as_row = lambda d: {"passed": d.passed, "checks": d.checks, "numbers": d.numbers, "flags": d.flags}  # noqa: E731
+    g1, g0 = R.guard_decision(as_row(d1)), R.guard_decision(as_row(d0))
+    assert g1["passed"] and g1["resolved"] and g1["ok"]
+    assert not g0["passed"] and not g0["ok"]
+    weak = stats.guard_persistence(main[:30], main[:30] * 0.55)          # a pass that is not resolved
+    gw = R.guard_decision(as_row(weak))
+    assert gw["ok"] == R.rule_guard_part(gw["passed"], gw["resolved"])   # J-a: one place decides
+
+
+def test_b2_rerun_pair_of_record_and_b3_scope(monkeypatch):
+    sm = dict(D.spec_map())
+    for n in ("B2b_s0", "B2a_s0"):
+        x = D.x2_spec(sm[n])
+        sm[x.name] = x
+    assert R.pair_of_record("B2b_s0", "B2a_s0", sm) == ("B2b_s0_x2", "B2a_s0_x2", True)
+    assert R.pair_of_record("B2c_s0", "B2a_s0", sm) == ("B2c_s0", "B2a_s0", False)   # converged: originals
+    assert R.pair_of_record("B2b_s1", "B2a_s1", sm) == ("B2b_s1", "B2a_s1", False)
+    assert R.superseded(sm) == {"B2b_s0", "B2a_s0"}
+    assert R.record_name("B2b_s0", sm) == "B2b_s0_x2" and R.record_name("B2b_s1", sm) == "B2b_s1"
+    assert sm["B2b_s0_x2"].rung == "B2b" and sm["B2b_s0_x2"].cls == "rerun"
+    for k in ("I11", "I12", "I13", "I17", "J-a", "J-b"):
+        assert k in R.PENDING_RULINGS                                    # every judgement item in one place
+
+
+def test_a2_dirty_clone_at_the_end_is_a_hard_stop(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(paths, "OUT_ROOT", tmp_path / "out")             # pristine mode
+    monkeypatch.setattr(machine, "git_state", lambda: {"commit": "x", "clean": False, "n_changed": 2})
+    monkeypatch.delenv("SFM_ALLOW_DIRTY_CLONE", raising=False)
+    with pytest.raises(SystemExit) as ex:
+        lib.finish({})
+    assert ex.value.code == lib.CLONE_DIRTY_EXIT
+    assert capsys.readouterr().out.strip().splitlines()[-1].startswith("HARD STOP (PLAN.md section 23, item 13) - clone")
+    monkeypatch.setenv("SFM_ALLOW_DIRTY_CLONE", "1")                     # laptop dry runs only
+    assert lib.finish({})["git_at_end"]["clean"] is False

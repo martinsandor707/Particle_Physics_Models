@@ -17,7 +17,8 @@ Rules (written here before any result of this list exists)
         (e) guards passed (G-K and G-bulk: persistence margin guard - 0.5 main >= 0 resolved at 2 SE, from the
             registry's guard columns vs mlp_std; G-region: <= 50 % of the gain from deep / border / Abar <= 0.3 cells,
             margin flagged - 0.5 main >= 0; G-mass reported)
-        promoted = (a) and (b) and (c) and (d) and (e). For B1d the two starts are the replicates (AUDIT 4.2 "2 starts").
+        promoted = (a) and (b) and (c) and (d) and (e). For B1d the two starts (s2_seed11, s2_seed12: fixed seed order, user decision PLAN
+        section 23 item 7) are the replicates (AUDIT 4.2 "2 starts").
     primary comparisons (AUDIT 4.2): B1d vs mlp_std; B2b - B2a, B2c - B2a, B4f - B2a, B6c - B6a, same seed; the same
         thresholds (-5 and -3 SE) and the same replication rule are applied to the comparison (reading flagged in
         results/m2b_mlp/STATUS.md); all other runs are exploratory, comparators or diagnostics and are labelled so.
@@ -96,6 +97,72 @@ def secondary_masks() -> dict:
     return {"p<2GeV": p < 2.0, "p>=2GeV": p >= 2.0, "contained": ~side, "side-leaking": side}
 
 
+# ======================================================================================================================
+# Rules whose reading is PENDING an independent mathematical ruling (review of commit 43ccfd6: I11, I12, I13, I17, J-a,
+# J-b). Each is one function with the behaviour implemented so far, so that a ruling changes exactly one place. The
+# report prints beside every use that the rule is "as implemented, ruling pending".
+# ======================================================================================================================
+PENDING_RULINGS = {
+    "I11": "which rule decides the primary comparisons against their comparators (implemented: the promotion "
+           "thresholds -5 and -3 SE and the replication rule applied to the comparison)",
+    "I12": "which SE enters 'better than B0 by more than 1 SE' (implemented: the paired SE against the per-event mean "
+           "of b0h_seed0..2; note that the control b0h_seed2 itself passes as coded)",
+    "I13": "the replication threshold (implemented: seed-1 delta <= -2.5 with the same sign, and the two-seed mean "
+           "meets (a) AND (b); the Track A report reads the delta part only)",
+    "I17": "1-SE for B6 per seed or on two-seed means (implemented: per seed)",
+    "J-a": "whether an unresolved G-K / G-bulk pass counts as passed (implemented: passed only if passed AND resolved "
+           "at 2 SE)",
+    "J-b": "G-region decided on the point estimate or at 2 SE (implemented: point estimate; the resolution flag is "
+           "printed)",
+}
+
+
+def rule_primary_comparison(p: dict) -> dict:
+    """I11 (pending): the parts of a primary comparison against its comparator."""
+    return {"a": bool(p["mean"] <= D.PROMO_GAIN), "b": bool(p["z"] <= D.PROMO_Z)}
+
+
+def rule_better_than_b0(q: stats.Paired) -> bool:
+    """I12 (pending): part (c) from the paired comparison with the per-event B0 mean."""
+    return bool(q.z < D.B0_Z)
+
+
+def rule_replication(p0: dict, p1: dict | None, both: dict | None) -> dict | None:
+    """I13 (pending; review B4): AUDIT 4.0 replication of a result by its second seed."""
+    if p1 is None or both is None:
+        return None
+    m0, m1 = p0["mean"], p1["mean"]
+    ok = bool(m1 <= 0.5 * D.PROMO_GAIN and (m1 < 0) == (m0 < 0) and both["mean"] <= D.PROMO_GAIN
+              and both["z"] <= D.PROMO_Z)
+    return {"seed1_half_threshold": m1 <= 0.5 * D.PROMO_GAIN, "same_sign": (m1 < 0) == (m0 < 0),
+            "two_seed_mean": both, "replicated": ok}
+
+
+def rule_one_se(rows_by_seed: dict) -> dict:
+    """I17 (pending): the 1-SE rule for B6, per seed (sfm.stats.one_se_select through registry.select_1se)."""
+    out = {}
+    for seed, rows in rows_by_seed.items():
+        if all(rows.values()):
+            sel = registry.select_1se(rows=list(rows.values()))
+            out[f"seed{seed}"] = {"runs": list(rows), "selected": sel.selected, "best": sel.best, "table": sel.table}
+        else:
+            out[f"seed{seed}"] = {"runs": list(rows), "selected": None, "best": None,
+                                  "not_evaluated": [n for n, r in rows.items() if not r]}
+    return out
+
+
+def rule_guard_part(passed: bool, resolved: bool) -> bool:
+    """J-a (pending): how the G-K / G-bulk decision counts for part (e)."""
+    return bool(passed and resolved)
+
+
+def rule_g_region(gain: float, margin: stats.Paired) -> bool:
+    """J-b (pending): G-region passes when <= 50 % of the gain lies in flagged cells, i.e. (gains negative) the
+    margin flagged - 0.5 main is >= 0; decided on the point estimate."""
+    return bool(gain < 0 and margin.mean >= 0.0)
+
+
+# ----------------------------------------------------------------------------------------------------------------------
 def parts(a, ref_mlp, b0) -> dict:
     p = provenance.paired_delta(a, ref_mlp)
     out = {"vs_mlp": pd(p), "a_gain": p.mean <= D.PROMO_GAIN, "b_z": p.z <= D.PROMO_Z}
@@ -103,7 +170,7 @@ def parts(a, ref_mlp, b0) -> dict:
         out["vs_b0"], out["c_b0"] = None, None
     else:
         q = provenance.paired_delta(a, b0)
-        out["vs_b0"], out["c_b0"] = pd(q), bool(q.z < D.B0_Z)
+        out["vs_b0"], out["c_b0"] = pd(q), rule_better_than_b0(q)
     return out
 
 
@@ -115,14 +182,17 @@ def two_seed(a0, a1, ref) -> dict:
     return pd(provenance.paired_delta(m, ref))
 
 
-def replication(p0: dict, p1: dict | None, both: dict | None) -> dict | None:
-    if p1 is None or both is None:
-        return None
-    m0, m1 = p0["mean"], p1["mean"]
-    ok = bool(m1 <= 0.5 * D.PROMO_GAIN and (m1 < 0) == (m0 < 0) and both["mean"] <= D.PROMO_GAIN
-              and both["z"] <= D.PROMO_Z)
-    return {"seed1_half_threshold": m1 <= 0.5 * D.PROMO_GAIN, "same_sign": (m1 < 0) == (m0 < 0),
-            "two_seed_mean": both, "replicated": ok}
+replication = rule_replication                     # former name (tests)
+
+
+def guard_decision(persistence: dict) -> dict:
+    """Review B1: the persistence decision of sfm.stats.guard_persistence as the registry stored it. Its margin is
+    mean(guard - 0.5 main) with gains negative: the guard keeps at least half the gain iff the margin is <= 0, which
+    is what ``passed`` says (together with its sign checks); "resolved" (|z of the margin| >= 2) is its own flag."""
+    passed = bool(persistence.get("passed"))
+    resolved = bool((persistence.get("flags") or {}).get("resolved"))
+    return {"passed": passed, "resolved": resolved, "margin": (persistence.get("numbers") or {}).get("margin"),
+            "ok": rule_guard_part(passed, resolved)}
 
 
 def guards(name: str, main_vs_mlp: np.ndarray | None) -> dict | None:
@@ -133,11 +203,11 @@ def guards(name: str, main_vs_mlp: np.ndarray | None) -> dict | None:
     out = {"gk": g["gk"], "gk_persistence": g["gk_persistence"], "bulk": g["bulk"],
            "bulk_persistence": g["bulk_persistence"], "report_on_stratum": g["report_on_stratum"],
            "report_on_short": g["report_on_short"], "mass": r["guards"]["mass"]}
-    gk_ok = bool(g["gk_persistence"]["numbers"].get("margin", -1) >= 0 and g["gk_persistence"]["flags"]["resolved"])
-    gb_ok = bool(g["bulk_persistence"]["numbers"].get("margin", -1) >= 0 and g["bulk_persistence"]["flags"]["resolved"])
-    out["gk_ok"], out["bulk_ok"] = gk_ok, gb_ok
+    out["gk_decision"] = guard_decision(g["gk_persistence"])
+    out["bulk_decision"] = guard_decision(g["bulk_persistence"])
+    out["gk_ok"], out["bulk_ok"] = out["gk_decision"]["ok"], out["bulk_decision"]["ok"]
     out["g_region"] = g_region(name, main_vs_mlp)
-    out["passed"] = bool(gk_ok and gb_ok and out["g_region"] is not None and out["g_region"]["passed"])
+    out["passed"] = bool(out["gk_ok"] and out["bulk_ok"] and out["g_region"] is not None and out["g_region"]["passed"])
     return out
 
 
@@ -163,15 +233,52 @@ def g_region(name: str, main) -> dict | None:
                                   if c != "normalisation"},
             "normalisation_term": pd(stats.paired(diffs["normalisation"], np.zeros_like(main))),
             "flagged_share_of_gain": (float(diffs["flagged"].mean()) / gain) if gain else None,
-            "margin": pd(margin), "passed": bool(gain < 0 and margin.mean >= 0.0)}
+            "margin": pd(margin), "resolved": bool(abs(margin.z) >= 2.0), "passed": rule_g_region(gain, margin)}
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# convergence reruns (review B2): where a rerun pair exists it is the pair of record
+# ----------------------------------------------------------------------------------------------------------------------
+def all_specs() -> dict:
+    """The list plus the convergence reruns (<name>_x2) that are registered on the live stream."""
+    sm = dict(D.spec_map())
+    for s in list(sm.values()):
+        if s.cls in ("primary", "comparator") and not s.data_free:
+            x = D.x2_spec(s)
+            if D.row(x.name) is not None:
+                sm[x.name] = x
+    return sm
+
+
+def pair_of_record(primary: str, comparator: str | None, sm: dict) -> tuple:
+    """(run, comparator, rerun?): a primary that was rerun is represented by its rerun together with its comparator's
+    rerun (AUDIT 4.0: "rerun once with doubled steps together with its comparator"); otherwise the originals."""
+    x = f"{primary}_x2"
+    if x in sm:
+        cx = comparator if comparator in (None, "mlp_std") else f"{comparator}_x2"
+        return x, (cx if cx in (None, "mlp_std") or cx in sm else comparator), True
+    return primary, comparator, False
+
+
+def superseded(sm: dict) -> set:
+    """Originals represented by a rerun (shown as "not converged, NOT used by the rules")."""
+    return {n for n in sm if f"{n}_x2" in sm}
+
+
+def record_name(name: str, sm: dict) -> str:
+    return f"{name}_x2" if f"{name}_x2" in sm else name
 
 
 def guard_candidates(sm: dict | None = None) -> list:
-    """Runs that meet the promotion parts (a)-(c) on a seed, and the other seed of their rung (AUDIT 4.2 note)."""
-    sm = sm or D.spec_map()
+    """Runs of record (reruns where they exist) that meet the promotion parts (a)-(c) on a seed, and the run of
+    record of the other seed of their rung (AUDIT 4.2 note; review B2: the x2 runs are considered)."""
+    sm = sm or all_specs()
     ref, b0 = mlp_array(), b0_mean()
+    unused = superseded(sm)
     hits = set()
     for n, s in sm.items():
+        if n in unused or s.cls not in ("primary", "rerun"):
+            continue
         a = tagged(n)
         if a is None:
             continue
@@ -179,18 +286,25 @@ def guard_candidates(sm: dict | None = None) -> list:
         if pr["a_gain"] and pr["b_z"] and pr["c_b0"]:
             hits.add(n)
             for m, t in sm.items():
-                if t.rung == s.rung and m != n:
+                if t.rung == s.rung and m != n and m not in unused and t.cls in ("primary", "rerun"):
                     hits.add(m)
     return sorted(hits)
 
 
+def _seed_runs(rung: str, sm: dict) -> list:
+    """The original runs of a rung in seed (or start) order."""
+    return [n for n, s in D.spec_map().items() if s.rung == rung]
+
+
 def collect(smoke: bool) -> dict:
-    sm = D.spec_map()
+    sm = all_specs()
+    unused = superseded(sm)
     ref, b0 = mlp_array(), b0_mean()
     masks = secondary_masks()
     res = {"stage": D.CTX.stage, "stream_id": lib.live_stream_id(), "machine_id": lib.MACHINE.id, "smoke": smoke,
            "b0_complete": b0 is not None, "runs": {}, "primary": {}, "one_se": {}, "ema": {}, "bceil": {},
-           "status": {}, "decisions": D.decisions()}
+           "status": {}, "decisions": D.decisions(), "pending_rulings": PENDING_RULINGS,
+           "not_used_by_the_rules": sorted(unused)}
     for n, s in sm.items():
         st = D.status(s)
         dg = D.diagnosis(n) if st.startswith("diverged") else None
@@ -200,8 +314,11 @@ def collect(smoke: bool) -> dict:
         if a is None:
             continue
         r = D.row(n)
+        primary = s.rung in D.PRIMARY_RUNGS and s.cls in ("primary", "rerun")
         e = {"rung": s.rung, "cls": s.cls, "seed": s.seed, "k": r["k"], "val_mean": r["val_mean"],
-             "primary": s.rung in D.PRIMARY_RUNGS, **parts(a, ref, b0)}
+             "primary": primary, "used_by_rules": n not in unused,
+             "label": ("not converged, NOT used by the rules (rerun: " + f"{n}_x2)") if n in unused else None,
+             **parts(a, ref, b0)}
         e["secondary_vs_mlp"] = {k: pd(provenance.paired_delta(a, ref, mask=m)) for k, m in masks.items()}
         if s.comparator and s.comparator != "mlp_std":
             c = comparator_array(s.comparator)
@@ -210,36 +327,42 @@ def collect(smoke: bool) -> dict:
         main = provenance.paired_difference(a, ref)
         e["guards"] = guards(n, main)
         res["runs"][n] = e
-    # replication and promotion
+    # replication (d) and promotion: only for the primaries' runs of record (review B3)
+    for rung in [r for r in D.PRIMARY_RUNGS if r != "B1"]:
+        originals = _seed_runs(rung, sm)
+        recs = [record_name(n, sm) for n in originals]
+        if len(recs) == 2 and all(x in res["runs"] for x in recs):
+            both = two_seed(tagged(recs[0]), tagged(recs[1]), ref)
+            res["runs"][recs[0]]["d_replication"] = rule_replication(res["runs"][recs[0]]["vs_mlp"],
+                                                                     res["runs"][recs[1]]["vs_mlp"], both)
+            res["runs"][recs[1]]["d_replication"] = f"see {recs[0]}"
+            if rung == "B1d":
+                res["runs"][recs[0]]["replication_note"] = (
+                    "both runs distil the same teacher (E5) on the same grid; the second start tests only the "
+                    "sensitivity to the start, not the sampling variability of the teacher")
     for n, e in res["runs"].items():
-        s = sm[n]
-        partner = next((m for m, t in sm.items() if t.replicate_of == n), None)
-        if partner and partner in res["runs"]:
-            both = two_seed(tagged(n), tagged(partner), ref)
-            e["d_replication"] = replication(e["vs_mlp"], res["runs"][partner]["vs_mlp"], both)
-        elif s.replicate_of:
-            e["d_replication"] = "see " + s.replicate_of
-        else:
-            e["d_replication"] = None
+        e.setdefault("d_replication", None)
         rep = e["d_replication"] if isinstance(e["d_replication"], dict) else None
-        e["promoted"] = bool(e["a_gain"] and e["b_z"] and e["c_b0"] and rep and rep["replicated"]
-                             and e["guards"] and e["guards"]["passed"])
-    # primary comparisons
+        if e["primary"] and e["used_by_rules"]:
+            e["promoted"] = bool(e["a_gain"] and e["b_z"] and e["c_b0"] and rep and rep["replicated"]
+                                 and e["guards"] and e["guards"]["passed"])
+        else:
+            e["promoted"] = None                       # the promotion rule does not apply (review B3)
+    # primary comparisons, on the pairs of record
     for rung, comp in (("B1d", "mlp_std"), ("B2b", "B2a"), ("B2c", "B2a"), ("B4f", "B2a"), ("B6c", "B6a")):
-        names = [n for n, s in sm.items() if s.rung == rung]
-        out = {}
-        arrs = {}
-        for n in names:
+        out, arrs = {}, {}
+        for n in _seed_runs(rung, sm):
             s = sm[n]
-            cn = "mlp_std" if comp == "mlp_std" else f"{comp}_s{s.seed}"
-            a, c = tagged(n), comparator_array(cn)
+            cn0 = "mlp_std" if comp == "mlp_std" else f"{comp}_s{s.seed}"
+            run, cn, rerun = pair_of_record(n, cn0, sm)
+            a, c = tagged(run), comparator_array(cn)
             if a is None or c is None:
-                out[n] = {"available": False, "comparator": cn}
+                out[run] = {"available": False, "comparator": cn}
                 continue
             p = provenance.paired_delta(a, c)
-            out[n] = {"comparator": cn, **pd(p), "a": p.mean <= D.PROMO_GAIN, "b": p.z <= D.PROMO_Z,
-                      "secondary": {k: pd(provenance.paired_delta(a, c, mask=m)) for k, m in masks.items()}}
-            arrs[n] = (a, c)
+            out[run] = {"comparator": cn, "rerun_pair": rerun, **pd(p), **rule_primary_comparison(pd(p)),
+                        "secondary": {k: pd(provenance.paired_delta(a, c, mask=m)) for k, m in masks.items()}}
+            arrs[run] = (a, c)
         if len(arrs) == 2:
             (n0, (a0, c0)), (n1, (a1, c1)) = list(arrs.items())
             provenance.check_pairable(a0, a1, c0, c1)
@@ -248,28 +371,28 @@ def collect(smoke: bool) -> dict:
                                                                 t.points, machine.MachineTag.from_fields(t.machine),
                                                                 label=lab)
             both = pd(provenance.paired_delta(mk(a0, a1, "variant mean"), mk(c0, c1, "comparator mean")))
-            out["replication"] = replication(out[n0], out[n1], both)
+            out["replication"] = rule_replication(out[n0], out[n1], both)
+            if rung == "B1d":
+                out["replication_note"] = res["runs"].get(n0, {}).get("replication_note")
         res["primary"][rung] = out
-    # B1 retention
+    # B1 retention (review C5: only with a resolved B1 gain)
     e5 = tagged("E5_smoke" if smoke else "E5_s2", stage=(D.SMOKE_STAGE if smoke else D.REAL_STAGE))
     if e5 is not None:
         g = provenance.paired_delta(e5, ref)
         res["b1"] = {"E5_vs_mlp": pd(g)}
-        for n in ("B1d_best", "B1d_second"):
+        for n in _seed_runs("B1d", sm):
             if n in res["runs"]:
-                # "retains 30-70 % of B1" (AUDIT 4.2) is defined only when B1 itself is a gain
-                res["b1"][f"{n}_retained_fraction"] = (res["runs"][n]["vs_mlp"]["mean"] / g.mean) if g.mean < 0 else None
-    # 1-SE (B6) per seed
+                res["b1"][f"{n}_retained_fraction"] = (res["runs"][n]["vs_mlp"]["mean"] / g.mean
+                                                       if (g.mean < 0 and abs(g.z) >= 2.0) else None)
+    # 1-SE (B6), on the pairs of record (B6b is never rerun)
+    by_seed = {}
     for seed in (0, 1):
-        rows = [D.row(f"{r}_s{seed}") for r in ("B6a", "B6b", "B6c")]
-        if all(rows):
-            sel = registry.select_1se(rows=rows)
-            res["one_se"][f"seed{seed}"] = {"selected": sel.selected, "best": sel.best, "table": sel.table}
-        else:
-            missing = [f"{r}_s{seed}" for r, x in zip(("B6a", "B6b", "B6c"), rows) if not x]
-            res["one_se"][f"seed{seed}"] = {"selected": None, "best": None, "not_evaluated": missing}
+        c_run, a_run, _ = pair_of_record(f"B6c_s{seed}", f"B6a_s{seed}", sm)
+        names = [a_run, f"B6b_s{seed}", c_run]
+        by_seed[seed] = {n: D.row(n) for n in names}
+    res["one_se"] = rule_one_se(by_seed)
     # B3 EMA
-    for n, s in sm.items():
+    for n, s in D.spec_map().items():
         if s.ema_row and tagged(n) is not None and tagged(f"{n}_ema") is not None:
             res["ema"][n] = pd(provenance.paired_delta(tagged(f"{n}_ema"), tagged(n)))
     # B-ceil
@@ -305,16 +428,25 @@ def markdown(res: dict) -> str:
         rep = e["d_replication"]
         rs = rep if isinstance(rep, str) else yn(rep["replicated"] if rep else None)
         vc = e.get("vs_comparator")
-        w(f"| {n} | {e['rung']}{' (primary)' if e['primary'] else ''} | {e['cls']} | {e['k']} | {e['val_mean']:.6f} | "
+        promo = (yn(e["promoted"]) if e["promoted"] is not None
+                 else ("n/a (not used)" if not e["used_by_rules"] else f"n/a ({e['cls']})"))
+        name = n + (f" — {e['label']}" if e.get("label") else "")
+        w(f"| {name} | {e['rung']}{' (primary)' if e['primary'] else ''} | {e['cls']} | {e['k']} | {e['val_mean']:.6f} | "
           f"{fmt(e['vs_mlp'])} | {yn(e['a_gain'])} | {yn(e['b_z'])} | {fmt(e['vs_b0'])} | {yn(e['c_b0'])} | {rs} | "
-          f"{yn(e['guards']['passed']) if e['guards'] else 'not evaluated'} | {yn(e['promoted'])} | "
+          f"{yn(e['guards']['passed']) if e['guards'] else 'not evaluated'} | {promo} | "
           f"{(vc['comparator'] + ' ' + fmt(vc) if vc and vc.get('mean') is not None else '-')} |")
+    w("\nPromotion is evaluated for the primaries' runs of record only (AUDIT 4.0: everything else is exploratory and "
+      "reported as such). Parts (c), (d), (e) use rules whose reading is pending an independent ruling (I12, I13, J-a, "
+      "J-b; see the end of this report).")
+    for n, e in res["runs"].items():
+        if e.get("replication_note"):
+            w(f"\n*{n}, part (d):* {e['replication_note']}.")
     w("\n## Primary comparisons (AUDIT 4.2; the same thresholds and replication rule)\n")
     w("| rung | run | comparator | Δ | (a) | (b) | p < 2 GeV | p ≥ 2 GeV | contained | side-leaking |")
     w("|---|---|---|---|---|---|---|---|---|---|")
     for rung, out in res["primary"].items():
         for n, c in out.items():
-            if n == "replication":
+            if n in ("replication", "replication_note") or not isinstance(c, dict):
                 continue
             if not c.get("mean") and c.get("available") is False:
                 w(f"| {rung} | {n} | {c['comparator']} | not available | | | | | | |")
@@ -325,14 +457,16 @@ def markdown(res: dict) -> str:
         rp = out.get("replication")
         if rp:
             w(f"| {rung} | two-seed mean | | {fmt(rp['two_seed_mean'])} | replicated: {yn(rp['replicated'])} | | | | | |")
+        if out.get("replication_note"):
+            w(f"| {rung} | note | | {out['replication_note']} | | | | | | |")
     if res.get("b1"):
         fr = [f"{k} {v:.2f}" for k, v in res["b1"].items() if k.endswith("fraction") and v is not None]
         w(f"\nB1 (E5) vs mlp_std {fmt(res['b1']['E5_vs_mlp'])}; retained fraction of B1 by B1d: "
-          + (", ".join(fr) if fr else "not defined (B1 shows no gain against mlp_std)"))
+          + (", ".join(fr) if fr else "not defined (B1 is not a resolved gain against mlp_std: delta >= 0 or |z| < 2)"))
     w("\n## Guards (bulk-restricted and other guard numbers; own table)\n")
-    w("| run | G-K Δ | G-K margin ok | G-bulk Δ (stratum) | G-bulk margin ok | report metric on stratum | "
-      "G-region flagged share | G-region passed | mass beyond zb |")
-    w("|---|---|---|---|---|---|---|---|---|")
+    w("| run | G-K Δ | G-K passed / resolved | G-bulk Δ (stratum) | G-bulk passed / resolved | report metric on stratum | "
+      "G-region flagged share | G-region passed / resolved | normalisation term | mass beyond zb |")
+    w("|---|---|---|---|---|---|---|---|---|---|")
     any_g = False
     for n, e in res["runs"].items():
         g = e["guards"]
@@ -342,13 +476,17 @@ def markdown(res: dict) -> str:
         gr = g["g_region"]
         share = gr.get("flagged_share_of_gain") if gr else None
         share_s = f"{share:.2f}" if share is not None else "-"
-        gr_ok = yn(gr["passed"]) if gr else "-"
+        gr_ok = f"{yn(gr['passed'])} / {yn(gr['resolved'])}" if gr else "-"
+        norm = fmt(gr["normalisation_term"]) if gr else "-"
         beyond = g["mass"].get("beyond_zb", {}).get("mean", "-")
-        w(f"| {n} | {fmt(g['gk'])} | {yn(g['gk_ok'])} | {fmt(g['bulk'])} | {yn(g['bulk_ok'])} | "
-          f"{fmt(g['report_on_stratum'])} | {share_s} | {gr_ok} | {beyond} |")
+        gk, gb = g["gk_decision"], g["bulk_decision"]
+        w(f"| {n} | {fmt(g['gk'])} | {yn(gk['passed'])} / {yn(gk['resolved'])} | {fmt(g['bulk'])} | "
+          f"{yn(gb['passed'])} / {yn(gb['resolved'])} | {fmt(g['report_on_stratum'])} | {share_s} | {gr_ok} | {norm} | "
+          f"{beyond} |")
     if not any_g:
         w("No run met the promotion parts (a)-(c); no guard evaluation was required (AUDIT 4.2 note).")
     w("\n## 1-SE rule (B6)\n")
+    w("(rule I17 as implemented, ruling pending: per seed, on the pairs of record)")
     for k, v in res["one_se"].items():
         if v.get("selected") is None:
             w(f"- {k}: not evaluated (missing or diverged: {', '.join(v.get('not_evaluated', []))})")
@@ -369,6 +507,9 @@ def markdown(res: dict) -> str:
     for n, st in res["status"].items():
         if st["status"] != "done":
             w(f"- {n} ({st['cls']}): {st['status']}" + (f"; diagnosis: {st['diagnosis']}" if st["diagnosis"] else ""))
+    for n, st in (res["decisions"].get("diverged") or {}).items():
+        if n.endswith("_ema"):
+            w(f"- {n}: {st.get('status')} (EMA row; non-finite score recorded as decided, PLAN 17.11 / 20 item 2)")
     conv = res["decisions"].get("convergence") or {}
     if conv:
         w("\n## Convergence (AUDIT 4.0)\n")
@@ -376,6 +517,9 @@ def markdown(res: dict) -> str:
             w(f"- {n}: " + (f"moved {c['move'] * E4:.2f} over {c['window_steps']} steps -> "
                             f"{'converged' if c['converged'] else 'NOT converged, reruns ' + str(c.get('reruns'))}"
                             if c.get("available") else "not available"))
+    w("\n## Rules pending an independent ruling (implemented as stated; one function each in this script)\n")
+    for k, v in res["pending_rulings"].items():
+        w(f"- **{k}**: {v}")
     return "\n".join(L) + "\n"
 
 

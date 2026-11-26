@@ -14,7 +14,7 @@ this file is gated.
 
 | model | val K = 64 | Δ `mlp_std` |
 |---|---|---|
-| `s2_seed11..15` | 18.118137 ... 18.118737 | +0.54 ... +6.54 (best member `s2_seed14`, second `s2_seed13`) |
+| `s2_seed11..15` | 18.118137 ... 18.118737 | +0.54 ... +6.54 |
 | `b0h_seed0..2` (B0) | 18.118184, 18.118187, 18.118114 | +1.01, +1.04, +0.31 |
 | E5 (B1, primary) | 18.118000 | −0.83 ± 1.35 (not promoted) |
 
@@ -32,8 +32,8 @@ selection last, smooth 0, weight decay 0, dedicated fold generator, EMA 0.999 (A
 
 | run(s) | rung | definition (AUDIT 4.2) | seeds | steps | comparator | class |
 |---|---|---|---|---|---|---|
-| `B1d_best`, `B1d_second` | B1d | FieldNet(32, 4) from the best / second-best stage-2 member, KL-distilled data-free to E5 on 256 training-momentum quantiles, lr 1e-3 | 2 starts | 6000 KL steps, no data | `mlp_std` | **primary** |
-| `B1f_s0` | B1f | `B1d_best` + 3000 steps 3e-4 → 3e-5, K = 16, T_B otherwise | 0 | 3000 | `B1d_best` | exploratory |
+| `B1d_m11`, `B1d_m12` | B1d | FieldNet(32, 4) started from `s2_seed11` / `s2_seed12` (fixed, validation-blind seed order: user decision, PLAN section 23 item 7), KL-distilled data-free to E5 on 256 training-momentum quantiles, lr 1e-3 | 2 starts | 6000 KL steps, no data | `mlp_std` | **primary** |
+| `B1f_s0` | B1f | `B1d_m11` (the first B1d replicate) + 3000 steps 3e-4 → 3e-5, K = 16, T_B otherwise | 0 | 3000 | `B1d_m11` | exploratory |
 | `B2a_s0/1` | B2a | `field_mlp_std`, T_B, K = 16 iid | 0, 1 | 6000 | `mlp_std` (and B0) | comparator |
 | `B2b_s0/1` | B2b | `field_mlp_std`, T_B, K = 64 iid | 0, 1 | 6000 | `B2a` same seed | **primary** |
 | `B2c_s0/1` | B2c | `field_mlp_std`, T_B, K = 16 stratified | 0, 1 | 6000 | `B2a` same seed | **primary** |
@@ -74,16 +74,16 @@ Rules applied by `scripts/run_m2b_list_report.py` (written before any result of 
 
 | # | Point | Reading taken |
 |---|---|---|
-| I1 | B1d "2 starts" | the two starts are the two replicates: part (d) of B1d compares `B1d_second` with `B1d_best` |
-| I2 | "best member" / "second-best" | by the registered K = 64 validation mean of `s2_seed11..15` on the live stream (H200: `s2_seed14`, then `s2_seed13`); resolved and recorded at run time |
+| I1 | B1d "2 starts" | **decided by the user (26 Nov 2026, PLAN section 23 item 7):** the starts are `s2_seed11` and `s2_seed12`, in this fixed seed order, never picked by a validation score; the two starts are the two replicates (part (d) of B1d compares `B1d_m12` with `B1d_m11`). Replaces the earlier reading "best / second-best member by validation mean", which put validation selection into a primary comparison |
+| I2 | how the starting members are chosen | **decided by the user:** by the fixed seed order above; no registered value of any member is read to choose (test `test_no_validation_number_decides_what_is_trained`) |
 | I3 | "256 training-momentum quantiles" (B1d, B6) | quantiles of the training ln p at probabilities (i + ½)/256 (midpoints, so the grid stays inside the training range that `kl_warm_start` enforces) |
 | I4 | B1d training | data-free: the factory's KL fit is the whole training; no validation trajectory, so the convergence rule is not applied to B1d |
-| I5 | B1f "B1d + 3000 steps" | from `B1d_best`; one run (seed 0, 2 min) |
+| I5 | B1f "B1d + 3000 steps" | **by the user's principle:** from the first B1d replicate, `B1d_m11` (started from `s2_seed11`). AUDIT 4.2 registers no other rule; its text is: "B1f \| does data fine-tuning undo it \| B1d + 3000 steps, 3e-4 → 3e-5, K = 16 \| T_B otherwise \| 0 \| 3,841 \| 2 min \| exploratory \| drifts back by 1–3". One run, seed 0 |
 | I6 | B3 "EMA streams of B2a, B2b, B2c" | each EMA state registered as `<run>_ema` (exploratory) and compared with its own last iterate. B3s ("with EMA") also gets an EMA row |
 | I7 | unspecified settings of B3s and B-ceil | taken from T_B (batch 256 given, `k_val` 64, selection last, weight decay as stated, dedicated folds, EMA 0.999; no EMA row for B-ceil) |
 | I8 | B-ceil `train_fraction` | the first round(f N) events of a permutation of the training split seeded with the run seed (0), in storage order; the index SHA-256 is recorded |
 | I9 | B-ceil "minimum over the trajectory" | the minimum of the K = 64 validation means of the fit history (every 100 steps); printed as a diagnostic, not paired, optimistic by construction |
-| I10 | comparator of B2a, B3s, B6a, B-ceil | `mlp_std` (B2a also against B0, as "B2a − B0 within ±1" asks); B1f against `B1d_best` |
+| I10 | comparator of B2a, B3s, B6a, B-ceil | `mlp_std` (B2a also against B0, as "B2a − B0 within ±1" asks); B1f against `B1d_m11` |
 | I11 | rule for the primary comparisons | the Track B thresholds (−5 and −3 SE) and the AUDIT 4.0 replication rule are applied to the comparison against the comparator; the promotion rule itself is against `mlp_std` |
 | I12 | "better than B0 by > 1 SE" | z of the paired Δ against the per-event mean of the three controls below −1 |
 | I13 | replication (AUDIT 4.0) | seed 1 Δ ≤ −2.5 with the same sign, and the two-seed mean (per-event mean of the two runs against the reference) meets (a) and (b) |
@@ -91,6 +91,43 @@ Rules applied by `scripts/run_m2b_list_report.py` (written before any result of 
 | I15 | convergence rerun of a comparator shared by two primaries | `B2a_sX_x2` once (B2b and B2c both use it) |
 | I16 | B4 templates | front = `abar_front.pt`, stored = `abar.pt` (both checked against `transfer/SHA256SUMS`), full_box = the Track A template of the H200 (checked against its `templates.json`) |
 | I17 | 1-SE (B6) | per seed among B6a, B6b, B6c (fewest weights within one paired SE of the best; `registry.select_1se`) |
+
+### 3a. Sweep: where does a validation value decide something? (26 Nov 2026, after the user's decision)
+
+| place in the driver | what decides | verdict |
+|---|---|---|
+| B1d starting networks | was: ranking of the members by registered validation mean | **changed**: fixed seed order `s2_seed11`, `s2_seed12` (user decision); the ranking function is removed |
+| B1f starting network | was: `B1d_best` (the validation-ranked best start) | **changed**: `B1d_m11`, the first replicate |
+| selection of the trained weights | `selection = "last"` in every recipe (no best-validation state is kept; the EMA stream is a separate row, not a choice) | none; unchanged |
+| smoke stand-in ensemble `E5_smoke` | the registered members in seed order | none (smoke only) |
+| convergence reruns (`<name>_x2`) | the validation trajectory over the last 1000 steps | a **pre-registered rule** (AUDIT 4.0) deciding what is re-run; unchanged |
+| guard evaluations | promotion parts (a)-(c) on validation | a **pre-registered rule** (AUDIT 4.2 note) deciding what is reported; unchanged |
+| divergence labels and blocked dependants | the last validation value (non-finite, blow-up) | a **user decision** (PLAN section 20 item 2) deciding how a run is labelled; a diverged B1d blocks B1f; unchanged |
+| 1-SE rule (B6), B-ceil trajectory minimum | validation means | **pre-registered** reporting rules; nothing is trained on their outcome |
+| KL warm starts (B1d, B4, B6), B-ceil training subset | training momenta / a seeded permutation of the training split | no validation data involved |
+
+### 3b. Hard stops (user, PLAN section 23 item 13)
+
+Any failed parity, reference, scoring, guard or file-access / deferred-file check ends the job at once, before any
+later phase, with the last line `HARD STOP (PLAN.md section 23, item 13) - <check> ... - no later phase was run;
+waiting for the user` and **exit code 3** (recorded under `stops` in `list_decisions.json`). The checks:
+- *parity / reference:* the reference set missing, not licensed by a passing parity record, or disputed; a batch-1
+  run or a stage-2 member not registered on the live stream; a starting network or E5 whose file does not match its
+  live row by SHA-256 or whose weights differ; `mlp_std.pt`, `abar_front.pt`, `abar.pt` not equal to
+  `transfer/SHA256SUMS`; the full_box template not equal to the Track A `templates.json`; a recipe (or a rerun recipe)
+  not equal to the pinned file; a finished run whose done-marker carries another recipe; a list name equal to a
+  batch-1 name;
+- *scoring:* the validation identity check, untagged or mixed-tag arrays, a tagged array that would be overwritten
+  (`NotValidationSet`, `UntaggedRow`, `MixedTags`, `UntaggedArray`, `FileExistsError`);
+- *guard:* a guard evaluation that raises, or a G-region decomposition that does not add up to the per-event NLL
+  (1e-4) or whose NLL differs from the registered array (every event 1e-4, mean 1e-6);
+- *file access:* a refusal by the file-access guard in this job (`GuardRefused`, or any line of this process in the
+  guard log other than the tolerated Parquet-reader import).
+Not a hard stop: a guard RULE that is not passed (a reported outcome); a diverged run (labelled as decided in PLAN
+section 20 item 2 - exploratory: recorded, the job continues; primary / comparator / diagnostic: "diverged - awaiting
+diagnosis", the job continues); too little free GPU memory (exit code 4, `STOPPED (resources)`, resumable). A
+non-finite per-event NLL at registration is treated as a divergence of the run (a property of the trained model), not
+as a failed scoring check - flagged for the reviewer.
 
 ## 4. Code (all new or changed for this list)
 
@@ -135,10 +172,10 @@ $L m2b_list $P -B shape-form-martin/scripts/run_m2b_list.py                  # t
 | phase | acceptance |
 |---|---|
 | verify | `batch-1 runs present: 13/13`; reference set parity PASS; templates front, stored, full_box verified; recipes pinned |
-| b1d ... bceil | one `registered:` line per run (31, plus 8 + 2 `_ema` rows); no `DIVERGED` line, else read its `diverged.json` (exploratory: continues; primary / comparator / diagnostic: "awaiting diagnosis") |
+| b1d ... bceil | one `registered:` line per run (31, plus 8 EMA rows: 6 of B2, 2 of B3s); no `DIVERGED` line, else read its `diverged.json` (exploratory: continues; primary / comparator / diagnostic: "awaiting diagnosis") |
 | converge | the move of every primary; `<name>_x2` reruns only where a primary moved ≥ 0.5 |
 | guards | either no candidate ("no run met the promotion parts") or one guarded row and G-region arrays per candidate |
-| report | `LIST_RESULTS.md` and `list_results.json` written; the job log ends `=== finished`; `.exit` = 0; the guard log holds only `pyarrow` import lines |
+| report | `LIST_RESULTS.md` and `list_results.json` written; the job log ends `=== finished`; `.exit` = 0; the guard log holds only `pyarrow` import lines. `.exit` = 3 with a last line `HARD STOP ...` = a failed check (section 3b): wait for the user; `.exit` = 4 = not enough free GPU memory: re-issue later |
 
 Copy back `<area>/sfm_out/shape-form-martin/results/machines/h200-g1056-97b197a7/` as for batch 1: tracked
 `registry.jsonl`, `runs/m2b_mlp/{B*,Bceil_*}/{done.json,init.json,fit_done.json,diverged.json}`,
@@ -146,18 +183,35 @@ Copy back `<area>/sfm_out/shape-form-martin/results/machines/h200-g1056-97b197a7
 `g_region.json`; by hand (git-ignored): `model.pt` and the per-event arrays of the new runs; not needed:
 `checkpoint.pt`, `fit.log`.
 
-**Estimate.** 159,000 training steps; at the measured 38 s per 6000-step fine-tune (6.3 ms per step) that is about
-17 min, plus B2b (K = 64) and B6c (width 64) at an estimated 1.5-2 times the step cost (+2 min), KL warm starts
-(about 1 min), 41 registry evaluations at about 2 s, data transfer per job (about 3 s × 31): **about 25 min**. Each
-convergence rerun adds its doubled steps (at most 8 primaries + 4 comparators, about +15 min in the worst case).
+**Estimate (per phase; corrected after the review, which counted the validation passes).** Every T_B fit validates
+at K = 64 every 250 steps on the main and the EMA stream (48 passes per 6000-step fit, 96 for B3s, 24 for B1f, 60 per
+B-ceil fit). Assumed on the H200: 6.3 ms per training step (38 s per 6000-step fine-tune, measured in batch 1 with
+K = 16 validation), 1.0-1.6 s per K = 64 validation pass, K = 64 training and width 64 at 1.26 and 1.53 times the
+step cost (measured ratio on the laptop).
+
+| phase | runs | estimate |
+|---|---|---|
+| verify | - | < 1 min |
+| b1d | 2 (6000 KL steps each, data-free) | about 1 min |
+| b1f | 1 (3000 steps, 24 passes) | about 1 min |
+| b2 | 6 (+ 6 EMA rows) | 10-13 min |
+| b3s | 2 (12,000 steps, 96 passes each) | 6-8 min |
+| b4 | 4 | 6-8 min |
+| b5 | 2 | 3-4 min |
+| b6 | 6 (+ 3000 KL steps each) | 10-14 min |
+| bceil | 8 (3000 steps, 60 passes each) | 10-15 min |
+| converge | 0-12 reruns with doubled steps | 0-45 min |
+| guards | per candidate: one guarded evaluation + G-region (seconds); probably none | < 2 min |
+| report | - | < 1 min |
+| **total** | | **about 50-65 min without reruns; up to about 1 h 50 min with every rerun** |
 
 ## 6. Laptop dry-run evidence (26 Nov 2026; scratch output root, guard active, pristine mode)
 
 - `--list` prints the 31 runs of section 2 (159,000 training steps) and the given batch-1 runs. On the laptop the
   batch-1 runs show "MISSING" (they exist on the H200 only). With the H200's identity patched in and the returned H200
   machine directory of the repository as output root (read-only test `test_batch1_runs_recognised_and_sources_verified_
-  on_the_h200_records`): all 13 batch-1 runs are recognised as registered, the member ranking is `s2_seed14`,
-  `s2_seed13`, ..., B1d's sources (best member and E5_s2) verify by SHA-256 against the real H200 rows, the full_box
+  on_the_h200_records`): all 13 batch-1 runs are recognised as registered, B1d's sources (`s2_seed11` / `s2_seed12` and
+  E5_s2) verify by SHA-256 against the real H200 rows, B1f resolves to `B1d_m11`, the full_box
   template verifies against the H200's Track A `templates.json`, and the H200 reference set is licensed (parity PASS).
 - Prerequisites in the scratch root: `val_parity.py --create-refset` (PASS) and `rescore_registered.py --names
   s2_seed11 s2_seed12` (PASS) - so that the smoke ensemble has two registered members.
@@ -195,3 +249,35 @@ convergence rerun adds its doubled steps (at most 8 primaries + 4 comparators, a
   is tested on the real H200 template file in the repository.
 - The guards phase in the smoke mode is forced onto `B2b_s0` (no smoke run meets the promotion parts).
 - Real step costs of B2b (K = 64) and B6c (width 64) on the H200: estimated.
+
+
+## 8. Review of commit 43ccfd6 (`results/m2b_mlp/REVIEW.md`, verdict NO-GO until A1) - what changed
+
+| finding | change | test |
+|---|---|---|
+| **A1** B1d / B1f starts by validation rank | **user decision (PLAN section 23 item 7):** fixed seed order. Runs `B1d_m11` (from `s2_seed11`) and `B1d_m12` (from `s2_seed12`, the replicate); `B1f_s0` from `B1d_m11`; `member_ranking` removed (the smoke stand-in uses the registered members in seed order); the three recipes re-pinned (`configs/m2b/list_recipes.json`). `--list` shows `from s2_seed11` / `from s2_seed12` / `from B1d_m11` | `test_list_matches_audit_4_2`, `test_no_validation_number_decides_what_is_trained`, the H200-records test (both starts and E5_s2 verified by SHA-256 on the real H200 rows; B1f resolves to `B1d_m11`) |
+| **A2 (i)** non-finite score / KL of a candidate | stays a recorded divergence, the job continues (orchestrator's ruling: PLAN 17.11 / 20 item 2 concern a model, not a harness check); now also for the EMA row (review C4); the report lists them as decided. A non-finite value in a benchmark, reference or parity computation still raises (hard stop) | divergence tests; EMA path by reading |
+| **A2 (ii)** clone dirty at the end | `run_m2b_lib.finish` prints `HARD STOP (PLAN.md section 23, item 13) - clone check failed ...` and exits 3 (laptop dry runs: `SFM_ALLOW_DIRTY_CLONE=1` keeps a warning). Shared by `val_parity.py`, `rescore_registered.py`, `run_m2b_list.py`; the Track A library does NOT use this code (it has no end-of-job clean check) | `test_a2_dirty_clone_at_the_end_is_a_hard_stop` |
+| **A2 (iii)** guard log of the job | after every phase and at the end: any line of this process other than the tolerated Parquet-reader import → hard stop listing every refused path (up to 20) | `test_guard_log_refusal_is_a_hard_stop` |
+| hard stops in general (PLAN 23 item 13) | `HardStop`; exit 3 with the last line `HARD STOP ...`, exit 4 for missing GPU memory (section 3b); a finished run whose done-marker carries another recipe is a hard stop | `test_hard_stop_exit_code_and_last_line`; smoke: tampered done-marker → exit 3 with that last line |
+| **B1** G-K / G-bulk pass test inverted | the report takes the registry's `passed` (margin = guard − ½ main ≤ 0, gains negative) and prints `resolved` beside it; combination in `rule_guard_part` (J-a pending) | `test_b1_guard_pass_test_follows_the_definition` (a surviving gain passes, an artefact fails) |
+| **B2** convergence reruns unused | where `<name>_x2` exists, the pair of record is (`<name>_x2`, `<comparator>_x2`) for the promotion parts, the primary comparisons, replication, the 1-SE rule and the guard candidates (the driver's guards phase sees the reruns); the original is printed as "not converged, NOT used by the rules" (as in the Track A report) | `test_b2_rerun_pair_of_record_and_b3_scope` |
+| **B3** promotion printed for every run | "promoted" only for the primaries' runs of record; others "n/a (<class>)" / "n/a (not used)" | same test; smoke report |
+| **B4**, I11, I12, I13, I17, J-a, J-b | NOT decided here: each is one function with the behaviour implemented so far (`rule_primary_comparison`, `rule_better_than_b0`, `rule_replication`, `rule_one_se`, `rule_guard_part`, `rule_g_region`), listed in `PENDING_RULINGS` and printed at the end of the report; waiting for the rulings | `PENDING_RULINGS` test |
+| review note beside B1d (d) | "both runs distil the same teacher (E5) on the same grid; the second start tests only the sensitivity to the start" | smoke report |
+| C5 | B1 retention printed only for a resolved B1 gain (|z| ≥ 2) | smoke report |
+| C6 | G-region: decomposition identity check (hard stop), resolution flag and normalisation term in the table | by reading; smoke guards earlier |
+| not done (outside the requested narrow diff) | C3 (`field_acc` warm-start KL in `init_info`), C7 (smoke mode refused off the laptop), C8 (post-build weight check for `field_mlp_std`), C2 (B-ceil EMA, would change eight pins) | - |
+
+**Smoke after the change** (fresh scratch root, guard on): `verify b1d b1f report` → `B1d_m11`, `B1d_m12`, `B1f_s0`
+(from `B1d_m11`) registered, exit 0; then a done-marker of `B1f_s0` tampered (recipe hash) and `b1f report` re-issued →
+exit 3, last line `HARD STOP (PLAN.md section 23, item 13) - reference: B1f_s0: the finished run carries recipe
+0000000000000000, the pinned recipe is 5ab08205053d40d5 ... - no later phase was run; waiting for the user`. The
+report on these rows prints the B1d note, "n/a (exploratory)" for B1f and the pending-rulings section.
+`results/registry.jsonl` and `results/test_access.log` unchanged.
+
+**Staging.** Commit with A1 + A2 (the reviewer's narrow re-check): `scripts/run_m2b_list.py`,
+`scripts/run_m2b_lib.py`, `configs/m2b/list_recipes.json`, `tests/test_run_m2b_list.py`, this file. The report fixes
+(B1-B3, rule functions): `scripts/run_m2b_list_report.py` (its tests are in the same test file; the driver's two-line
+change for B2 - `phase_guards` uses `rep.all_specs()` - is in `run_m2b_list.py`). Not touched: `scripts/run_m2a*.py`,
+`src/sfm/models/dist_factory.py`, `src/sfm/registry.py`, `src/sfm/metric.py`, `common.py`.

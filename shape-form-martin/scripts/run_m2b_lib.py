@@ -78,13 +78,25 @@ def start(what: str) -> dict:
     return rec
 
 
+CLONE_DIRTY_EXIT = 3
+
+
 def finish(rec: dict) -> dict:
-    """End-of-batch record: the git state again (the clone must still be clean in pristine mode)."""
+    """End-of-batch record: the git state again. In pristine mode a clone that is no longer clean is a HARD STOP
+    (PLAN.md section 23, item 13; review A2 (ii)): a clear last line and exit status 3 (SystemExit), not a warning.
+    ``SFM_ALLOW_DIRTY_CLONE=1`` (laptop dry runs only, never on the H200) keeps it a recorded warning. Used by every
+    script of this library (val_parity, rescore_registered, run_m2b_list); the Track A library does not use it."""
+    import os
     rec = dict(rec)
     rec["git_at_end"] = machine.git_state()
     if paths.pristine_mode() and rec["git_at_end"].get("clean") is not True:
-        print("WARNING: the clone is no longer clean at the end of the batch: "
-              f"{rec['git_at_end']}", flush=True)
+        if os.environ.get("SFM_ALLOW_DIRTY_CLONE") == "1":
+            print(f"WARNING (dry run, SFM_ALLOW_DIRTY_CLONE=1): the clone is not clean at the end: {rec['git_at_end']}",
+                  flush=True)
+            return rec
+        print(f"HARD STOP (PLAN.md section 23, item 13) - clone check failed: the clone is no longer clean at the end of "
+              f"the job ({rec['git_at_end'].get('n_changed')} entries in git status); waiting for the user", flush=True)
+        raise SystemExit(CLONE_DIRTY_EXIT)
     return rec
 
 

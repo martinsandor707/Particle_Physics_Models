@@ -15,9 +15,10 @@ Phases (default order): verify b1d b1f b2 b3s b4 b5 b6 bceil converge guards rep
               B0 controls b0h_seed0..2, B1 = E5_s2) registered on the live stream with their model files; mlp_std.pt
               and the acceptance templates by SHA-256 (front / stored: transfer/SHA256SUMS; full_box: the Track A
               templates.json of this machine); every recipe equal to the pinned file (N5)
-    b1d       B1d: FieldNet(32, 4) from the best and from the second-best stage-2 member (by registered validation
-              mean on the live stream), KL-distilled data-free to E5 on 256 training-momentum quantiles, 6000 steps
-    b1f       B1f: B1d (best start) + 3000 steps 3e-4 -> 3e-5, K = 16, T_B otherwise, seed 0
+    b1d       B1d: FieldNet(32, 4) started from s2_seed11 and from s2_seed12 - the fixed, validation-blind seed order
+              decided by the user (PLAN section 23 item 7; never a validation ranking) - KL-distilled data-free to E5
+              on 256 training-momentum quantiles, 6000 steps; B1d_m12 is the replicate of B1d_m11
+    b1f       B1f: B1d_m11 (the first replicate) + 3000 steps 3e-4 -> 3e-5, K = 16, T_B otherwise, seed 0
     b2        B2a (K = 16 iid), B2b (K = 64 iid), B2c (K = 16 stratified): field_mlp_std, T_B, seeds 0 and 1; the EMA
               stream of each is registered as <name>_ema (B3)
     b3s       B3s: fresh field(32, 4), 12000 steps 3e-3 -> 1e-4, K = 16, smooth 1e-4, EMA 0.999, seeds 0 and 1
@@ -34,6 +35,11 @@ Phases (default order): verify b1d b1f b2 b3s b4 b5 b6 bceil converge guards rep
               promotion parts (a)-(c) on a seed, for its other seed, and G-region arrays of mlp_std as reference
     report    scripts/run_m2b_list_report.py: the pre-registered rules applied to the registered arrays
 
+Hard stops (user, PLAN section 23 item 13): a failed parity, reference, scoring, guard or file-access / deferred-file
+check ends the job at once with exit code 3 and the last line "HARD STOP (PLAN.md section 23, item 13) - ..."; too
+little free GPU memory ends it with exit code 4 ("STOPPED (resources)", resumable). See results/m2b_mlp/STATUS.md 3b.
+No validation value chooses what is trained: selection "last" everywhere, fixed B1d/B1f starts; validation values
+only drive pre-registered rules on what is re-run (convergence) or reported (guards, 1-SE) and the divergence labels.
 Never re-run, re-pair or changed: the runs registered by batch 1 (recognised by their rows on the live stream). The
 eight laptop-trained networks stay records (used only as members / starting points, verified by SHA-256).
 Divergence (PLAN section 20 item 2): a run is diverged iff its LAST validation mean is not finite, the registry finds a
@@ -77,6 +83,22 @@ CONVERGED_MOVE, CONVERGENCE_WINDOW = 0.5e-4, 1000                     # AUDIT 4.
 BLOWUP_NAT, FROZEN_FRACTION = 1.0, 0.5
 # promotion rule (PLAN 6 / AUDIT 4.0), nat per event
 PROMO_GAIN, PROMO_Z, B0_Z = -5e-4, -3.0, -1.0
+
+
+class HardStop(RuntimeError):
+    """A failed parity, reference, scoring, guard or file-access / deferred-file check (PLAN.md section 23, item 13):
+    the job stops at once, before any later phase, and waits for the user."""
+
+    def __init__(self, check: str, msg: str):
+        super().__init__(f"{check}: {msg}")
+        self.check = check
+
+
+def hard_stop(check: str, msg: str):
+    raise HardStop(check, msg)
+
+
+HARD_STOP_EXIT, RESOURCE_EXIT = 3, 4
 
 
 class Ctx:
@@ -152,6 +174,9 @@ class Spec:
         return out_dir() / self.name
 
 
+# User decision of 26 Nov 2026 (PLAN.md section 23, item 7): the two starting networks of B1d / B1f are NOT picked by
+# a validation score; the strictly validation-blind fixed seed order is used. B1f starts from the first replicate.
+B1D_START_ORDER = ("s2_seed11", "s2_seed12")
 T_B = {}                                   # Spec defaults are T_B: 6000 steps, cosine 1e-3 -> 1e-4, batch 256,
                                            # k_val 64, eval_every 250, selection last, smooth 0, wd 0, dedicated
                                            # fold generator, EMA 0.999
@@ -161,14 +186,16 @@ def build_list() -> list:
     """The remaining runs of AUDIT 4.2, in table order. Batch-1 runs (S2-11..15, B0 = b0h_seed0..2, B1 = E5_s2,
     B1c = the subset arrays + E6) are listed separately (``given``)."""
     L = []
-    for start in ("best", "second"):                                   # B1d: two starts, data-free
-        L.append(Spec(f"B1d_{start}", "B1d", "primary", "field_distill",
-                      {"start": f"<{start} member>", "target": "<E5>", "grid": 256, "kl_steps": 6000, "kl_lr": 1e-3},
+    for member in B1D_START_ORDER:                                      # B1d: two starts, data-free; fixed seed
+        L.append(Spec(f"B1d_m{member[-2:]}", "B1d", "primary", "field_distill",   # order (user, PLAN 23 item 7)
+                      {"start": member, "target": "<E5>", "grid": 256, "kl_steps": 6000, "kl_lr": 1e-3},
                       steps=0, data_free=True, ema_decay=None, comparator="mlp_std",
-                      replicate_of=None if start == "best" else "B1d_best",
-                      notes="distillation of E5 into one FieldNet(32, 4); second start = replicate"))
-    L.append(Spec("B1f_s0", "B1f", "exploratory", "from_run", {"run": "<B1d_best>"}, steps=3000, lr=3e-4, lr_end=3e-5,
-                  comparator="B1d_best", notes="B1d + data fine-tune"))
+                      replicate_of=(None if member == B1D_START_ORDER[0] else f"B1d_m{B1D_START_ORDER[0][-2:]}"),
+                      notes=f"distillation of E5 into one FieldNet(32, 4) started from {member} (validation-blind "
+                            "fixed seed order); the second start is the replicate"))
+    first = f"B1d_m{B1D_START_ORDER[0][-2:]}"
+    L.append(Spec("B1f_s0", "B1f", "exploratory", "from_run", {"run": f"<{first}>"}, steps=3000, lr=3e-4, lr_end=3e-5,
+                  comparator=first, notes=f"B1d + data fine-tune, from the first B1d replicate ({first})"))
     for rung, kt, fold, cls, comp in (("B2a", 16, "iid", "comparator", "mlp_std"),
                                       ("B2b", 64, "iid", "primary", "B2a"),
                                       ("B2c", 16, "stratified", "primary", "B2a")):
@@ -233,7 +260,7 @@ def x2_spec(s: Spec) -> Spec:
 # ----------------------------------------------------------------------------------------------------------------------
 def pinned() -> dict:
     if not PIN_FILE.exists():
-        raise SystemExit(f"{paths.portable(PIN_FILE)} missing: the recipes are not pinned (run --pin on the laptop "
+        hard_stop("recipe pin", f"{paths.portable(PIN_FILE)} missing: the recipes are not pinned (run --pin on the laptop "
                          "and commit the file)")
     return json.loads(PIN_FILE.read_text())
 
@@ -241,14 +268,14 @@ def pinned() -> dict:
 def check_pins(specs) -> None:
     clash = sorted(set(s.name for s in specs) & BATCH1_NAMES)
     if clash:
-        raise SystemExit(f"list names collide with batch-1 runs: {clash}")
+        hard_stop("reference", f"list names collide with batch-1 runs: {clash}")
     pins = pinned().get("recipes", {})
     bad = [(s.name, s.recipe_hash(), pins.get(s.name)) for s in specs if pins.get(s.name) != s.recipe_hash()]
     if bad:
-        raise SystemExit(f"recipes differ from the pinned file {paths.portable(PIN_FILE)}: {bad[:5]} ... "
+        hard_stop("recipe pin", f"recipes differ from the pinned file {paths.portable(PIN_FILE)}: {bad[:5]} ... "
                          "(N5: only the tracked, pinned recipes run)")
     if paths.pristine_mode() and not str(PIN_FILE.resolve()).startswith(str(paths.REPO_ROOT.resolve())):
-        raise SystemExit("the pin file must be the tracked file inside the clone")
+        hard_stop("recipe pin", "the pin file must be the tracked file inside the clone")
 
 
 def write_pins() -> None:
@@ -347,19 +374,19 @@ def status(s: Spec) -> str:
 # ----------------------------------------------------------------------------------------------------------------------
 # sources: resolution and verification (B2 of the review: starting points by SHA-256 against a live registry row)
 # ----------------------------------------------------------------------------------------------------------------------
-def member_ranking() -> list:
-    """The stage-2 members (S2-11..15) ordered by registered validation mean on the live stream (best first). Smoke:
-    the members that are registered on this machine (at least two)."""
-    ranked = []
+def registered_members() -> list:
+    """The stage-2 members S2-11..15 that are registered on the live stream, in seed order (no validation number is
+    used to order or choose anything). Real mode: all five must be registered (batch 1)."""
+    out = []
     for n in GIVEN["S2-11..15"]:
-        r = given_row(n)
-        if r is not None:
-            ranked.append((r["val_mean"], n))
+        if given_row(n) is not None:
+            out.append(n)
         elif not CTX.smoke:
-            raise SystemExit(f"{n}: not registered on the live stream {lib.live_stream_id()} (batch 1 must be done)")
-    if len(ranked) < 2:
-        raise SystemExit("fewer than two stage-2 members registered on this machine")
-    return [n for _, n in sorted(ranked)]
+            hard_stop("reference", f"{n}: not registered on the live stream {lib.live_stream_id()} (batch 1 must be "
+                      "done)")
+    if len(out) < 2:
+        hard_stop("reference", "fewer than two stage-2 members registered on this machine")
+    return out
 
 
 def ensemble_ref() -> str:
@@ -372,11 +399,12 @@ def ensemble_ref() -> str:
 def resolve(s: Spec) -> dict:
     kw = dict(s.kwargs)
     if s.factory == "field_distill":
-        rank = member_ranking()
-        kw["start"] = lib.member(rank[0] if kw["start"] == "<best member>" else rank[1])
+        if kw["start"] not in GIVEN["S2-11..15"]:
+            hard_stop("reference", f"{s.name}: start {kw['start']!r} is not a stage-2 member")
+        kw["start"] = lib.member(kw["start"])          # fixed by the spec (validation-blind); file verified later
         kw["target"] = ensemble_ref()
-    if s.factory == "from_run" and kw.get("run") == "<B1d_best>":
-        kw["run"] = f"out:{os.path.relpath(out_dir() / 'B1d_best', paths.OUT_RESULTS)}"
+    if s.factory == "from_run" and str(kw.get("run", "")).startswith("<B1d_"):
+        kw["run"] = f"out:{os.path.relpath(out_dir() / kw['run'][1:-1], paths.OUT_RESULTS)}"
     if CTX.smoke:
         for k in ("kl_steps", "warm_steps"):
             if k in kw:
@@ -403,11 +431,11 @@ def verify_sources(s: Spec, kw: dict) -> dict:
         fsha = provenance.sha256_file(f)
         r = registry.registered_row(stage, name, stream_id=lib.live_stream_id(), ckpt=f)
         if r is None:
-            raise SystemExit(f"{s.name}: source {key}={ref} (SHA-256 {fsha[:12]}) matches no row on the live stream")
+            hard_stop("reference", f"{s.name}: source {key}={ref} (SHA-256 {fsha[:12]}) matches no row on the live stream")
         obj = torch.load(f, map_location="cpu", weights_only=False)
         wsha = provenance.weights_sha256(obj["state"])
         if r.get("weights_sha256") != wsha:
-            raise SystemExit(f"{s.name}: source {key}={ref}: weight tensors differ from its row")
+            hard_stop("reference", f"{s.name}: source {key}={ref}: weight tensors differ from its row")
         out[key] = {"run": ref, "stage": stage, "name": name, "file_sha256": fsha, "weights_sha256": wsha,
                     "trained_on": r.get("trained_on"), "row_timestamp": r.get("timestamp"),
                     "row_val_nll_sha256": r.get("val_nll_sha256")}
@@ -417,7 +445,7 @@ def verify_sources(s: Spec, kw: dict) -> dict:
         want = lib.input_hashes().get(lib.MLP_STD_REL)
         sha = provenance.sha256_file(f)
         if sha != want:
-            raise SystemExit(f"{s.name}: mlp_std.pt SHA-256 {sha[:12]} differs from transfer/SHA256SUMS")
+            hard_stop("reference", f"{s.name}: mlp_std.pt SHA-256 {sha[:12]} differs from transfer/SHA256SUMS")
         out["mlp_std"] = {"file_sha256": sha}
     if s.factory == "field_acc":
         out["template"] = verify_template(kw["template"])
@@ -432,16 +460,16 @@ def verify_template(kind: str) -> dict:
         want = lib.input_hashes().get(rel)
         sha = provenance.sha256_file(f)
         if sha != want:
-            raise SystemExit(f"template {kind}: {rel} SHA-256 differs from transfer/SHA256SUMS")
+            hard_stop("reference", f"template {kind}: {rel} SHA-256 differs from transfer/SHA256SUMS")
         return {"kind": kind, "file": rel, "file_sha256": sha}
     from sfm.models import dist_factory
     tdir = dist_factory.template_dir()
     meta = read_json(tdir / "templates.json")
     if meta is None:
-        raise SystemExit(f"template {kind}: {paths.portable(tdir)}/templates.json missing (Track A templates phase)")
+        hard_stop("reference", f"template {kind}: {paths.portable(tdir)}/templates.json missing (Track A templates phase)")
     sha = provenance.sha256_file(tdir / f"{kind}.pt")
     if (meta.get("sha256") or {}).get(kind) != sha or meta.get("machine_id") != lib.MACHINE.id:
-        raise SystemExit(f"template {kind}: file SHA-256 or machine differs from the Track A templates.json")
+        hard_stop("reference", f"template {kind}: file SHA-256 or machine differs from the Track A templates.json")
     return {"kind": kind, "file": paths.portable(tdir / f"{kind}.pt"), "file_sha256": sha, "track_a_record": True}
 
 
@@ -570,12 +598,15 @@ def run_spec(s: Spec) -> dict:
     """Execute, skip or resume one run; returns its done.json, or a diverged / blocked record."""
     d = done_marker(s.name)
     if d is not None:
+        if d.get("recipe_hash") != s.recipe_hash():
+            hard_stop("reference", f"{s.name}: the finished run carries recipe {d.get('recipe_hash')}, the pinned "
+                      f"recipe is {s.recipe_hash()} (a finished run is never re-run or re-interpreted)")
         return d
     dv = diverged_marker(s.name)
     if dv is not None:
         return dv
     if s.name in BATCH1_NAMES:
-        raise SystemExit(f"{s.name}: a batch-1 run name; batch-1 runs are never re-run")
+        hard_stop("reference", f"{s.name}: a batch-1 run name; batch-1 runs are never re-run")
     if CTX.smoke and s.kwargs.get("template") in ("full_box", "back_corrected"):
         from sfm.models import dist_factory
         if not (dist_factory.template_dir() / "templates.json").exists():
@@ -672,9 +703,16 @@ def run_spec(s: Spec) -> dict:
                 m_ema.load_state_dict(obj["ema_state"])
                 ema = row(f"{s.name}_ema", ckpt=model_path)
                 if ema is None:
-                    ema = registry.evaluate(m_ema, f"{s.name}_ema", CTX.stage, val,
-                                            meta={**meta, "rung": "B3", "cls": "exploratory", "comparator": s.name,
-                                                  "notes": f"EMA stream (decay {s.ema_decay}) of {s.name} (B3)"})
+                    try:
+                        ema = registry.evaluate(m_ema, f"{s.name}_ema", CTX.stage, val,
+                                                meta={**meta, "rung": "B3", "cls": "exploratory", "comparator": s.name,
+                                                      "notes": f"EMA stream (decay {s.ema_decay}) of {s.name} (B3)"})
+                    except FloatingPointError as err:   # a candidate's score (orchestrator ruling A2 (i)): recorded
+                        warn = list(warn) + [f"EMA row {s.name}_ema: non-finite per-event NLL ({err}); recorded as "
+                                             "diverged, not registered"]
+                        record_decision("diverged", f"{s.name}_ema", {"criteria": ["non-finite EMA score"],
+                                                                      "status": "diverged", "cls": "exploratory"})
+                        ema = None
         log(f"[{s.name}] registered: val {r['val_mean']:.6f}  vs mlp {r['vs_mlp']['mean'] * 1e4:+.2f} +- "
             f"{r['vs_mlp']['se'] * 1e4:.2f}e-4" + (f"; EMA {ema['val_mean']:.6f}" if ema else ""))
         done = {"name": s.name, "stage": CTX.stage, "smoke": CTX.smoke, "rung": s.rung, "cls": s.cls,
@@ -706,7 +744,7 @@ def phase_verify() -> dict:
             r = given_row(n)
             out["given"][n] = bool(r)
             if r is None and not CTX.smoke:
-                raise SystemExit(f"verify: batch-1 run {n} ({k}) is not registered on the live stream")
+                hard_stop("reference", f"verify: batch-1 run {n} ({k}) is not registered on the live stream")
     out["mlp_std"] = verify_sources(Spec("verify", "-", "-", "field_mlp_std", {}), {})
     for t in ("front", "stored") + (() if CTX.smoke else ("full_box",)):
         out["templates"][t] = verify_template(t)
@@ -722,12 +760,13 @@ def smoke_prep() -> None:
     """Smoke only: the B1 ensemble stand-in E5_smoke (uniform ensemble of the registered stage-2 members)."""
     if not CTX.smoke or done_marker("E5_smoke") is not None:
         return
-    members = [lib.member(n) for n in member_ranking()]
-    for n in member_ranking():
+    names = registered_members()
+    members = [lib.member(n) for n in names]
+    for n in names:
         f = models._run_dir(lib.member(n), models.BuildContext()) / "model.pt"
         if given_row(n) is None or registry.registered_row(REAL_STAGE, n, stream_id=lib.live_stream_id(),
                                                            ckpt=f) is None:
-            raise SystemExit(f"smoke: member {n} has no row with its file on the live stream")
+            hard_stop("reference", f"smoke: member {n} has no row with its file on the live stream")
 
     def job():
         val = registry.load_validation()
@@ -783,7 +822,7 @@ def phase_converge() -> dict:
                 x = x2_spec(t)
                 pins = pinned().get("x2_recipes", {})
                 if pins.get(x.name) != x.recipe_hash():
-                    raise SystemExit(f"{x.name}: rerun recipe not pinned")
+                    hard_stop("recipe pin", f"{x.name}: rerun recipe not pinned")
                 res[s.name].setdefault("reruns", []).append(x.name)
                 run_spec(x)
     write_json({**decisions(), "convergence": res}, decisions_file())
@@ -793,15 +832,21 @@ def phase_converge() -> dict:
 def phase_guards() -> dict:
     """Guards for every run meeting the promotion parts (a)-(c) on a seed, and its other seed (AUDIT 4.2 note)."""
     import run_m2b_list_report as rep
-    cands = rep.guard_candidates(sm=spec_map())
+    specs = rep.all_specs()                                            # the list + registered x2 reruns (B2)
+    cands = rep.guard_candidates(sm=specs)
     if CTX.smoke and not cands:
         cands = [n for n in ("B2b_s0",) if row(n)]                     # exercise the path in the smoke mode
     out = {}
     for n in cands:
-        s = spec_map().get(n)
+        s = specs.get(n)
         if s is None or row(n) is None:
             continue
-        out[n] = guard_one(s)
+        try:
+            out[n] = guard_one(s)
+        except HardStop:
+            raise
+        except Exception as err:                                          # a guard that cannot be evaluated
+            hard_stop("guard", f"guard evaluation of {n} failed: {type(err).__name__}: {err}")
     write_json({**decisions(), "guards": out}, decisions_file())
     return out
 
@@ -851,11 +896,26 @@ def g_region(name: str, model, val, val_cpu) -> dict:
             out[cls] = {"path": paths.portable(ta.path), "sha256": ta.sha256}
         write_json({"name": label, "arrays": out}, d / "g_region.json")
         return out
+    def checked(comp, registered, label):
+        """The decomposition must add up to the per-event NLL, and that NLL must equal the registered array
+        (tolerance check: every event within 1e-4, mean within 1e-6); otherwise a hard stop (guard check)."""
+        a = comp["arrays"]
+        recon = a["flagged"] + a["inner"] + a["normalisation"]
+        resid = float(np.abs(recon - comp["parts_nll"].astype(np.float64)).max())
+        tc = provenance.tolerance_check(comp["parts_nll"], registered.values, top=3)
+        if resid > 1e-4 or not tc["strict_pass"]:
+            hard_stop("guard", f"G-region of {label}: decomposition residual {resid:.2e}, against the registered array "
+                      f"max {tc['max_abs']:.2e} / mean {tc['mean_diff']:.2e}")
+        return comp
+
     ref_marker = out_dir() / "_mlp_std_reference" / "g_region" / "g_region.json"
     if not ref_marker.exists():
-        save("_mlp_std_reference", "mlp_std", g_region_compute(models.mlp_std_start(common.DEVICE).eval(), val.showers,
-                                                               val_cpu))
-    return save(name, f"{CTX.stage}/{name}", g_region_compute(model, val.showers, val_cpu))
+        mref = registry.reference_set().bench["mlp"]
+        save("_mlp_std_reference", "mlp_std",
+             checked(g_region_compute(models.mlp_std_start(common.DEVICE).eval(), val.showers, val_cpu), mref,
+                     "mlp_std"))
+    return save(name, f"{CTX.stage}/{name}",
+                checked(g_region_compute(model, val.showers, val_cpu), registry.row_array(row(name)), name))
 
 
 def phase_report() -> None:
@@ -894,6 +954,10 @@ def print_list() -> None:
             other.append(f"lr {s.lr:g}->{s.lr_end:g}")
         if s.ema_row:
             other.append("EMA row")
+        if "start" in s.kwargs:
+            other.append(f"from {s.kwargs['start']}")
+        if "run" in s.kwargs:
+            other.append(f"from {s.kwargs['run'].strip('<>')}")
         for k, lab in (("template", "tpl"), ("hidden", "h"), ("n_layers", "L"), ("kl_steps", "KL"),
                        ("n_knots", "knots")):
             if k in s.kwargs:
@@ -905,7 +969,58 @@ def print_list() -> None:
           "convergence reruns of non-converged primaries come on top (doubled steps, with their comparators)")
 
 
+TOLERATED_GUARD_REASON = "import of a Parquet reader while the guard is active"   # pandas probes pyarrow; tolerated
+
+
+def check_guard_log() -> None:
+    """File-access / deferred-file check: any refusal of THIS process other than the tolerated Parquet-reader
+    import is a hard stop (a refused open may have been swallowed by library code)."""
+    from sfm import guard
+    f = guard.guard_log_path()
+    if not f.exists():
+        return
+    bad = [ln for ln in f.read_text().splitlines()
+           if f"\tpid {os.getpid()}\t" in ln and TOLERATED_GUARD_REASON not in ln]
+    if bad:
+        refused = [ln.split("\t")[3] + " (" + ln.split("\t")[4] + ")" if ln.count("\t") >= 4 else ln for ln in bad]
+        hard_stop("file access", f"{len(bad)} refusal(s) by the file-access guard in this job: "
+                  + "; ".join(refused[:20]) + (" ..." if len(refused) > 20 else ""))
+
+
+def _stop_line(kind: str, msg: str) -> None:
+    line = (f"HARD STOP (PLAN.md section 23, item 13) - {msg} - no later phase was run; waiting for the user"
+            if kind == "hard" else f"STOPPED (resources) - {msg} - re-issue the same command later (resumes)")
+    try:
+        record_decision("stops", datetime.now(timezone.utc).isoformat(timespec="seconds"), {"kind": kind, "msg": msg})
+    except Exception:
+        pass
+    print(paths.scrub_str(line), flush=True)
+
+
 def main(argv=None) -> int:
+    """Exit codes: 0 finished; 3 HARD STOP (a failed check, waiting for the user); 4 stopped for lack of GPU memory
+    (resumable); anything else is an unexpected error (traceback, exit 1)."""
+    from sfm import guard
+    hard = (HardStop, registry.NoReferenceSet, registry.ReferenceSetNotLicensed, registry.ReferenceSetDisputed,
+            registry.NotValidationSet, registry.UntaggedRow, provenance.MixedTags, provenance.UntaggedArray,
+            guard.GuardRefused, FileExistsError)
+    try:
+        return _main(argv)
+    except hard as err:
+        check = getattr(err, "check", None) or {
+            "NoReferenceSet": "reference", "ReferenceSetNotLicensed": "parity", "ReferenceSetDisputed": "reference",
+            "NotValidationSet": "scoring", "UntaggedRow": "scoring", "MixedTags": "scoring",
+            "UntaggedArray": "scoring", "GuardRefused": "file access", "FileExistsError": "scoring"}.get(
+            type(err).__name__, "check")
+        _stop_line("hard", f"{check} check failed: {type(err).__name__}: {err}" if not isinstance(err, HardStop)
+                   else f"{err}")
+        return HARD_STOP_EXIT
+    except machine.InsufficientGPUMemory as err:
+        _stop_line("resource", str(err))
+        return RESOURCE_EXIT
+
+
+def _main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("phases", nargs="*")
     ap.add_argument("--list", action="store_true")
@@ -926,9 +1041,11 @@ def main(argv=None) -> int:
         raise SystemExit(f"unknown phase(s) {unknown}; known: {list(PHASES)}")
     if "verify" not in phases:
         check_pins(build_list())
+    check_guard_log()
     for p in [x for x in DEFAULT_PHASES if x in phases]:
         log(f"=== phase {p}")
         PHASES[p]()
+        check_guard_log()
     log(f"=== finished: {phases}")
     lib.finish(CTX.batch)
     return 0
