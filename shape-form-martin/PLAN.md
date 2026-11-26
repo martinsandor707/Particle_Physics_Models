@@ -2233,3 +2233,40 @@ the record: the pairing A11p against A11 at the same seed, start and schedule is
 in effect one test (the seeds are near-copies in such pairs), at a level of about 2.5 %; a pass means only "not
 worse than A11 within the margin", and A11 itself is 20 above A2c; the screen's prediction for this stratum is
 weak, so the acceptance conditions are the operative control.
+
+## 25. Test jobs move to a test copy on the H200 (user approval of 26 Nov 2026, evening)
+
+**Why.** Development testing had used more GPU time on the user's laptop than the real runs used on the H200: one
+complete smoke pass of the Track A driver takes 12–13 minutes of laptop GPU (38 minutes with Stage 2), repeated after
+every round of changes and by every review; the estimate for two days is 3–5 hours.
+
+**What the user approved.** (1) Three new folders in `<area>`: a folder for test copies, one for their outputs, one
+for their caches. (2) A one-time copy of the input files into a test copy. (3) A standing batch class "smoke and test
+jobs in the test copy", under the same caps as every campaign job.
+
+**How it is set up**
+- One test copy per worker ("slot") in the test folder, filled from the laptop working tree by `tar` and `scp` —
+  tracked files with their uncommitted edits plus new files; it is not a git repository. Outputs go to a per-slot,
+  per-experiment output root in the test output folder; a new root is seeded with a reference set that was created
+  in the test copy itself. The Python environment is a copy of the real one, inside the test cache folder (a copy
+  within `<area>`: no install, no network).
+- Workers reach the H200 only through one helper (`cache/h200_tools/h200_dev.sh`, git-ignored because it holds the
+  login details): sync, new output root, run one job through the launcher, wait, read a log, list, fetch into the
+  session scratch folder, stop through the stop helper. No free ssh access.
+- **One campaign job at a time on the machine, real or test:** the helper waits while any job is running, and the
+  orchestrator's helper for real jobs refuses to start while a test job runs.
+- The file-access guard is active for test jobs with the user's whole folder as guarded area: a test job cannot open
+  the real output folder, the real clone, or the other project's files.
+
+**What it does and does not affect**
+- No number of record: test outputs have their own folder, registry and reference set, under smoke stages, and are
+  never copied into the repository. The real clone stays pull-only and clean. The deferred files are not on the
+  machine.
+- It does affect: the wall-clock time of a real job that queues behind a test job; timing measurements, which must
+  not run while test jobs do; the VPN, without which testing stops (workers then tell the orchestrator).
+- Residual risk, stated to the user: unreviewed code runs under the shared account; the guard that fences it comes
+  from the tested tree itself. The test copy carries the real machine identifier, so the separation rests on the
+  separate output folder, not on the tag.
+
+**First jobs in the test copy (26 Nov, 19:18 UTC):** validation parity — all checks passed, same means as the real
+run (18.118083954 / 18.120407104); reference set created. Each took 15 s.
