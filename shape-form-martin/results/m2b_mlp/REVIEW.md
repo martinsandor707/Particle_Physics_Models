@@ -438,3 +438,256 @@ re-check of that diff (section 7.2, step 1).
   `results/test_access.log` `effa9734743f…0c60`, `common.py` `ece3c67f89cd…bb3`. No test array, test cache or CSV file
   was opened; nothing under `shape-form-proton/` or `shape-form-original/` was modified; no git command that writes was
   used.
+
+---
+
+## 9. Fable rulings and check of the review
+
+26 Nov 2026, evening. Written by the second reviewer (mathematics and statistics). Subject: the committed state of
+`43ccfd6`; the author's uncommitted fix in the working tree was not read. Sections 1-8 above are the Opus review and
+are not edited. Everything executed here ran from a `git archive` export of `43ccfd6` in a scratch directory or with
+plain numpy on the H200 batch-1 validation arrays that are in the repository; no GPU computation, no test data.
+Reproducers: `<scratch>/fable_m2b/` (`numpy_h200.py`, `h200_guards.py`, `spot_check.py`).
+
+Marking: **[within]** = follows from the pre-registered text; **[confirm]** = the text does not fix it, the user
+decides; for those the difference between the options is stated. None of the rulings changes a fit: all of them act
+on the report, which re-reads registered arrays.
+
+### 9.1 Rulings
+
+**I11 - which rule decides the primary comparisons. Ruling: option (i), as two separate statements. [confirm]**
+- Text. AUDIT 4.0: "Every Δ is paired by event against the comparator trained with the same seed."; "Promotion,
+  Track B (PLAN §6): Δ ≤ −5 and ≤ −3 SE against `mlp_std`, better than B0 by > 1 SE, guards passed."; "a result
+  counts only if the second seed gives Δ ≤ half the threshold ...". AUDIT 4.2: class "**primary** (B2b − B2a)" and
+  likewise for B2c, B4f, B6c; Expected "0 ± 1; ≤ −3: 5 %". A6 revised, point 6: the six primary comparisons "remain
+  the basis of the multiple-testing accounting".
+- Ruling. (P) *Promotion of a model* is decided against `mlp_std` only, parts (a)-(e). (Q) *The primary comparison*
+  is the test of the isolated mechanism; its Δ is the paired difference to the same-seed comparator, and it counts
+  iff Δ₀ ≤ −5 and ≤ −3 SE and the replication rule (I13) holds on the comparison. The two are never combined: a
+  promoted run whose comparison is null is promoted as a model, and the report says that the mechanism is not shown.
+- Why [confirm]. The list gives the bracketed contrast no threshold of its own; −5 / −3 SE is the only threshold
+  Track B has, and it is the strictest of the candidates, but the Expected column counts "≤ −3".
+- What differs. No run. In the primary table: under (i) a contrast with Δ between −5 and −3 is "no"; under (iii)
+  (−3 and −2 SE, half −1.5, the Track A keep rule) it is "yes"; under (ii) the table has Δ ± SE and no verdict.
+- Report requirement whatever is confirmed: Δ ± SE per seed and the two-seed mean for every contrast, and a neutral
+  note "between −3 and −5" where that applies, not a second pass / fail.
+
+**I12 - part (c), "better than B0 by more than 1 SE". Ruling: keep the paired SE against the per-event B0 mean. [within]**
+- Text. PLAN §6: "better than B0 by > 1 SE"; "Every variant is compared with **B0**"; A6 revised, point 5: "its seed
+  scatter and the B0 mean use these three runs only".
+- Formula. d_e = ℓ_run(e) − (1/3) Σ_k ℓ_b0h_seed-k(e) over the 14,950 validation events; Δ_B0 = mean(d);
+  SE = sd(d, ddof 1)/√n; (c) holds iff Δ_B0 / SE < −1. Formed only when all three controls are registered.
+- Why no between-seed term (numpy on the H200 arrays):
+
+| quantity | value |
+|---|---|
+| controls against `mlp_std` | +1.01 ± 0.48, +1.04 ± 0.89, +0.31 ± 0.81 |
+| pairwise differences of the controls | −0.03 ± 0.67, +0.70 ± 0.71, +0.73 ± 0.65 (largest 1.13 SE) |
+| between-seed variance of the three means, observed | 0.170 (sd 0.41) |
+| the same, expected from event noise alone (Σ pairwise SE² / 6) | 0.228 |
+| chance that at least one of three controls lies below −1 SE of their common mean, equal true means | 0.46 |
+
+  The scatter of the controls is not larger than what the paired SE already carries; adding s²/3 would count the
+  same noise twice. A control at z = −1.21 is what a 1-SE bar does in nearly half of all cases; the heavy bars of
+  the rule are (a), (b) and (d).
+- The three options cannot differ in any decision. B0 lies +0.79 ± 0.64 above `mlp_std`. For a run exactly at the
+  threshold (Δ = −5 at −3 SE) the triangle inequality gives z ≤ −2.51 against the B0 mean, −2.50 with the
+  between-seed term added, and ≤ −2.15 against every single control; larger gains only move away from −1. So (a)
+  and (b) imply (c) under all three readings, for promotion and for the choice of guard candidates. Only the printed
+  (c) of rows that fail (a) or (b) could differ.
+- Print beside (c), as description: the seed sd of the controls and Δ against each single control.
+
+**I13 - "the threshold" in the replication rule. Ruling: the Δ part only, in both clauses, in both tracks. [within]**
+- Text. AUDIT 4.0: "a result counts only if the second seed gives Δ ≤ half the threshold with the same sign and the
+  mean of the two seeds meets the threshold."
+- Ruling. "Half the threshold" can only be half of a number; the same word in the same sentence then means that
+  number. Track B: Δ₁ ≤ −2.5 with the sign of Δ₀, and the two-seed mean ≤ −5, where the two-seed mean is the paired
+  delta of the per-event mean of the two runs against the per-event mean of their references. This is ruling 5 of
+  `results/m2a_dist/REVIEW.md` (Track A: −1.5 and −3), which the Stage-1 table already uses.
+- The stricter version (literal conditions and two-seed mean ≤ −3 SE) is printed as a labelled alternative column,
+  as in the Track A report (`replicated_alternative_2se` there). If the two columns disagree on a primary comparison
+  or on a promotion row, that row goes to the user.
+- The code at `43ccfd6` uses Δ for the first clause and Δ and SE for the second: neither reading. To be changed
+  (finding B4).
+- Seed order: seed 0 is the result, seed 1 the replicate ("the second seed"), as in Track A. A row that passes on
+  seed 1 only is printed and not promoted.
+
+**I17 - the 1-SE rule of B6. Ruling: per seed, then eligibility on both seeds. [within]**
+- Text. AUDIT 4.2, B6c: "capacity; 1-SE rule"; AUDIT 4.0: pairing "against the comparator trained with the same
+  seed"; the same form as the finalist rule of `results/m2a_dist/REVIEW.md` section 10.4.
+- Ruling. For each seed, `sfm.stats.one_se_select` over B6a, B6b, B6c of that seed (the pairs of record, B2). A
+  capacity is eligible if it is eligible on both seeds; the selection is the eligible capacity with the fewest
+  weights. Reported: both per-seed tables (best, eligible set, selected) and the combined line. If the per-seed
+  selections differ, the report says so and gives the combined selection; if no capacity is eligible on both seeds,
+  it says "no automatic selection" and the table goes to Gate 1.
+
+**J-a - an unresolved G-K or G-bulk result. Ruling: undecided; neither passed nor failed. [within]**
+- Text. PLAN §6: "G-K re-evaluation at K=1024 (sign holds, ≥ 50 % of the gain persists)"; PLAN §13: "evaluated as
+  the paired margin `guard − 0.5·main` with its SE, and is called resolved only at 2 SE"; `guard_persistence`: "A
+  pass or a fail with `resolved` False is a statement about noise, not about the candidate."
+- Ruling. The verdict is the registered point-estimate check (`passed`: main < 0, guard < 0, margin ≤ 0), printed
+  with `resolved` (|z| of the margin ≥ 2) beside it, as the Track A report does. For part (e): passed and resolved =
+  passed; failed and resolved = failed; anything unresolved = undecided. With an undecided guard the automatic
+  "promoted" flag is not set and the row is not rejected: it is listed "meets (a)-(d), guard undecided" for Gate 1,
+  where the guards are a named item (PLAN §6).
+- If the user prefers that an unresolved pass promotes automatically, only the "promoted" column changes.
+
+**J-b - G-region. Ruling: the same three values. [within]**
+- Text. PLAN §6: "**G-region** ≤ 50 % of the gain from deep, border or `Ā ≤ 0.3` cells"; PLAN §13: "G-region
+  localises the hit term only; the normalisation term is reported as its own row."; ruling 9 of the Track A review
+  ("margin form with SE").
+- Ruling. Passed iff main < 0 and mean(flagged − 0.5·main) ≥ 0; resolved iff |z| of that margin ≥ 2; unresolved =
+  undecided, as J-a. The sign is opposite to G-K because here at most half may come from the flagged cells. The
+  report prints the normalisation term and the decomposition residual (finding C6).
+
+**B1d - how to read part (d). Ruling: evaluated on the two starts, labelled as what it is. [within]**
+- Text. AUDIT 4.2, B1d, Seeds column: "2 starts"; PLAN §23 item 7 (fixed starts `s2_seed11`, `s2_seed12`).
+- Ruling. (d) is computed mechanically with the first start as the result and the second as the replicate, and is
+  labelled "replicated over starting networks (one teacher)". It shows that the result does not depend on the
+  start. It does not replicate E5, which is one realisation and is itself −0.83 ± 1.35 against `mlp_std`.
+- The report prints B1d − E5 (paired) for both starts; that is the distillation loss. It replaces the retained
+  fraction, which has no meaning while B1 is not a gain (finding C5).
+- If a B1d run met (a)-(c) while its teacher does not, the student would beat the teacher by more than 4: listed for
+  Gate 1 as an anomaly, not promoted automatically.
+
+**I4 - convergence of B1d (classed "mechanical" in section 2; I do not agree). [confirm]**
+- Text. AUDIT 4.0: "A run has converged if the validation mean moved by less than 0.5 over its last 1000 steps. A
+  non-converged primary is rerun once with doubled steps together with its comparator; nothing else changes."
+- B1d is a primary and has no validation trajectory, so the rule cannot be applied as written. Section 2 says the KL
+  trajectory is in `init.json`; it is not: `kl_warm_start` returns `kl_initial`, `kl_final` and `steps`, and the
+  five intermediate values exist only as `warm start step` lines of the job log.
+- Options. (α) No convergence statement for B1d; the table shows KL initial and final and the five log lines, which
+  must then be copied back. (β) Two unconditional companions with 12,000 KL steps (data-free, about a minute each,
+  new pinned names): the 6,000-step run is of record iff |Δ(12,000 − 6,000)| < 0.5 on the registered arrays, else
+  the 12,000-step run. No validation number decides whether they run.
+- What differs: two short runs and one table line per start. (β) can run as its own job after the batch; nothing
+  else depends on it (B1f starts from the 6,000-step run, "B1d + 3000 steps"). I recommend (β).
+
+**A2(i) - a non-finite score of a candidate. Ruling: agreed; no need to bring it to the user. [within]**
+- Text. PLAN 17.11: "for exploratory rungs a divergence ... is caught, recorded ... and the job continues ... a
+  primary rung is marked as failed only after a Fable diagnosis"; PLAN 20 item 2: "Only a non-finite final value or
+  an unrecovered fit ... counts as diverged"; PLAN 23 item 13: "Any failed parity, reference, scoring, guard, or
+  file-access / deferred-file check is a hard stop".
+- Ruling. A check compares a computation with something known beforehand: parity targets, the reference set, the
+  predicted re-scoring table, hashes, the file-access guard. A candidate's fit has no known answer; its non-finite
+  outcome, and a non-finite KL in its warm start, is a result and stays a recorded divergence. A non-finite value in
+  a benchmark, reference or parity computation is a failed check and stops the job.
+- One boundary case belongs to the hard stops. The fit's last validation mean (K = 64, the registry's points) and
+  the registry's mean of the same weights are two scorings of one thing. If the fit ended finite and the registry
+  then finds non-finite values, or the two means differ by more than 1e-6, that is a failed scoring check, not a
+  divergence. At `43ccfd6` the first case is recorded as a divergence (`run_m2b_list.py:660-664`) and the second is
+  not looked at. Either the driver stops there, or the comparison is made for all runs from `done.json` and the
+  registry before the table is read.
+
+### 9.2 Check of the Opus review
+
+**B1 (G-K / G-bulk test inverted): confirmed.**
+- From the definition. `sfm.stats.guard_persistence`: main and guard are run − reference, so a gain is negative;
+  margin = mean(guard − 0.5·main); the "fraction" check passes iff margin ≤ 0. `run_m2b_list_report.py:136-137`
+  asks for `margin >= 0 and resolved` and ignores `passed`.
+- On the real H200 arrays (margin recomputed with numpy, equal to the registry's to four digits) and with the
+  report's own `guards()` on the real rows:
+
+| row | main | G-K | margin (z) | registry | report at `43ccfd6` |
+|---|---|---|---|---|---|
+| `E5_s2` | −0.83 ± 1.35 | −0.48 ± 1.34 | −0.07 (−0.1) | passed, unresolved | not ok |
+| `b0h_seed0` | +1.01 ± 0.48 | +1.21 ± 0.48 | +0.70 (+2.8) | failed, resolved | **ok** |
+| `s2_seed15` | +6.54 ± 2.25 | +6.70 ± 2.23 | +3.43 (+3.1) | failed, resolved | **ok** |
+
+  A network that is worse than `mlp_std` under both metrics passes the guard.
+
+**B2 (convergence reruns never the pair of record): confirmed.** The report at `43ccfd6` contains no reference to an
+`_x2` run; `collect` iterates `spec_map()` (the 31 originals) for parts (a)-(e), the primary table, replication and
+the 1-SE rule, and `guard_candidates` does the same. The reruns appear only as names in the convergence section.
+
+**"The report's functions reproduce numpy on the real H200 arrays": confirmed.** Independent numpy from the `.npy`
+files: E5 −0.8258 ± 1.3548 and −1.6155 (z −1.140) against B0; `s2_seed14` +0.5416 ± 1.6449 and −0.2481 (z −0.161);
+`b0h_seed2` against B0 −0.4761 (z −1.209); two-seed mean of `s2_seed14`, `s2_seed13` +1.1350 ± 1.3963; best −
+second −1.19 ± 1.28, second − third −0.09 ± 1.51. Equal to section 5.3 in every digit.
+
+**Spot check of the list (section 1): six runs printed in full from the committed code, all as registered.**
+
+| run | AUDIT 4.2 | committed spec and fit configuration |
+|---|---|---|
+| `B1d_second` (distillation) | `FieldNet(32, 4)` from a member; `kl_warm_start(target=E5, 256 training-momentum quantiles, steps=6000, lr=1e-3)`, no data; primary | `field_distill`, grid 256, 6000 KL steps, lr 1e-3, data-free, comparator `mlp_std`, primary. The start is the point of A1 |
+| `B4x_s0` (acceptance) | `field_acc(template="full_box", base="mlp_std", warm_steps=500)`, T_B, K = 16, seed 0, exploratory | the same; T_B exactly; comparator `B2a_s0` |
+| `B6c_s1` (capacity) | `field(64, 4)`, KL to `mlp_std` on 256 quantiles, 3000 steps, 1e-3; T_B, K = 16; primary (B6c − B6a) | `field_kl(64, 4, mlp_std, 256, 3000, 1e-3)`; T_B, seed 1; comparator `B6a_s1`; replicate of `B6c_s0`; rerun pinned |
+| `B3s_s0` | fresh `field(32, 4)`; 12,000 steps, 3e-3 → 1e-4, batch 256, K = 16, smooth 1e-4, EMA 0.999 | the same; `k_val` 64, eval 250, selection last |
+| `Bceil_k6_wd1e-4_f25` | 6 uniform knots, frozen base, wd 1e-4, 25 % of train; 3000 steps, 3e-3 → 3e-4, K = 16, eval 100 | the same; seed 0 |
+| `B2c_s1` | `field_mlp_std`, T_B, K = 16, stratified; primary (B2c − B2a) | the same; comparator `B2a_s1` |
+
+T_B in every fit: 6000 steps, 1e-3 → 1e-4, batch 256, `k_val` 64, eval 250, selection last, smooth 0, weight decay 0,
+dedicated fold generator, EMA 0.999. I agree with section 1: nothing missing, nothing changed.
+
+**The sweep for validation-dependent training choices (section 2.1): complete as far as I can see.** V1 and V2 are
+the only leaks; V4 to V6 are pre-registered rules that decide a rerun, a block or an evaluation. One remark on the
+user's fix: the fixed order `s2_seed11`, `s2_seed12` is the convention batch 1 already used for its representative
+ensembles ("the lexicographically first subset of the seeds (no selection)"), and these two members are third and
+fourth by validation (+1.82, +3.40), so the rule cannot be read as favourable.
+
+**Where I differ from the review.**
+- I4 is not mechanical, and the statement about `init.json` is wrong (9.1).
+- Run time: section 6 multiplies the validation passes by 1.6 s; PLAN §21 measured 0.6 s for a K = 64 pass of a
+  component model on the H200. My estimate is 35 to 45 minutes plus reruns. Either way more than the 25 minutes the
+  user was told.
+- B3: the promotion rule of PLAN §6 is written for any variant, so the column may stay for every run with two seeds.
+  What the report must add is the class beside it and one sentence on multiplicity: six pre-registered comparisons,
+  every other row exploratory and not a test (as C12 of the Track A review).
+- Nothing in sections 1 to 6 is too lenient on a point that changes what is trained.
+
+**From my interrupted first pass (same commit, executed; scratch since lost, so stated from the session record).**
+- Factories and options at smoke scale: parameter counts 3,841 / 4,897 / 13,825 and 4,096 per knot; `kl_warm_start`
+  KL equal to a float64 numpy computation to 5e-8; quantile grid equal to `np.quantile` at (i + ½)/256, range 0.225
+  to 19.96 GeV; a zero residual table reproduces `mlp_std` exactly; weight decay acts on the 3-D table only; the
+  25 % subset lies inside the 50 % subset; smoothness penalty of `mlp_std` 0.32, times 1e-4 = 3.2e-5, the AUDIT's
+  number; `field_kl` is bit-reproducible for one seed.
+- End-to-end smoke in the committed tree, through the launcher with the guard active: two-step reference set
+  (parity PASS, then created), two members re-scored, smoke job stopped by `stop_job.sh` inside the fit of `B3s_s0`
+  (exit 143), second job skipped the finished runs and went on through b3s, b4 and b5. Injected divergences were
+  handled as decided: the comparator `B2a_s1` "diverged - awaiting diagnosis; the job continues", the exploratory
+  `B5f_s0` "diverged; the job continues". I was interrupted before the phases b6, bceil, converge, guards and
+  report; those are not confirmed by me either.
+
+### 9.3 What the final re-check must show
+
+For the author's fix commit, before the batch may run:
+
+1. **Scope.** The diff against `43ccfd6` touches `run_m2b_list.py`, `run_m2b_list_report.py`, the pin file, the tests
+   and, for A2, `run_m2b_lib.finish`. `common.py`, `registry.py`, `metric.py`, `train.py`, `provenance.py` and the
+   factories are unchanged. At the commit the H200 pulls, `g_region_compute`, `_g_region_static`, `_g_region_masks`,
+   `template_dir`, `acceptance_template` and `exit_depth` are unchanged from `43ccfd6`, or are reviewed again.
+2. **A1.** The two starts are the constants `s2_seed11`, `s2_seed12` in the spec; no real-mode code path reads a
+   `val_mean` to choose anything; run names carry no rank; B1f starts from the B1d run of the first start; the three
+   recipes are re-pinned and the old names are gone; `verify_sources` verifies both starting files and `E5_s2`
+   against their H200 rows on the records in the repository.
+3. **A2.** A candidate's non-finite score or KL stays a divergence; the scoring-consistency case of 9.1 is a stop or
+   a mandatory post-run comparison; a clone that is not clean at the end gives a non-zero exit.
+4. **B1, J-a, J-b.** Guard verdicts from the registry's `passed`, `resolved` beside them, three values; G-region with
+   its resolution flag, the normalisation term and the decomposition residual. Shown on the two synthetic cases of
+   section 5.2 and on the real rows of 9.2 (`E5_s2` undecided, `b0h_seed0` failed).
+5. **B2.** Where `_x2` runs exist they are the pair of record for (a)-(e), the primary table, replication, the 1-SE
+   rule and the guard candidates; the originals are printed as labelled rows that no rule uses; a column names the
+   pairs used when seeds mix an original and a rerun.
+6. **B4, I13.** Replication in the literal reading with the alternative column; constants −5 and −2.5.
+7. **I11, I12, I17, B1d.** The primary table as ruled, with the neutral note; (c) as ruled with the descriptive
+   columns; the 1-SE rule with both-seed eligibility; the B1d label and B1d − E5.
+8. **B3.** Class beside the promotion column; the sentence on multiplicity.
+9. **I4.** As the user decides; under either option the KL lines are copied back.
+10. **Tests** of the fix commit pass from an export of it, the H200-records test with the fixed starts included.
+11. **End to end, smoke mode, from an export of the fix commit:** two-step reference set, a stop inside a fit and a
+    resume, one injected divergence each for an exploratory run, a comparator and a primary, a forced convergence
+    rerun and a forced guard evaluation, the report reading the rerun pair; no write inside the clone; the guard log
+    with `pyarrow` lines only.
+12. **Numbers.** The fixed report's functions against numpy on the real H200 arrays, as section 5.3.
+
+Parts I want to do myself: items 4 to 7 and 12 (the rule logic, recomputed with numpy on constructed and real
+arrays), and item 11, which the first review could not run and which my export ran as far as b5. Items 1 to 3 and 10
+are a routine re-check.
+
+### 9.4 Not verified here, and integrity
+
+- Not verified: the author's fix (not read); the phases b6 to report end to end; anything on the H200; the real
+  warm-start quality of B4 and B6 (smoke mode only, by rule).
+- `results/registry.jsonl` `017edeba…81de`, `results/test_access.log` `effa9734…0c60` and `common.py` `ece3c67f…bb3`
+  are unchanged. This section is the only change to the repository. No test array was opened; no git command that
+  writes was used.
