@@ -1,5 +1,112 @@
 # Track A (M2A) - status, 25 Nov 2026 (item E4 of PLAN.md section 16.7)
 
+## R4. Fixes after the re-review of `a05c86e` (REVIEW.md section 8) - for before Stage 2
+
+The re-review gave GO for `warmstart-check warmstart-rerun a2c report` on the H200 at `a05c86e`. The fixes below are
+a separate change, committed after that follow-up job has started. **They do not alter what `warmstart-check`,
+`warmstart-rerun` or `a2c` fit or register** (proof in R4.2).
+
+### R4.1 What changed
+
+| finding | fix | where |
+|---|---|---|
+| B8-1 | (i) `frozen_lr("net")` returns the rate decided again by `warmstart-rerun` (`decisions.json: warmstart_rerun.lr_net_after_rerun.lr_net_after`) when re-run pilots changed it, so every later network run (A11n of Stage 2 among them) uses the rate the re-runs used; `plr.json` stays the record of the pilot. (ii) `stage2_specs` names `effective("A2n_s<seed>")` as A11n's comparator; the Stage-2 record names the A2n runs in force and the rate of record. The report prints "Learning rate of record for network runs". Test on the lr_net-changed branch, which no smoke run has taken: `test_b8_1_lr_net_changed_branch_rate_of_record_and_stage2_comparator` (dependents re-run with the new rate, comparator `A2n_s0_ws`, `frozen_lr` and `fit_config` give the new rate, A11n compared with `A2n_s0_ws`). | `run_m2a_lib.frozen_lr`, `run_m2a.stage2_specs`, report |
+| B8-2 | The gate accepts a run it waits for as **resolved** if it is registered, OR if it diverged and a valid diagnosis of that divergence is on file (`L.diagnosis`: names the SHA-256 of its `diverged.json`; verdict `failed` or `rerun_allowed`). Applied to the two A2c seeds and to the recorded warm-start re-runs. Consequences, printed: a diagnosed A2c seed has no control column ("A2c_s1 diverged; diagnosis on file (...): no control column for that seed. The report is final without it"), and the "NOT FINAL" banner is lifted; a diagnosed warm-start re-run does not supersede, so its original stays in force with its warm start flagged. Not weakened: without a valid diagnosis the gate refuses as before, and a diagnosis bound to another `diverged.json` is ignored. | `run_m2a._resolved`, `stage2_preconditions`, report |
+| B8-3 | Kept line: `yes`, `no`, `no (failed, diagnosed: <run>)` or `not evaluable (<run>: <status>)`. Kept = keep on seed 0 and replication by seed 1, so a seed without a comparison makes the rule not evaluable unless seed 0 was evaluated and not kept. "Equal NLL (both)" prints `not evaluable (...)` when a seed has no comparison. The value in `kept_and_replicated` stays a boolean (False when not evaluable), so the Stage-2 list is unchanged in meaning: only rungs kept and replicated enter A11. | report `_kept_status` |
+| C8-3 | `warmstart-check` re-issued: the record of the first check is reused when its step-0 array still carries its tag and SHA-256 and the inputs (target columns, recorded kl_map, decision) are unchanged; nothing is rebuilt. A network run restarted before its first checkpoint: the first step-0 array is verified by its tag and reused if the rebuild equals it bit for bit. Otherwise the training starts from the REBUILT model, so its parity is written as a new tagged array `val_nll_rebuild<k>.npy` beside the first (nothing is overwritten) with `rebuilt_after_restart` and the difference recorded. (Reusing the first array there would describe a start the run no longer has.) | `run_m2a._reusable_check_record`, `run_m2a_lib.step0_parity` |
+| C8-4 | A re-run that did not register (diverged, blocked, missing) does not supersede: `L.superseded()` returns only the supersessions in force (re-run registered); `L.superseded_recorded()` is the record as written by `warmstart-rerun` (unchanged); `L.rerun_not_in_force()` lists the others. The rules, the guard pairs and the tables use the original; the table carries the row "<re-run> (warm-start re-run: **diverged** - NOT in force; the original above stays in force with its warm start flagged)". Implemented in the mapping only: `phase_warmstart_rerun` and what it records are unchanged. | `run_m2a_lib`, report |
+| C8-5 | A2c carries the claim "exactly A2s" in the Initialisation table (smoke: kl_map 0.0, holds); the control column is headed "control: Δ vs A2c s0 / s1 (decides nothing)". | report |
+
+### R4.2 Proof that `warmstart-check`, `warmstart-rerun`, `a2c` fit and register exactly what `a05c86e` does
+
+Reference states were all produced by code identical to `a05c86e` (the tree equalled `a05c86e` when they were made):
+- the old smoke root after `warmstart-check warmstart-rerun`, with the constructed below-floor case;
+- the same with `a2c`;
+- the fresh root with the injected divergences.
+
+- P1 `--list`: the whole output, the additions block included, is byte-identical to `a05c86e`'s (and its first 102
+  lines to the reviewed listing, `8762ba00...`).
+- P2 re-issue: `warmstart-check warmstart-rerun a2c` with the new code on a copy of the a05c86e state started 0 fits.
+  All 783 files of the machine directory (registry, `decisions.json`, `plr.json`, every run file, every tagged array,
+  `results.json`) are byte-identical. The check reused its 14 records without a rebuild. On the fresh root, where the
+  two warm-start phases had never been issued, the first issue added only their two (empty) keys to
+  `decisions.json`; their content comes from unchanged code paths. The second issue left all 570 files byte-identical.
+- P3 `a2c`: with the new code on a copy of the a05c86e state before A2c, both A2c rows are identical to the rows
+  `a05c86e` produced on the same state (validation-array and weight hashes, 2 of 2).
+- P4 `warmstart-check warmstart-rerun`: the pre-check state was rebuilt (old smoke root plus the deterministic
+  construction of the below-floor case), then both phases ran with the new code. Compared with the a05c86e state:
+  - all 74 smoke rows (14 re-runs, the constructed pair and every other row) identical in validation-array and
+    weight hashes;
+  - the 8 guard rows identical (K = 1024 and bulk arrays);
+  - `decisions.json` keys `warmstart_check`, `warmstart_rerun`, `guard_targets` and `step0_parity` identical.
+
+  `init.json` of the two runs fitted to the rebuilt A4_s0 (A4n_s0, A4n_s0_ws) differs from the reference. The
+  comparison was interrupted before I traced the differing key. Their step-0 records in `decisions.json` are
+  identical, so the difference lies elsewhere in `init.json`, probably in the recorded metadata of the source row
+  (the timestamp of the independently rebuilt A4_s0 row). The A2n re-runs, whose source was not rebuilt, have
+  byte-identical `init.json`.
+- These proof runs used the code of this change. Afterwards only `phase_stage2` received one more line (the rate of
+  record recorded safely when lr_net is undecided). The scratch roots of P2-P4 were lost in a session interruption;
+  the numbers above were read before that.
+- **The one case that can differ (by design, C8-4):** if a warm-start re-run DIVERGED, its original stays in force,
+  so the guard pairs of the network rungs use the original comparator (a05c86e used the diverged re-run and computed
+  no guards for those pairs). On such a state, re-issuing the guards phase with the new code adds guard rows for
+  the pairs now in force (K = 1024 / bulk evaluations, no fit). Nothing else changes, and nothing at all when no
+  re-run diverged.
+
+### R4.3 Awaiting the user (not changed, by instruction)
+
+1. **Divergence criterion (i)** (review 8.6, C8-1). As implemented, a non-finite validation mean anywhere in the
+   history makes a run diverged and terminal, even if the fit recovered and ends finite and good. Reviewer's
+   proposal: apply (i) to the LAST value, or to a fit that did not recover; an earlier non-finite value is reported
+   with the run, like isolated skipped batches.
+2. **A2c_x2 / A2c6k** (review 8.3). Reviewer's conditional rule, stated before any Track A result was read:
+   - **A2c_x2** is needed iff the rules use a doubled-step rerun pair for some primary;
+   - **A2c6k** is needed iff a mixture rung (A10, A10-2, A10-4, A10-5, A10g) passes the keep rule or the one-seed
+     equal-NLL rule;
+   - in either case before the content of A11 is decided. Until then the report says "not matched (...)".
+3. **Pilot re-runs under rule (b) only** (C8-2). Re-runs of pilots whose targets have no column below the floor are
+   replicates. If the H200 does not train bit-reproducibly, a near-tie could change lr_net and re-run the whole net
+   column (as implemented). Reviewer's proposal: decide lr_net again only when a pilot was re-run under rule (a). A
+   change without a below-floor column goes to the user before the re-runs are used; read the log line "lr_net after
+   the warm-start re-run".
+
+### R4.4 Tests
+
+`pytest tests/test_dist_factory.py tests/test_run_m2a.py tests/test_models.py`: **113 passed, 3 skipped** (default
+output root, templates absent); **116 passed, 0 skipped** with a dry-run output root. New: one test per finding of
+section 8 (B8-1 lr_net-changed branch; B8-2 gate resolution; B8-3 kept status; C8-3 step-0 reuse / rebuild; C8-4
+supersession in force; C8-5 A2c claim); the earlier gate test was adapted to the recorded map.
+
+**End-to-end with the current code (laptop, smoke, new scratch root; diagnosis and approval files were TEST
+FIXTURES).**
+- Setup: two-step reference set ALL PASS; real parity PASS (-1.869e-08 ± 1.1e-08 nat); the smoke default list with
+  the network warm starts in fit_to version 2 (scratch harness, as the job in progress made them).
+- `warmstart-check warmstart-rerun` with `A2n_s0_ws` made to diverge (smoke-only hook): all 14 network runs listed
+  (rule b); `A2n_s0_ws` DIVERGED; the other 13 re-ran.
+  - **C8-4:** the report shows "A2n_s0_ws (warm-start re-run of A2n_s0: diverged - awaiting diagnosis - NOT in force;
+    A2n_s0 stays in force)". The net rows keep their numbers against the original in force (`A4n_s0_ws vs A2n_s0`:
+    -7.48 ± 2.36). Under a05c86e every net row lost its numbers.
+- `a2c` with `A2c_s1` made to diverge: A2c_s1 "diverged - awaiting diagnosis"; the report says NOT FINAL.
+- Re-issuing `warmstart-check warmstart-rerun a2c`: registry byte-identical (the check reused its 14 records).
+- **B8-2:**
+  - Stage 2 with an approval fixture: refused (A2c_s1 diverged without a valid diagnosis).
+  - Diagnosis fixtures (A2c_s1: failed; A2n_s0_ws: rerun_allowed), then the report: "A2c_s1 diverged; diagnosis on
+    file (failed): no control column for that seed. The report is final without it". No NOT FINAL banner. A2n_s0_ws
+    "diagnosis: rerun_allowed - NOT in force".
+  - The old approval was refused as stale. With a renewed approval Stage 2 ran, and its re-issue passed the R6
+    recomputation.
+- **B8-3** on a fresh-root state with A7_s0 diverged: "A7: not evaluable (A7_s0: diverged - awaiting diagnosis)" in
+  the kept line and in "equal NLL (both)". With a valid "failed" diagnosis: "A7: no (failed, diagnosed: A7_s0)".
+- **C8-5:** "A2c_s0 | ... | exactly A2s: yes" and both control column headers "(decides nothing)".
+- Repository: `results/registry.jsonl` and `results/test_access.log` unchanged; `--list` SHA-256 `5d67b5e2...` (=
+  a05c86e).
+
+**Files for staging (this change):** `shape-form-martin/scripts/run_m2a.py`, `shape-form-martin/scripts/run_m2a_lib.py`,
+`shape-form-martin/scripts/run_m2a_report.py`, `shape-form-martin/tests/test_run_m2a.py`,
+`shape-form-martin/results/m2a_dist/STATUS.md`. (`paramnet.py`, `dist_factory.py`, `test_models.py`,
+`test_dist_factory.py`: unchanged from `a05c86e`.)
+
 ## R3. The user's decisions of 25 Nov 2026 (PLAN 17.11): A2c, scale floor, divergence - written, waiting for re-review
 
 The real Track A job runs on the H200 from commit `5ddfd9f` (= the reviewed files). Everything below is for AFTER that

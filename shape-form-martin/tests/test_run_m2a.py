@@ -442,10 +442,10 @@ def test_stage2_preconditions(monkeypatch, tmp_path):
     with pytest.raises(SystemExit, match="warmstart-check"):
         M.stage2_preconditions()
     monkeypatch.setattr(M, "decisions", lambda: {"warmstart_check": {"rerun": ["A4n_s0"]}})
-    monkeypatch.setattr(L, "superseded", lambda: {})
+    monkeypatch.setattr(L, "superseded_recorded", lambda: {})
     with pytest.raises(SystemExit, match="warm-start re-runs missing"):
         M.stage2_preconditions()
-    monkeypatch.setattr(L, "superseded", lambda: {"A4n_s0": "A4n_s0_ws"})
+    monkeypatch.setattr(L, "superseded_recorded", lambda: {"A4n_s0": "A4n_s0_ws"})
     monkeypatch.setattr(M, "decisions", lambda: {"warmstart_check": {"rerun": ["A4n_s0"]},
                                                  "diverged": {"A7_s0": {"status": "diverged - awaiting diagnosis"}}})
     monkeypatch.setattr(L, "diagnosis", lambda n: None)
@@ -481,3 +481,136 @@ def test_stage2_approval_requires_the_kept_key(tmp_path, monkeypatch):
                                                           "literal", "approved_utc": "t", "approved_by": "u"}))
     with pytest.raises(SystemExit, match="no key 'kept_and_replicated'"):
         M.stage2_approval()
+
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# re-review of a05c86e (REVIEW.md section 8): B8-1, B8-2, B8-3, C8-3, C8-4, C8-5
+# ---------------------------------------------------------------------------------------------------------------------
+def test_b8_1_lr_net_changed_branch_rate_of_record_and_stage2_comparator(tmp_path, monkeypatch):
+    """warmstart-rerun when the re-run pilots change lr_net: every other network run is re-run with the new rate,
+    later network runs read it as the rate of record (plr.json stays the pilot's record), and Stage 2's A11n is
+    compared with the superseding A2n run."""
+    import json as _json
+    monkeypatch.setattr(L, "out_dir", lambda: tmp_path)
+    (tmp_path / "plr.json").write_text(_json.dumps({"lr_poly": 0.003, "lr_net": 0.01}))
+    pilots = [s.name for s in M.plr_specs()[1]]
+    executed = pilots + ["A1_s0", "A2n_s0", "A4n_s0"]
+    (tmp_path / "decisions.json").write_text(_json.dumps({"warmstart_check": {"rerun": pilots + ["A4n_s0"]}}))
+    specs = {s.name: s for s in M.plr_specs()[1] + M.stage0_specs() + M.primary_specs()[1]}
+    registered, calls = set(), []
+
+    def fake_run_spec(sp):
+        calls.append((sp.name, sp.lr, sp.comparator))
+        registered.add(sp.name)
+        return {"name": sp.name}
+    monkeypatch.setattr(M, "_net_runs_executed", lambda: list(executed))
+    monkeypatch.setattr(M, "_spec_of", lambda n: specs[n])
+    monkeypatch.setattr(L, "run_spec", fake_run_spec)
+    monkeypatch.setattr(L, "registered_row", lambda n, ckpt=None, need_guards=False: {} if n in registered else None)
+    monkeypatch.setattr(M, "_plr_decide", lambda names: (0.003, {"names": names}))
+    monkeypatch.setattr(M, "phase_guards", lambda: None)
+    M.phase_warmstart_rerun()
+    rec = M.decisions()["warmstart_rerun"]
+    assert rec["lr_net_after_rerun"]["lr_net_before"] == 0.01 and rec["lr_net_after_rerun"]["lr_net_after"] == 0.003
+    assert set(rec["dependent"]) == {"A1_s0", "A2n_s0"}                     # A4n_s0 was listed itself
+    by = {n: (lr, comp) for n, lr, comp in calls}
+    assert all(by[f"{p}_ws"][0] == sp.lr for p, sp in ((p, specs[p]) for p in pilots))   # pilots keep their rate
+    assert by["A1_s0_ws"][0] == by["A2n_s0_ws"][0] == by["A4n_s0_ws"][0] == 0.003
+    assert by["A4n_s0_ws"][1] == "A2n_s0_ws"                                # comparator follows the re-run
+    assert L.frozen_lr("net") == 0.003 and _json.loads((tmp_path / "plr.json").read_text())["lr_net"] == 0.01
+    a11n = {sp.name: sp.comparator for sp in M.stage2_specs(["A7"]) if sp.rung == "A11n"}
+    assert a11n == {"A11n_s0": "A2n_s0_ws", "A11n_s1": "A2n_s1"}           # A2n_s1 was not superseded here
+    assert L.fit_config(specs["A1_s1"]).lr == 0.003                         # any later network run: rate of record
+
+
+def test_c8_4_a_diverged_rerun_does_not_supersede(tmp_path, monkeypatch):
+    import json as _json
+    monkeypatch.setattr(L, "out_dir", lambda: tmp_path)
+    (tmp_path / "decisions.json").write_text(_json.dumps({"warmstart_rerun": {"superseded": {
+        "A2n_s0": "A2n_s0_ws", "A4n_s0": "A4n_s0_ws"}}}))
+    monkeypatch.setattr(L, "registered_row", lambda n, ckpt=None, need_guards=False: {} if n != "A2n_s0_ws" else None)
+    monkeypatch.setattr(L, "diverged_marker", lambda n: {"status": "diverged"} if n == "A2n_s0_ws" else None)
+    assert L.superseded() == {"A4n_s0": "A4n_s0_ws"}
+    assert L.effective("A2n_s0") == "A2n_s0" and L.effective("A4n_s0") == "A4n_s0_ws"
+    assert L.rerun_not_in_force() == {"A2n_s0": ("A2n_s0_ws", "diverged")}
+    assert L.superseded_recorded()["A2n_s0"] == "A2n_s0_ws"                # the record itself is untouched
+
+
+def test_b8_2_diagnosed_divergence_resolves_the_gate(monkeypatch):
+    status = {"A2c_s0": "reg", "A2c_s1": "div", "A4n_s0_ws": "div"}
+    diag = {}
+    monkeypatch.setattr(L, "registered_row", lambda n, ckpt=None, need_guards=False:
+                        {} if status.get(n, "reg") == "reg" else None)
+    monkeypatch.setattr(L, "diverged_marker", lambda n: {"status": "diverged"} if status.get(n) == "div" else None)
+    monkeypatch.setattr(L, "diagnosis", lambda n: diag.get(n))
+    monkeypatch.setattr(M, "_net_runs_executed", lambda: ["A4n_s0"])
+    monkeypatch.setattr(M, "decisions", lambda: {"warmstart_check": {"rerun": ["A4n_s0"]}})
+    monkeypatch.setattr(L, "superseded_recorded", lambda: {"A4n_s0": "A4n_s0_ws"})
+    with pytest.raises(SystemExit, match="A2c control is not finished or diverged without a valid diagnosis"):
+        M.stage2_preconditions()
+    diag["A2c_s1"] = {"valid": False, "verdict": "failed"}
+    with pytest.raises(SystemExit, match="A2c control"):
+        M.stage2_preconditions()
+    diag["A2c_s1"] = {"valid": True, "verdict": "failed"}
+    with pytest.raises(SystemExit, match="diverged without a valid diagnosis, for \\['A4n_s0'\\]"):
+        M.stage2_preconditions()
+    diag["A4n_s0_ws"] = {"valid": True, "verdict": "rerun_allowed"}
+    import run_m2a_report as RR
+    monkeypatch.setattr(RR, "collect", lambda with_guards=True: {})
+    import json as _json
+    monkeypatch.setattr(L, "out_dir", lambda: __import__("pathlib").Path("/nonexistent"))
+    with pytest.raises(FileNotFoundError):                      # every precondition passed; only results.json absent
+        M.stage2_preconditions()
+    assert M._resolved("A2c_s0") and M._resolved("A2c_s1") and M._resolved("A4n_s0_ws")
+
+
+def test_b8_3_not_evaluable_instead_of_no():
+    ok = {"paired": {"mean": -4e-4}, "keep": True, "run": "X_s0"}
+    bad = {"status": "diverged - awaiting diagnosis", "run": "X_s1", "paired": None, "keep": None}
+    rep_yes = {"replicated": True}
+    assert R._kept_status({"seeds": {0: ok, 1: {"keep": True, "run": "X_s1"}}, "replication": rep_yes}) == "yes"
+    assert R._kept_status({"seeds": {0: ok, 1: bad}, "replication": None}).startswith("not evaluable (X_s1")
+    assert R._kept_status({"seeds": {0: {**bad, "run": "X_s0"}, 1: ok}, "replication": None}).startswith(
+        "not evaluable (X_s0")
+    no0 = {"keep": False, "run": "X_s0", "paired": {"mean": 1e-4}}
+    assert R._kept_status({"seeds": {0: no0, 1: bad}, "replication": None}) == "no"   # seed 0 decided it
+    failed = {**bad, "status": "failed (diagnosed)", "run": "X_s0"}
+    assert R._kept_status({"seeds": {0: failed}, "replication": None}).startswith("no (failed, diagnosed")
+
+
+def test_c8_3_step0_array_reused_if_identical_and_kept_beside_if_rebuilt(tmp_path, monkeypatch):
+    from sfm.machine import MachineTag
+    mt = MachineTag.from_fields({"gpu_name": "test", "launch_grid": 1})
+    pts = provenance.points_tag(grid=1, K=64, split_fingerprint="f")
+    src = provenance.TaggedArray.make(np.full(50, 18.12), pts, mt, label="src")
+    monkeypatch.setattr(L, "out_dir", lambda: tmp_path)
+    monkeypatch.setattr(L, "live", lambda: {"points": pts, "machine": mt, "stream_id": "s"})
+    monkeypatch.setattr(L, "live_machine", lambda: mt)
+    monkeypatch.setattr(L, "registered_row", lambda n, ckpt=None, need_guards=False: {})
+    monkeypatch.setattr(L, "tagged", lambda n, kind="k64": src)
+    values = {"v": np.full(50, 18.121, dtype=np.float32)}
+    monkeypatch.setattr(L.common, "test_nll", lambda model, showers: values["v"])
+
+    class Fake(torch.nn.Module):
+        pass
+    val = type("V", (), {"showers": None})()
+    a = L.step0_parity(Fake(), "N_s0", "SRC", val)
+    b = L.step0_parity(Fake(), "N_s0", "SRC", val)                     # restart, identical rebuild: reused
+    assert a == b and "rebuilt_after_restart" not in b
+    values["v"] = np.full(50, 18.122, dtype=np.float32)                # restart, rebuild differs
+    c = L.step0_parity(Fake(), "N_s0", "SRC", val)
+    assert c["rebuilt_after_restart"] and c["array"].endswith("val_nll_rebuild1.npy")
+    assert c["first_build"]["sha256"] == a["sha256"] and c["first_build"]["max_abs_vs_rebuild"] > 0
+    assert (tmp_path / "N_s0" / "step0" / "val_nll.npy").exists()       # the first array is never overwritten
+
+
+def test_c8_5_a2c_carries_the_exactly_a2s_claim(tmp_path, monkeypatch):
+    import json as _json
+    monkeypatch.setattr(L, "out_dir", lambda: tmp_path)
+    (tmp_path / "A2c_s0").mkdir()
+    (tmp_path / "A2c_s0" / "done.json").write_text(_json.dumps({"machine_id": L.MACHINE_ID, "kl_map": 0.0, "spec": {
+        "rung": "A2c", "cls": "control", "provider": "poly"}}))
+    (tmp_path / "A2c_s0" / "init.json").write_text(_json.dumps({"init_info": {"kl_map": 0.0, "kl_ref": "A2s_s0"}}))
+    rows = R.initialisation_table()
+    assert rows[0]["claim"] == "exactly A2s" and rows[0]["claim_holds"] is True

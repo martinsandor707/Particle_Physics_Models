@@ -190,11 +190,18 @@ def done_marker(path) -> Optional[dict]:
 
 
 def frozen_lr(provider: str) -> float:
+    """The learning rate of record of a provider class: plr.json (the P-lr decision); for the network class the rate
+    decided again by ``warmstart-rerun`` when re-run pilots changed it (review B8-1: every later network run, A11n
+    of Stage 2 among them, must use the rate the re-runs used). plr.json itself stays the record of the pilot."""
     f = plr_file()
     if not f.exists():
         raise RuntimeError(f"{paths.portable(f)} missing: the learning-rate pilot has not been decided")
     d = json.loads(f.read_text())
     key = {"poly": "lr_poly", "net": "lr_net"}[provider]
+    if provider == "net":
+        after = ((decisions().get("warmstart_rerun") or {}).get("lr_net_after_rerun") or {}).get("lr_net_after")
+        if after is not None:
+            return float(after)
     if d.get(key) is None:
         raise RuntimeError(f"{paths.portable(f)}: {key} not frozen yet")
     return float(d[key])
@@ -636,23 +643,58 @@ def step0_parity(model, name: str, source: Optional[str], val, subdir: str = "st
     f = (Path(base) if base is not None else out_dir() / name) / subdir / "val_nll.npy"
     if not np.isfinite(nll).all():
         return {"source": source, "available": False, "reason": f"{int((~np.isfinite(nll)).sum())} non-finite values"}
+    extra = {}
+    if f.exists():
+        # review C8-3: a restart before the first checkpoint rebuilds the warm start. The array of the first build
+        # is verified by its tag (sidecar SHA-256) and reused if the rebuild equals it bit for bit; otherwise the
+        # training now starts from the REBUILT model, so its parity is what counts: it is written as a new tagged
+        # array next to the first one (nothing is overwritten) and the difference is recorded.
+        old = provenance.load_tagged(f, expect_machine_id=live_machine().id)
+        if not (old.values.shape == nll.shape and np.array_equal(old.values, nll)):
+            k = 1
+            while f.with_name(f"val_nll_rebuild{k}.npy").exists():
+                k += 1
+            first = {"array": paths.portable(f), "sha256": old.sha256,
+                     "max_abs_vs_rebuild": float(np.abs(old.values.astype(np.float64) - nll.astype(np.float64)).max())}
+            f = f.with_name(f"val_nll_rebuild{k}.npy")
+            extra = {"rebuilt_after_restart": True, "first_build": first}
     ta = provenance.save_tagged(f, nll, live()["points"], live_machine(), label=f"{CTX.stage}/{name}:{subdir}")
     src = tagged(source)
     p = provenance.paired_delta(ta, src)
     d = provenance.paired_difference(ta, src)
     return {"source": source, "available": True, "paired": pd(p), "max_abs_event": float(np.abs(d).max()),
-            "step0_val_mean": float(np.mean(nll, dtype=np.float64)), "array": paths.portable(f), "sha256": ta.sha256}
+            "step0_val_mean": float(np.mean(nll, dtype=np.float64)), "array": paths.portable(f), "sha256": ta.sha256,
+            **extra}
 
 
 # ----------------------------------------------------------------------------------------------------------------------
 # supersession (warm-start re-runs, PLAN 17.11)
 # ----------------------------------------------------------------------------------------------------------------------
-def superseded() -> dict:
+def superseded_recorded() -> dict:
+    """The map {original: re-run} as warmstart-rerun recorded it (every re-run it started)."""
     return dict((decisions().get("warmstart_rerun") or {}).get("superseded") or {})
 
 
+def superseded() -> dict:
+    """The supersessions IN FORCE: only a re-run with a registry row supersedes its original. A re-run that diverged
+    (or is blocked, or did not finish) does not: the original stays in force and the report says so (review C8-4)."""
+    return {o: n for o, n in superseded_recorded().items() if registered_row(n) is not None}
+
+
+def rerun_not_in_force() -> dict:
+    """{original: (re-run, status)} for recorded re-runs without a registry row (diverged, blocked, missing)."""
+    out = {}
+    for o, n in superseded_recorded().items():
+        if registered_row(n) is None:
+            dv = diverged_marker(n)
+            out[o] = (n, "diverged" if dv is not None else ("blocked" if n in (decisions().get("blocked") or {})
+                                                            else "missing"))
+    return out
+
+
 def effective(name: Optional[str]) -> Optional[str]:
-    """The run that stands for ``name`` in the rules: its warm-start re-run if it was superseded, else itself."""
+    """The run that stands for ``name`` in the rules: its warm-start re-run if that supersession is in force (the
+    re-run is registered), else itself."""
     if name is None:
         return None
     return superseded().get(name, name)

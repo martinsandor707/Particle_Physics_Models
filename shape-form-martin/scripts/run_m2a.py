@@ -743,6 +743,7 @@ def phase_warmstart_check():
     names = _net_runs_executed()
     sets, extras = L.data_cpu()
     runs, rerun = {}, []
+    prior = (decisions().get("warmstart_check") or {}).get("runs") or {}
     for n in names:
         d = L.done_marker(L.out_dir() / n / "done.json")
         init = L.read_json(L.out_dir() / n / "init.json", {}) or {}
@@ -750,6 +751,14 @@ def phase_warmstart_check():
         tc = target_columns(d)
         kw = dict(d.get("build_kwargs") or d["spec"]["kwargs"])
         seed = int(d["spec"]["seed"])
+        old = _reusable_check_record(n, prior.get(n), tc, kl)
+        if old is not None:                 # review C8-3: re-issue - the verified record is reused, nothing rebuilt
+            runs[n] = old
+            if old["rerun"]:
+                rerun.append(n)
+            log(f"warmstart-check {n}: record of the first check reused (step-0 array verified by its tag); "
+                f"{'RE-RUN' if old['rerun'] else 'keep'}")
+            continue
 
         def job(n=n, kw=kw, seed=seed, kl=kl):
             dev = L.common.DEVICE
@@ -781,6 +790,26 @@ def phase_warmstart_check():
                                       "kl_threshold_nat": KL_AFFECTED, "runs": runs, "rerun": rerun,
                                       "trains_nothing": True})
     log(f"warmstart-check: {len(rerun)} of {len(names)} network runs to be re-run: {rerun}")
+
+
+def _reusable_check_record(name: str, rec, tc: dict, kl) -> Optional[dict]:
+    """The record of an earlier warmstart-check of this run, if its inputs are unchanged (same target columns, same
+    recorded kl_map, hence the same PLAN 17.11 decision) and its step-0 array still carries its tag and hash.
+    Reusing it avoids a second rebuild, which save_tagged would refuse if it were not bit-identical (review C8-3)."""
+    if not rec:
+        return None
+    p0 = rec.get("step0_parity") or {}
+    try:
+        if p0.get("available"):
+            f = L.out_dir() / "warmstart_check" / name / "step0_old_warmstart" / Path(p0["array"]).name
+            if provenance.load_tagged(f, expect_machine_id=L.live_machine().id).sha256 != p0["sha256"]:
+                return None
+    except (FileNotFoundError, provenance.UntaggedArray, provenance.MixedTags):
+        return None
+    a, b, r = warmstart_affected(tc, kl)
+    same = (rec.get("target_columns") == json.loads(json.dumps(L._jsonable(tc))) and rec.get("kl_map_recorded") == kl
+            and (rec.get("rule_a_below_floor"), rec.get("rule_b_kl_map"), rec.get("rerun")) == (a, b, r))
+    return rec if same else None
 
 
 def _spec_of(name: str) -> Spec:
@@ -893,7 +922,7 @@ def stage2_specs(kept: list) -> list:
     for s in (0, 1):
         out.append(Spec(run_name("A11n", s), "A11n", "component",
                         dict(provider="net", net_from=f"{L.stage()}/{run_name('A11', s)}"), s, "net", "stage2",
-                        comparator=run_name("A2n", s), notes="A11n = net version of A11"))
+                        comparator=L.effective(run_name("A2n", s)), notes="A11n = net version of A11"))
     return out
 
 
@@ -942,22 +971,34 @@ def stage2_approval() -> tuple:
     return appr, kept, sha
 
 
+def _resolved(name: str) -> bool:
+    """Review B8-2: a run the gate waits for is resolved if it is registered, or if it diverged and an independent
+    diagnosis of its divergence is on file (L.diagnosis valid, any verdict). Consequences, printed by the report: a
+    diagnosed A2c seed leaves its control column empty ("diverged (diagnosed)"); a diagnosed warm-start re-run does
+    not supersede: its original stays in force with its warm start flagged."""
+    if L.registered_row(name) is not None:
+        return True
+    return L.diverged_marker(name) is not None and bool((L.diagnosis(name) or {}).get("valid"))
+
+
 def stage2_preconditions() -> None:
     """User decisions of 25 Nov 2026 and review R6: refused while (i) A2c_s0 / A2c_s1 are not finished, (ii) the
     warm-start check has not run or a run it listed has no finished re-run, (iii) a primary, base, control or rerun
     run diverged and has no valid diagnosis, or (iv) results.json differs from the report recomputed now from the
     registered arrays (only a table that follows from the arrays can be approved)."""
     import run_m2a_report as R
-    miss = [sp.name for sp in a2c_specs() if L.registered_row(sp.name) is None]
+    miss = [sp.name for sp in a2c_specs() if not _resolved(sp.name)]
     if miss:
-        raise SystemExit(f"stage2 refused: the A2c control is not finished ({miss}); run `run_m2a.py a2c` first")
+        raise SystemExit(f"stage2 refused: the A2c control is not finished or diverged without a valid diagnosis "
+                         f"({miss}); run `run_m2a.py a2c`, or for a diverged seed obtain the diagnosis")
     if _net_runs_executed() and decisions().get("warmstart_check") is None:
         raise SystemExit("stage2 refused: run `run_m2a.py warmstart-check` (and warmstart-rerun) first")
-    sup = L.superseded()
+    rec = L.superseded_recorded()
     open_ = [n for n in (decisions().get("warmstart_check") or {}).get("rerun", [])
-             if n not in sup or L.registered_row(sup[n]) is None]
+             if n not in rec or not _resolved(rec[n])]
     if open_:
-        raise SystemExit(f"stage2 refused: warm-start re-runs missing for {open_}; run `run_m2a.py warmstart-rerun`")
+        raise SystemExit(f"stage2 refused: warm-start re-runs missing, or diverged without a valid diagnosis, for "
+                         f"{open_}; run `run_m2a.py warmstart-rerun`, or for a diverged re-run obtain the diagnosis")
     waiting = [n for n, v in (decisions().get("diverged") or {}).items()
                if v.get("status") == "diverged - awaiting diagnosis" and not (L.diagnosis(n) or {}).get("valid")]
     if waiting:
@@ -970,6 +1011,14 @@ def stage2_preconditions() -> None:
                          f"(keys {diff}); re-run `run_m2a.py report` and renew the approval")
 
 
+def _lr_net_or_none():
+    """The network learning rate of record, or None if it is undecided (then the network runs are blocked)."""
+    try:
+        return L.frozen_lr("net")
+    except RuntimeError:
+        return None
+
+
 def phase_stage2():
     appr, kept, sha = stage2_approval()
     stage2_preconditions()
@@ -978,7 +1027,9 @@ def phase_stage2():
                                       "approval_file_sha256": provenance.sha256_file(L.out_dir() / STAGE2_APPROVAL)})
     note_decision("stage2_content", {"kept_and_replicated": kept,
                                      "A11": "A2s (no rerun)" if not kept else f"A2s + {kept}",
-                                     "A11n": "A2n (no rerun)" if not kept else "net version of A11",
+                                     "A11n": (f"A2n (no rerun; in force: {[L.effective(f'A2n_s{s}') for s in (0, 1)]})"
+                                              if not kept else "net version of A11"),
+                                     "lr_net_of_record": _lr_net_or_none(),
                                      "A11p": "not implemented (pruning by diagonal Fisher information)"})
     for sp in stage2_specs(kept):
         L.run_spec(sp)

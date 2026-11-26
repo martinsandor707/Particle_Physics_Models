@@ -289,8 +289,8 @@ def initialisation_table() -> list:
         row = {"run": f.parent.name, "rung": spec.get("rung"), "provider": spec.get("provider"),
                "cls": spec.get("cls"), "kl_map": d.get("kl_map", info.get("kl_map")), "kl_ref": info.get("kl_ref"),
                "sources_verified": sorted((d.get("sources_verified") or {}).keys())}
-        if spec.get("rung") in EXACT_START and spec.get("cls") in ("primary", "exploratory", "rerun") \
-                and spec.get("provider") == "poly":
+        if ((spec.get("rung") in EXACT_START and spec.get("cls") in ("primary", "exploratory", "rerun"))
+                or spec.get("rung") == "A2c") and spec.get("provider") == "poly":                # review C8-5
             row["claim"] = "exactly A2s"
             row["claim_holds"] = row["kl_map"] is not None and abs(row["kl_map"]) <= KL_EXACT
         if spec.get("provider") == "net":
@@ -358,6 +358,17 @@ def run_status(name: str) -> str:
     return _m()._status_text(name)
 
 
+def _diagnosed(name: str) -> bool:
+    return L.diverged_marker(name) is not None and bool((L.diagnosis(name) or {}).get("valid"))
+
+
+def _lr_net_of_record():
+    try:
+        return L.frozen_lr("net")
+    except RuntimeError:
+        return None
+
+
 def entry(run: str, comp: str, masks: dict) -> dict | None:
     """The comparison of run vs comp if both are registered; a status record if the run (or its comparator) diverged
     or is blocked (user decision of 25 Nov 2026: never silently omitted); None if the run does not exist at all."""
@@ -369,6 +380,25 @@ def entry(run: str, comp: str, masks: dict) -> dict | None:
     st = st_r if not have(run) else f"comparator {comp}: {run_status(comp)}"
     return {"run": run, "vs": comp, "status": st, "paired": None, "keep": None, "equal_one": None, "k": None,
             "vs_formula": None, "secondary": {}}
+
+
+def _kept_status(v: dict) -> str:
+    """'yes', 'no', 'no (failed, diagnosed: <run>)' or 'not evaluable (<run>: <status>)' for the kept line (review
+    B8-3): kept = keep on seed 0 and replication by seed 1. Seed 0 without a comparison -> not evaluable (or 'no' if
+    its divergence was diagnosed as a failure); seed 0 kept but seed 1 without a comparison -> not evaluable."""
+    c0, c1 = v["seeds"].get(0), v["seeds"].get(1)
+    for c in (c0, c1):
+        if c is None or not c.get("status"):
+            continue
+        if c is c1 and not (c0 and c0.get("keep")):
+            continue                                   # seed 0 evaluated and not kept: seed 1 cannot change it
+        if c["status"] == "failed (diagnosed)":
+            return f"no (failed, diagnosed: {c['run']})"
+        return f"not evaluable ({c['run']}: {c['status']})"
+    if c0 is None:
+        return "not evaluable (seed 0 missing)"
+    rep_ = v.get("replication")
+    return "yes" if (c0.get("keep") and rep_ and rep_.get("replicated")) else "no"
 
 
 def primary_pairs(r: str, masks: dict) -> tuple:
@@ -442,6 +472,10 @@ def collect(with_guards: bool = True) -> dict:
             x["convergence"] = convergence(nr)
             if nr != f"{r}n_s0" or nc != "A2n_s0":
                 x["supersedes"] = entry(f"{r}n_s0", "A2n_s0", masks)
+            nif = L.rerun_not_in_force().get(f"{r}n_s0")
+            if nif:                                    # review C8-4: the original stays in force
+                x["rerun_not_in_force"] = {"run": nif[0], "status": run_status(nif[0]),
+                                           "diagnosis": L.diagnosis(nif[0])}
     for r in M.EXPLORATORY:
         c = {}
         for s in (0, 1):
@@ -458,12 +492,18 @@ def collect(with_guards: bool = True) -> dict:
                    "convergence": {s: convergence(f"{r}_s{s}") for s in c}}
     res["primaries"], res["net"], res["exploratory"] = prim, net, expl
     # cleaner columns and kept-and-replicated (input of Stage 2; no decision is taken here)
-    kr, kr_alt = {}, {}
+    kr, kr_alt, kst = {}, {}, {}
     for grp in (prim, expl):
         for r, v in grp.items():
             c0 = v["seeds"].get(0)
             kr[r] = bool(c0 and c0["keep"] and v["replication"] and v["replication"]["replicated"])
             kr_alt[r] = bool(c0 and c0["keep"] and v["replication"] and v["replication"]["replicated_alternative_2se"])
+            # review B8-3: a seed without a comparison (diverged / blocked) makes the rule not evaluable, never "no"
+            kst[r] = _kept_status(v)
+            if any(c.get("status") for c in v["seeds"].values()):
+                v["equal_both"] = None
+                v["equal_both_status"] = "not evaluable (" + "; ".join(
+                    f"{c['run']}: {c['status']}" for c in v["seeds"].values() if c.get("status")) + ")"
             for s, c in v["seeds"].items():
                 if c.get("paired") is None:
                     c["cleaner_by_gain"] = c["cleaner_by_constants"] = None
@@ -475,7 +515,9 @@ def collect(with_guards: bool = True) -> dict:
     for s in (0, 1):
         x = entry(f"A2c_s{s}", f"A2s_s{s}", masks)
         a2c["runs"][s] = x if x is not None else {"run": f"A2c_s{s}", "status": "not run yet"}
-    a2c["complete"] = all(have(f"A2c_s{s}") for s in (0, 1))
+    a2c["complete"] = all(have(f"A2c_s{s}") or _diagnosed(f"A2c_s{s}") for s in (0, 1))      # review B8-2
+    a2c["diagnosed_divergence"] = {f"A2c_s{s}": L.diagnosis(f"A2c_s{s}") for s in (0, 1)
+                                   if not have(f"A2c_s{s}") and _diagnosed(f"A2c_s{s}")}
     for grp in (prim, expl):
         for r, v in grp.items():
             for s, c in v["seeds"].items():
@@ -491,8 +533,13 @@ def collect(with_guards: bool = True) -> dict:
                        for n, v in (dec.get("diverged") or {}).items()}
     res["blocked"] = dict(dec.get("blocked") or {})
     res["superseded_warm_start"] = L.superseded()
+    res["warm_start_reruns_not_in_force"] = {o: {"rerun": n, "status": st, "status_now": run_status(n),
+                                                 "diagnosis": L.diagnosis(n)}
+                                             for o, (n, st) in L.rerun_not_in_force().items()}
+    res["lr_net_of_record"] = _lr_net_of_record()
     res["kept_and_replicated"] = kr
     res["kept_and_replicated_alternative_2se"] = kr_alt
+    res["kept_status"] = kst
     res["primary_rungs"], res["exploratory_rungs"] = list(M.PRIMARIES), list(M.EXPLORATORY)
     # guards (C2: may be left out; a pair whose guard data is missing is listed, never dropped silently)
     g, missing = {}, []
@@ -554,7 +601,8 @@ def markdown(res: dict) -> str:
       "tables (K = 64) and guard tables are separate. Nulls and negative results as measured.\n")
     a2c = res.get("a2c") or {}
     if not a2c.get("complete"):
-        w("**NOT FINAL: the A2c control (user decision of 25 Nov 2026) is not finished - `run_m2a.py a2c`.**\n")
+        w("**NOT FINAL: the A2c control (user decision of 25 Nov 2026) is not finished - `run_m2a.py a2c` (a diverged "
+          "seed needs its independent diagnosis instead).**\n")
     if res.get("diverged") or res.get("blocked"):
         w(f"**Diverged or blocked runs: {len(res.get('diverged') or {})} diverged, {len(res.get('blocked') or {})} "
           "blocked - see the section 'Diverged and blocked runs'. None is omitted from the tables.**\n")
@@ -578,6 +626,8 @@ def markdown(res: dict) -> str:
             f"{grp} lr {lr}: " + (fmt(v['vs_lowest']) + " vs lowest" if v.get("vs_lowest") else
                                   f"{v.get('status')} - loses (P-lr rule)")
             for grp in ("poly", "net") for lr, v in (p.get(grp) or {}).items()))
+    w(f"- Learning rate of record for network runs: {res.get('lr_net_of_record')} (plr.json, or the rate decided again "
+      "by warmstart-rerun when re-run pilots changed it; review B8-1)")
     ws = dec.get("warmstart_rerun") or {}
     if (ws.get("lr_net_after_rerun") or {}):
         x = ws["lr_net_after_rerun"]
@@ -592,6 +642,8 @@ def markdown(res: dict) -> str:
         w(f"| {k} | **{v}** |")
     for k, v in (res["stage0"].get("superseded_warm_start") or {}).items():
         w(f"| {k} (superseded: warm start; not used) | {fmt(v)} |")
+    for o, v in (res.get("warm_start_reruns_not_in_force") or {}).items():
+        w(f"| {v['rerun']} (warm-start re-run of {o}: **{v['status_now']}** - NOT in force; {o} stays in force) | - |")
     sd = res["stage0"]["A2s_seed_sd_of_means"]
     w(f"\nA2s seed scatter (sd of the validation means of the seeds): {sd * E4:.2f}e-4\n" if sd is not None else "")
     if res["A9_step0"]:
@@ -603,6 +655,9 @@ def markdown(res: dict) -> str:
       "and equal NLL stay against A2s as registered. The column 'control: Δ vs A2c' below decides nothing.\n")
     for s_, x in (a2c.get("runs") or {}).items():
         w(f"- A2c_s{s_} - A2s_s{s_}: {_cell(x) if x.get('vs') else x.get('status')}")
+    for nme, dg in (a2c.get("diagnosed_divergence") or {}).items():
+        w(f"- {nme} diverged; diagnosis on file ({dg.get('verdict')}): no control column for that seed. The report "
+          "is final without it (review B8-2).")
     w("- Matched step-budget groups: " + "; ".join(f"**{k}**: {v}" for k, v in (a2c.get("groups") or {}).items())
       + "\n")
     cc = a2c.get("control_column") or {}
@@ -620,7 +675,7 @@ def markdown(res: dict) -> str:
       "report is exploratory and is not a test.\n")
     w("| rung | k | pairs used by the rules (s0 / s1) | Δ seed 0 | keep s0 | Δ seed 1 | keep s1 | replicated "
       "(two-seed mean) | replicated under the alternative reading (literal conditions AND two-seed mean <= -2 SE; "
-      f"{ALT}) | equal NLL (both) | Δ vs formula s0 | converged s0/s1 | control: Δ vs A2c s0 / s1 |\n"
+      f"{ALT}) | equal NLL (both) | Δ vs formula s0 | converged s0/s1 | control: Δ vs A2c s0 / s1 (decides nothing) |\n"
       "|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for r, v in res["primaries"].items():
         c0, c1 = v["seeds"].get(0), v["seeds"].get(1)
@@ -629,7 +684,7 @@ def markdown(res: dict) -> str:
         used = " / ".join((v["seeds"][s_].get("pair", "original") if s_ in v["seeds"] else "-") for s_ in (0, 1))
         w(f"| {r} | {_k(c0, c1)} | {used} | {_cell(c0)} | {_yn(c0, 'keep')} | {_cell(c1)} | {_yn(c1, 'keep')} | "
           f"{yn(rep and rep['replicated'])} ({fmt(rep and rep['two_seed_mean'])}) | "
-          f"{yn(rep and rep['replicated_alternative_2se'])} | {yn(v['equal_both'])} | "
+          f"{yn(rep and rep['replicated_alternative_2se'])} | {v.get('equal_both_status') or yn(v['equal_both'])} | "
           f"{fmt(c0 and c0.get('vs_formula'))} | "
           f"{'/'.join(yn((cv.get(s_) or {}).get('converged')) for s_ in (0, 1))} | {ctrl(c0)} / {ctrl(c1)} |")
         for s_, x in v["originals_not_used"].items():
@@ -657,17 +712,24 @@ def markdown(res: dict) -> str:
         if sp:
             w(f"| {sp['run']} vs {sp['vs']} (**superseded: warm start**; rules use the row above) | {_k(sp)} | "
               f"{_cell(sp)} | {_yn(sp, 'keep')} | {_yn(sp, 'equal_one')} | |")
+        nif = c.get("rerun_not_in_force")
+        if nif:
+            dg = nif.get("diagnosis") or {}
+            w(f"| {nif['run']} (warm-start re-run: **{nif['status']}** - NOT in force; the original above stays in "
+              f"force with its warm start flagged{'; diagnosis: ' + str(dg.get('verdict')) if dg.get('valid') else ''}"
+              ") | | | | | |")
     w("\n## Stage 1 - exploratory (vs A2s of the same seed)\n")
     w("| rung | k | Δ seed 0 | keep s0 | equal s0 | Δ seed 1 | replicated | replicated under the alternative reading "
       f"(literal conditions AND two-seed mean <= -2 SE; {ALT}) | equal NLL (both) | cleaner (gain / constants) | "
-      "control: Δ vs A2c s0 / s1 |\n|---|---|---|---|---|---|---|---|---|---|---|")
+      "control: Δ vs A2c s0 / s1 (decides nothing) |\n|---|---|---|---|---|---|---|---|---|---|---|")
     for r, v in res["exploratory"].items():
         c0, c1 = v["seeds"].get(0), v["seeds"].get(1)
         rep = v["replication"]
         mark = {"A3c": " (template notes Q1, Q2)", "A3x": " (template note Q1)"}.get(r, "")       # review R5
         w(f"| {r}{mark} | {_k(c0, c1)} | {_cell(c0)} | {_yn(c0, 'keep')} | {_yn(c0, 'equal_one')} | {_cell(c1)} | "
           f"{yn(rep and rep['replicated'])} | {yn(rep and rep['replicated_alternative_2se'])} | "
-          f"{yn(v['equal_both'])} | {_yn(c0, 'cleaner_by_gain')} / {_yn(c0, 'cleaner_by_constants')} | "
+          f"{v.get('equal_both_status') or yn(v['equal_both'])} | {_yn(c0, 'cleaner_by_gain')} / "
+          f"{_yn(c0, 'cleaner_by_constants')} | "
           f"{ctrl(c0)} / {ctrl(c1)} |")
     tl = res.get("templates")
     w("\n**Template limitations (A3c / A3x; review rulings Q1 and Q2, runs as registered):**\n")
@@ -817,8 +879,10 @@ def markdown(res: dict) -> str:
       + ("; ".join(f"{r}: {', '.join(nc)}" for r, nc in nearly) if nearly else "none") + ".\n")
     w("\n## Kept and replicated (the input of Stage 2; no combination formed here)\n")
     prs, exs = set(res.get("primary_rungs") or []), set(res.get("exploratory_rungs") or [])
+    kst = res.get("kept_status") or {}
     for label, keys in (("primaries", prs), ("exploratory", exs)):
-        w(f"- {label}: " + ", ".join(f"{r}: {yn(v)}" for r, v in res["kept_and_replicated"].items() if r in keys))
+        w(f"- {label}: " + ", ".join(f"{r}: {kst.get(r) or yn(v)}" for r, v in res["kept_and_replicated"].items()
+                                     if r in keys))
     w(f"- *{ALT}* (literal conditions AND two-seed mean <= -2 SE): " + ", ".join(
         f"{r}: {yn(v)}" for r, v in (res.get("kept_and_replicated_alternative_2se") or {}).items()) + "\n")
     return "\n".join(out) + "\n"
