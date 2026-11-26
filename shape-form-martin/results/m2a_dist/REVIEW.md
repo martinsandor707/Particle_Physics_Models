@@ -14,6 +14,9 @@ directory (reproducers and logs; not part of the repository).
 `ee462fc`.** Sections 0 to 6 are as written for `c4f39fd` and were not changed by the addendum.
 **Second addendum: section 8, re-review of commit `a05c86e` (A2c control, scale floor, divergence handling) - GO
 for `warmstart-check warmstart-rerun a2c report` after the present job has ended.**
+**Third addendum (26 Nov 2026): section 9, re-check of commit `aab7aba` - the six fixes are closed; section 10,
+review of Stage 2 as coded - the runs are as registered, Stage 2 is not ready to run, requirements R1 to R9;
+section 11, the specification of A11p, written before any Stage-2 result exists.**
 
 ## 0. Files reviewed (SHA-256 of the content in commit `c4f39fd`)
 
@@ -771,3 +774,554 @@ branch of `warmstart-rerun` (never taken in smoke: the rate did not change); Sta
 
 *Only on the H200:* whether a fitted target has a column below the floor; whether rebuilt warm starts and
 replicate trainings are bit for bit as on the laptop (C8-2, C8-3); the real `kl_map` values and step-0 parities.
+
+## 9. Re-check of `aab7aba` (fixes for B8-1 to B8-3 and C8-3 to C8-5)
+
+Date: 26 Nov 2026. Subject: the five Track A files as committed in `aab7aba`, and section R4 of `STATUS.md`.
+Units as before. Two circumstances of this re-check:
+
+- **The reproducers of sections 4 to 8 no longer exist.** The scratch directory named `<scratch>` there was
+  cleared between the sessions (the worker lost its scratch roots in the same way). Everything below was rebuilt
+  from nothing in a new scratch directory; where a number is compared with "the `a05c86e` run", the reference is
+  the value written into section 8 or logged then.
+- **The working tree moved during the re-check** (other workers edited the driver, the library and the test file
+  while it ran). Every execution below therefore used a snapshot of `aab7aba` (`git archive` of `scripts/`, `src/`
+  and `tests/`), loaded under the real file paths by an import hook with the bytecode cache bypassed; each run
+  prints how many modules came from the snapshot and that none came from the working tree. `common.py` is
+  unchanged since `aab7aba`.
+
+| File | SHA-256 in `aab7aba` |
+|---|---|
+| `scripts/run_m2a.py` | `7088e735c40668114cc971ce67833d27167d1f2cb0cc03a30df3a5d41cd71928` |
+| `scripts/run_m2a_lib.py` | `41c6b305ce5c6a756a8622ac60c2a1855f3f85c035cc9b43484a8bc56506764b` |
+| `scripts/run_m2a_report.py` | `5c1cca7f967d3d8d5b82ac082c4c6924189b36fb1b929d378c078855d2c397dd` |
+| `src/sfm/models/paramnet.py` | `1cd02599d66b7f02397e551543e47de1847fabbb3987b90ec401978dd3737d1f` (unchanged since `a05c86e`) |
+| `src/sfm/models/dist_factory.py` | `09612b3fe25e5c8ac7aa7dc7ec4fee08087bec5bd53602e173e28bb964112b8d` (unchanged since `a05c86e`) |
+
+### 9.1 Verdict
+
+**All six findings are closed, each shown by at least one variation. Nothing in `aab7aba` changes what the
+phases that have run fit or register.** As far as these fixes go, nothing stands in the way of Stage 2. What does
+stand in its way is the subject of section 10.
+
+### 9.2 The six findings
+
+| Finding | Fix as coded | Variation executed | State |
+|---|---|---|---|
+| B8-1 `lr_net` after re-run pilots; comparator of A11n | `frozen_lr("net")` returns the rate decided again by `warmstart-rerun` when one is recorded, else `plr.json`; `stage2_specs` takes the comparator of A11n from `L.effective` | fabricated records in a scratch `decisions.json`: no record, the record of the machine of record (no `lr_net_after_rerun`), `lr_net_after` null: 0.01 (= `plr.json`) each time; `lr_net_after` 0.003: `frozen_lr`, `fit_config(A11n_s0).lr` and the recorded `lr_net_of_record` are 0.003, the polynomial rate stays 0.003 from `plr.json`. Comparator of `A11n_s0`: follows a supersession in force, ignores a recorded re-run without a registry row | closed |
+| B8-2 states the gate could not leave | `_resolved`: a run the gate waits for is registered, or diverged with a valid diagnosis; used for the A2c seeds and for the re-runs | the planned command with two divergences injected through the smoke-only hook (`A2c_s1`, `A9n_s0_ws`), then the gate step by step with fixtures: no diagnosis -> refused ("the A2c control is not finished or diverged without a valid diagnosis (['A2c_s1'])"); a diagnosis naming another `diverged.json` -> still refused; a valid one -> the next refusal ("warm-start re-runs missing, or diverged without a valid diagnosis, for ['A9n_s0']"); valid diagnosis of the re-run -> the next refusal (the table on disk differs from the recomputed one); report and approval renewed -> the gate passes. Both states can be left | closed |
+| B8-3 rule lines with a diverged seed | `_kept_status` | six constructed cases: seed 0 awaiting diagnosis -> "not evaluable (X_s0: diverged - awaiting diagnosis)"; seed 0 failed by diagnosis -> "no (failed, diagnosed: X_s0)"; seed 0 kept and seed 1 diverged -> "not evaluable (X_s1: ...)"; seed 0 not kept and seed 1 diverged -> "no" (seed 1 cannot change it); seed 0 missing -> "not evaluable"; both fine and replicated -> "yes" | closed |
+| C8-3 step-0 arrays written once | a re-issued check reuses a record whose array still verifies and whose inputs are unchanged; a rebuild that differs from an existing array is written next to it | re-issue on the finished state: 14 of 14 records reused, nothing rebuilt. One array of the check deleted: rebuilt bit for bit, same hash and same paired numbers. One first-build array replaced by a validly tagged array with one value changed by 1e-3: the rebuild goes to `val_nll_rebuild1.npy`, the record carries `rebuilt_after_restart`, the hash of the first array and the maximum difference 1.0e-3; nothing is overwritten; the list for re-run is unchanged | closed |
+| C8-4 a diverged re-run superseded its original | `superseded()` = the supersessions in force (re-run registered); `superseded_recorded()`, `rerun_not_in_force()` for the report | on the same state: 14 supersessions recorded, 13 in force, `A9n_s0` listed as not in force (re-run diverged); `effective(A9n_s0)` is `A9n_s0`, the other network runs map to their re-runs; the report prints "A9n_s0_ws (warm-start re-run of A9n_s0: **diverged** - NOT in force; A9n_s0 stays in force)" and the row of A9n keeps its numbers. On fabricated records: a recorded re-run without a registry row does not supersede, one with a row does | closed |
+| C8-5 A2c in the Initialisation table; header of the control column | report | in the smoke report: "A2c_s0 ... 0.00e+00 ... exactly A2s: yes" (both seeds); both control columns headed "control: Δ vs A2c s0 / s1 (decides nothing)" | closed |
+
+The tests committed with `aab7aba`, run against the snapshot: `test_run_m2a.py`, `test_dist_factory.py`,
+`test_review_fixes.py` - 106 passed, 3 skipped (three template tests of `test_dist_factory.py` that need
+the Track A templates in the default output root of this machine).
+
+### 9.3 The loose end: the `init.json` files that differed
+
+The worker's comparison roots are gone, so the question was answered on new material: which fields of `init.json`
+can differ between two executions of the same computation.
+
+- `A9_s0` and `A11_s0` in one root are the same computation executed twice (10.2); weights and per-event arrays are
+  bit-identical. Their `init.json` differ in `build_seconds` (wall time of the build), in
+  `sources_verified/start/row/timestamp` and `.../trained_on/source` (the *latest* registry row of the source is
+  recorded: its time stamp and origin label change when the guards phase adds a row for the source in between), and
+  in the name fields of `spec`. No content field differs: `n_params`, `init_info` with `kl_map`, `build_kwargs`,
+  the hashes of the source's weights and of its validation array are equal.
+- `model.pt` differs as a file between any two executions (`saved_utc`, the history with its wall times, the
+  configuration with the run name) while the weights are identical. `sources_verified` records the file hash of
+  the source's checkpoint (`model_sha256`, `row/checkpoint_sha256`) *and* the hash of its weights
+  (`weights_sha256`). Hence, for a run whose source was rebuilt independently - the worker's case, A4n fitted to a
+  rebuilt `A4_s0` - the two file hashes differ as well, and the weights hash and `row/val_nll_sha256` are the
+  fields that must agree.
+
+So the difference the worker saw is of the kind it assumed (time-dependent fields), with one refinement: next to
+the time stamp, the checkpoint *file* hash of an independently rebuilt source differs by construction. A byte
+comparison of `init.json` is not a test of reproducibility; the comparison has to be on `weights_sha256`, the
+arrays and `kl_map`. Not blocking; a one-line note in `STATUS.md` suffices.
+
+### 9.4 Nothing changes for the phases that have run
+
+*By the syntax tree* (`a05c86e` -> `aab7aba`): in the driver only `phase_stage2`, `phase_warmstart_check`,
+`stage2_preconditions`, `stage2_specs` changed and `_lr_net_or_none`, `_resolved`, `_reusable_check_record` are
+new; 81 items are identical, among them the run list, every spec builder, the rules, `phase_warmstart_rerun`,
+`phase_a2c`, `phase_guards`, `guard_targets`, `stage1_comparisons`. In the library `frozen_lr`, `step0_parity`,
+`superseded` changed (and the docstring of `effective`), `rerun_not_in_force` and `superseded_recorded` are new;
+`run_spec`, `fit_config`, `divergence_check` are identical. In the report `collect`, `initialisation_table`,
+`markdown` changed; `_diagnosed`, `_kept_status`, `_lr_net_of_record` are new.
+
+*By execution* (smoke, laptop):
+
+- `--list`: SHA-256 `5d67b5e2...` as the worker states; its first 102 lines are the listing reviewed in section 4
+  (`8762ba00...`), unchanged since `c4f39fd`.
+- A finished smoke state was made with the `aab7aba` code and network warm starts of `fit_to` version 2 (as the
+  job of record made them): 64 registry rows, 58 runs. Then the planned command (`warmstart-check warmstart-rerun
+  a2c report`) with the `aab7aba` code: the 64 old registry lines remain a byte-identical prefix (80 lines after);
+  14 of 14 warm starts rebuilt bit for bit; the 12 `kl_map` values and the 12 step-0 parities written down from
+  the `a05c86e` run are reproduced to every printed digit (for example `A9n_s0` 0.06985222548246384 and
+  +79.956 ± 6.337); the 14 re-runs are bit-identical to their originals; `lr_net` is decided again and stays 0.01;
+  `A2c_s0` 18.120563, A2c - A2s +0.51 ± 0.24 and +0.21 ± 0.21 - the numbers of the `a05c86e` run.
+- The same command issued again on the finished state: no fit starts, 14 records reused, the registry and all 736
+  result files are byte-identical (logs and the GPU-time file aside).
+- On the machine of record the check listed no run, so no `lr_net_after_rerun` exists and no supersession is
+  recorded: `frozen_lr("net")` returns the value of `plr.json`, `effective` is the identity, and the pairs of the
+  Stage-1 table are those of the registered runs. This is the first case of the B8-1 variation.
+
+### 9.5 Remarks (none blocks)
+
+- **Rm1.** `phase_warmstart_rerun` is unchanged and still works on the *recorded* map in two places: the comparator
+  given to a re-run (`sup.get(...)`) and the second decision of `lr_net`, in which a pilot re-run that diverged
+  "loses" although, by C8-4, its original stays in force. Both need a re-run to diverge; neither can occur on the
+  machine of record (nothing was listed). To be aligned with C8-4 when R3 of section 10 touches the function.
+- **Rm2.** PLAN 20 items 2 and 3 (divergence only for a non-finite final value or an unrecovered fit; escalation of
+  an `lr_net` change without a column below the floor) are decisions taken after `aab7aba` and are not in it:
+  criterion (i) is unchanged. They are requirement R3 of section 10.
+- **Rm3.** The gate's recomputation (R6, R8 of section 7) includes the commit of the report. Seen here: a commit
+  by another worker, touching no Track A file, landed between a report and the gate, and the gate refused with
+  "differs from the report recomputed from the registered arrays (keys [..., 'git', ...])". This is as designed,
+  and it has a consequence for the machine of record: Stage 2 needs a new commit there, so the Stage-1 report has
+  to be issued again at that commit and the approval written for the new file. It must then be shown that the new
+  `results.json` differs from the one the user saw in the `git` field only (requirement R9 of section 10).
+- **Rm4.** The smoke state above differs from the state of the job of record in one respect: its original network
+  runs already carry a step-0 parity record, because the `aab7aba` code writes one at build time. The check
+  recomputes the parity of the old warm start in its own directory in both cases.
+
+### 9.6 What was verified, and how
+
+*By execution (laptop, smoke stage, scratch roots, snapshot of `aab7aba`):* the tests; the listing; the pristine
+state, the planned command on it, and its re-issue; the C8-3 variations; the B8-1, B8-3 and C8-4 variations on
+fabricated records; the planned command with two injected divergences and the gate on that state, step by step
+(B8-2, C8-4); the Stage-2 probes of 10.6. All approval and diagnosis files used were reviewer fixtures in scratch
+roots and were removed.
+
+*By reading only:* the `lr_net`-changed branch of `warmstart-rerun` (never taken in smoke); the report's wording
+for a diagnosed A2c seed beyond the lines quoted.
+
+*Not verified:* anything on the H200. Whether replicate trainings there are bit-identical is still unknown; the
+comparison of `A11_s0` / `A11_s1` with `A9_s0` / `A9_s1` (10.3) will show it.
+
+## 10. Stage 2: review and requirements
+
+Subject: `stage2_specs`, `STAGE2_MERGE`, `stage2_approval`, `stage2_preconditions`, `phase_stage2` as committed in
+`aab7aba`, against AUDIT 4.0 / 4.1 and the user's decisions of PLAN 20. Stage 2 has not run anywhere.
+
+### 10.1 Verdict
+
+**The three runs that are coded (A11, A11k, A11n) are as the audit registers them. Stage 2 is nevertheless not
+ready to run:** on the state of the machine of record the phase refuses (correctly), the user's decisions have no
+representation in the gate, and nothing that Stage 2 is run for - the comparisons, the guards on its models, the
+finalist rule, the "cleaner" test, A11p - is implemented. The requirements are in 10.5; none of them touches a
+phase that has already run.
+
+### 10.2 The runs as coded, against the registration
+
+| Run | Registered (AUDIT 4.1) | As coded | Judgement |
+|---|---|---|---|
+| A11, seeds 0, 1, 2 | A2s plus every kept and replicated rung, joint refit (poly, T_A) | `component` with the merged arguments of the kept rungs (`STAGE2_MERGE`; for A9 equal to the arguments of its own spec, 10.6), `start` = the fitted A2s of the same seed (copy by name), polynomial provider, 4000 steps, k_train 16, the polynomial rate of record, comparator `A2s_s<seed>` | **[within]**. "Joint refit" from the fitted A2s is the procedure by which every rung was fitted; it adds no training to A11 that the rungs did not have. Starting from a rung's fit would add 4000 steps and is not what is coded. |
+| A11k, seeds 0, 1 | the same with k_train = 64 | the A11 spec with `k_train=64`, comparator `A2s_s<seed>` | **[within]**; the comparison that isolates k_train (against `A11_s<seed>`) is missing from any report (10.5) |
+| A11n, seeds 0, 1 | net version of A11 | `provider="net"`, `net_from` = the fitted `A11_s<seed>` (`fit_to` version 3, step-0 parity recorded), the network rate of record (B8-1), 4000 steps, comparator = the A2n of the same seed that is in force | **[within]** |
+| A11p, seeds 0, 1 | pruning | recorded as "not implemented" | section 11 |
+| finalist, "cleaner" | simplest within 1 paired SE of the best; cleaner: >= 3 better than the A0 value or >= 10 % fewer constants at equal NLL | not implemented; Stage-2 runs appear in no report | 10.4, 10.5 |
+| guards | applied to kept Track A rungs (4.0) | `guard_targets()` covers the Stage-1 comparisons only | 10.5 |
+
+Constants: with the user's content, A11 and A11k have 104 (the 101 of A2s, `logit_dh`, two halo scalars) - read
+from the registered A9 of the machine of record (provider mask 102 in 44 rows, two scalars outside it).
+
+Verified by execution (10.6): the merge refuses the kept list of the machine of record; with the content "A9" the
+seven specs are as in the table; `A11_s0` is the same computation as `A9_s0`.
+
+### 10.3 What the user's decisions change
+
+1. **Content of A11.** `results.json` of the machine of record gives the kept-and-replicated list [A9, A9r] under
+   both readings (the list is by the NLL rules; guards are separate tables). The gate requires the approved list to
+   equal it, and `stage2_specs` then stops: A9 and A9r conflict on `far` ("decide A11 by hand"). This is the right
+   behaviour of the code as it is - the combination is the user's decision - but the decision now exists (A9 only;
+   A9r excluded) and has no place in the approval file. It needs one (R1).
+2. **A11 with the content "A9" is A9.** Same factory arguments (`det_halo`, `far`, start A2s of the seed), same
+   provider, seed, schedule; the step-0 evaluation that A9 has and A11 has not does not touch the training random
+   streams (`train.fit` seeds itself and uses dedicated generators). `A11_s0` and `A11_s1` therefore repeat
+   `A9_s0` and `A9_s1`: bit for bit in smoke on the laptop (10.6), and on the H200 if training there is
+   reproducible, which has not been observed yet. Consequences: the two runs are to be made as registered (8
+   minutes) and compared bit for bit with A9 - a reproducibility check of the machine of record that the campaign
+   does not have so far; they are not a further replication of A9; only seed 2 is new information.
+3. **The waiver.** A11 will fail G-region exactly as A9 does (it is the same model). The waiver is for the class
+   `low_abar` only. The existing per-class arrays overlap (a hit can be deep and low-acceptance), so "G-region
+   without `low_abar`" cannot be computed from them: a further class is needed, flagged* = deep or last ring or
+   first / last z-bin, that is, flagged for a reason other than low acceptance alone (R6).
+4. **The formula as fallback comparator.** Every Stage-2 model has to be paired with this machine's formula array,
+   and both clauses of "cleaner" are against the formula (k = 101, 18.120407 on the machine of record) - the
+   Stage-1 column `cleaner_by_constants` tested equal NLL against A2s, which is not the Stage-2 question.
+   For orientation, from Stage 1: A9 is at -2.18 ± 1.26 against the formula with 104 constants, so A11 by itself
+   meets neither clause; "cleaner" can only come from A11k (a further -0.8) or from A11p (k <= 90, that is at least
+   14 coefficients dropped). This is the situation in which a pruning rule is most exposed to being tuned;
+   section 11 is fixed without knowledge of how many coefficients pass.
+5. **Guards on the Stage-2 models** (G-K, G-bulk, G-region, G-mass) with the guard code as fixed for the
+   bottleneck (`dde1764`, bit-equality shown by its author; not part of this re-check).
+6. **PLAN 20 items 2 and 3** change code that Stage 2 executes: criterion (i) of the divergence definition is still
+   "any non-finite validation mean in the history" at `aab7aba` (the user: only a non-finite final value or an
+   unrecovered fit; a recovered one is a warning with its count in the metadata), and `warmstart-rerun` still
+   changes the network rate without escalation. The second is moot on the machine of record (no re-run was
+   listed); the first can decide the fate of a Stage-2 fit.
+
+### 10.4 Comparisons and the finalist rule, made mechanical
+
+Every number through `provenance.paired_delta` on registered arrays of the machine of record.
+
+| Comparison | Seeds | What it says | Rule attached |
+|---|---|---|---|
+| A11 - A2s | 0, 1, 2 | gain of the content against the base (registered comparator) | none new (the rung is already kept) |
+| A11 - A9 | 0, 1 | reproducibility: maximum absolute per-event difference | must be 0; otherwise a finding for Gate 1 |
+| A11 - A2c | 0, 1 | gain against the matched control (no control exists for seed 2: say so) | none |
+| A11k - A11, A11k - A2s | 0, 1 | effect of k_train = 64; registered comparator | none; A11k is a candidate below |
+| A11p - A11 | 0, 1 | acceptance (section 11) | equal NLL, U1, U2 |
+| A11n - A2n (in force), A11n - A11 | 0, 1 | network column; polynomial bias of the final structure | none |
+| each of them - formula array | all | fallback comparator | "cleaner" |
+
+Strata as in Stage 1 (the two registered secondary columns and the short stratum), never as selection criteria
+except where section 11 says so.
+
+**Finalist [within], with one point for the user.** Candidates: the models with a countable set of constants -
+A2s (101), A11 (104), A11k (104), A11p (104 - |Z|, only if accepted without hurting the short events). For each of
+the seeds 0 and 1 the rule `sfm.stats.one_se_select` is applied to the candidates' registered arrays of that seed
+(best = lowest mean; eligible if Δ < SE, strict; pairing by seed as 4.0 demands). A candidate is eligible if it is
+eligible on both seeds; the finalist is the eligible candidate with the fewest constants, ties (A11, A11k) to the
+lower two-seed mean. If no candidate is eligible on both seeds, there is no automatic finalist and the table goes
+to the user. A11n is not a candidate (its constants are network weights; it measures the polynomial bias); the
+same table is printed once more with A11n included, and **if that changes the selection - the network better than
+every polynomial model by more than 1 SE on both seeds - the choice is the user's at Gate 1 [confirm]**.
+Seed 2 of A11 is reported and selects nothing (no other candidate has it).
+
+**"Cleaner" [within].** For the finalist F with k_F constants, against the formula array:
+(c1) better by at least 3: Δ_0 <= -3, with the replication rule of 4.0 in its literal reading (ruling 5): Δ_1 <=
+-1.5 and (Δ_0 + Δ_1)/2 <= -3; or
+(c2) k_F <= 90 (10 % fewer than 101) and equal NLL on both seeds (Δ_s <= +1 SE_s and Δ_s < +1).
+Both are printed per seed with their numbers. If neither holds, the report says in these words that the finalist is
+not cleaner than the legacy formula and that the legacy formula remains the Track A baseline (PLAN 20).
+
+### 10.5 Requirements for the worker
+
+**R1 - content of A11 by recorded decision.** The approval file gains: `a11_content` (list of rungs), `excluded`
+(rung -> reason, for every kept-and-replicated rung not in the content), `waivers` (list of {rung, guard, class,
+basis, "subject to Gate 1"}). The gate refuses unless: the content is a subset of the kept-and-replicated list of
+`results.json` under the approved reading; every other rung of that list has an exclusion with a reason; every
+content rung whose guard block in `results.json` fails a guard has a waiver for exactly that guard, and no waiver
+exists without such a failure; the content merges without conflict. `kept_and_replicated` stays as it is (it must
+still equal the table). Content, exclusions and waivers go into `decisions.json` and into the head of the Stage-2
+report. For the machine of record: content [A9], A9r excluded (user, PLAN 20), waiver {A9, G-region, low_abar}.
+
+**R2 - runs.** A11 (0, 1, 2), A11k (0, 1), A11n (0, 1) as coded. Nothing in their specs changes. Before the first
+k_train = 64 fit: the memory estimate against the cap of the machine; if it does not fit, stop and report (the
+batch is part of T_A and is not to be changed).
+
+**R3 - PLAN 20 items 2 and 3** in the divergence check and in `warmstart-rerun`, with tests on constructed
+histories: a recovered non-finite value mid-run registers the run with a warning and the count in its metadata; a
+non-finite final value, a frozen last window and a blow-up remain terminal. Every run registered so far must be
+classified as before (none had a non-finite value: show it from the stored histories).
+
+**R4 - Stage-2 guards.** Guard rows and G-region arrays for every Stage-2 run and its comparator, existing arrays
+and markers reused, none rewritten. The per-run timing record of PLAN 21.
+
+**R5 - Stage-2 report**, separate from the Stage-1 report (`results.json` and `RESULTS.md` of Stage 1 stay
+byte-identical; the gate's recomputation must still pass after Stage 2, its guards and its report have run - a
+re-issued `stage2` on a finished state starts no fit and is not refused). Content: the comparisons of 10.4; the
+initialisation table for A11n (kl_map, step-0 parity, columns below the floor); convergence; warnings of R3; the
+candidates table per seed and the finalist; "cleaner" (c1), (c2); the guard tables; the statement of 10.3 item 2
+with the measured maximum difference; commit and clean flag.
+
+**R6 - the waiver in the guard table.** G-region is printed as registered (it fails) and, in a separate line
+headed as the user's waiver of PLAN 20, with the flagged class replaced by flagged* (10.3 item 3; new tagged
+arrays under a new subset name and a new marker; the same rule: gain < 0 and at most 50 % of it from flagged*).
+Never the word "passes" for G-region of a model with the halo; if the flagged* line fails as well, the failure is
+not covered by the waiver and is reported as such. Applies to A11, A11k, A11p, A11n alike.
+
+**R7 - A11p** exactly as section 11: the screen (its own phase or script, training events only, output files with
+hashes), the factory argument for reduced degrees, the fits, the acceptance by the report. The screen runs after
+`A11_s0` and `A11_s1` are registered and before any A11p fit; its table is written to disk and hashed before the
+fits start, and the fits refuse a pruning set other than the hashed one.
+
+**R8 - nothing that has run changes.** The real listing (`--list`) unchanged or its difference explained line by
+line; specs, `fit_config`, `run_spec`'s training path, the rules and the Stage-1 report untouched; shown by
+continuing a finished smoke state made with the present code: no fit starts, the registry gains no line, the
+Stage-1 `results.json` is byte-identical apart from the commit fields.
+
+**R9 - order, and the approval on the machine of record.** After the Stage-2 commit is on the machine: the
+Stage-1 `report` is issued again (the gate binds the table to the commit, 9.5 Rm3); a key-by-key comparison shows
+that the new `results.json` differs from the file the user saw in the `git` field only; the approval file names
+the new SHA-256 and records the old one. The commit that carries section 11 precedes the first Stage-2 fit.
+Then: `stage2` (fits) -> Stage-2 guards -> A11p screen -> A11p fits -> their guards -> Stage-2 report. No Stage-2
+number is used to change a rule.
+
+### 10.6 Verified by execution, and what the final re-check needs
+
+*Executed now (smoke, laptop, snapshot of `aab7aba` as in section 9):*
+
+- `stage2_specs` with the kept list of the machine of record, [A9, A9r]: "stage2: kept rungs conflict on far (True
+  vs False); decide A11 by hand". With the content [A9]: seven specs - `A11_s0/1/2` (`det_halo`, `far`, start
+  `A2s_s<seed>`, k_train 16, comparator `A2s_s<seed>`), `A11k_s0/1` (the same, k_train 64), `A11n_s0/1`
+  (`net_from` the `A11_s<seed>`, comparator `A2n_s<seed>`).
+- `A11_s0` against `A9_s0`: the specs differ in name, rung, class, `init_eval` and notes, the fit configurations
+  in the name only. Fitted in a scratch root: the per-event validation arrays are identical (maximum absolute
+  difference 0.0 on 14,950 events) and so is every tensor of the fitted state.
+- The gate on a finished smoke state (nothing kept there, so Stage 2 is A11k alone): refused without an approval
+  file; with a fixture approval `A11k_s0`, `A11k_s1` are fitted with K_train 64 and registered; issued again: no
+  fit, not refused; the Stage-1 report issued again after Stage 2: `results.json` byte-identical (the Stage-2 runs
+  appear nowhere in it); `stage2` a third time: accepted, no fit. The mechanics are idempotent as they stand; R5
+  asks that they stay so once guards and a report for Stage 2 exist.
+
+*For the final re-check of the Stage-2 commit I need:* the commit id and its difference against `aab7aba` and
+against the guard commit; the test results; the hash of `--list`; the text of the approval file as it will be
+placed on the machine of record (before it is placed); and I will run, in smoke on scratch copies: the continuation
+of a finished state (R8); the gate with each refusal of R1 (no content, content not in the list, missing
+exclusion, missing waiver, superfluous waiver, conflict, forged table) and a valid file; `stage2` twice (second
+time no fit); `A11_s0` against `A9_s0` bit for bit; R3 on injected histories; the screen of section 11 on the
+smoke A11 with the comparison against automatic differentiation, and a pruned fit; the Stage-2 report recomputed
+from the arrays with numpy (candidates, finalist, both "cleaner" clauses, U1, U2, the flagged* line).
+
+## 11. A11p specification (written before any Stage-2 result exists)
+
+Fixed on 26 Nov 2026. No Stage-2 run exists at this time (orchestrator's statement; the laptop's copy of the
+machine of record has no approval file and no A11 row in its registry), and nothing below was chosen with
+reference to a Stage-2 result. (The smoke fits of 10.6 - 40 steps in scratch roots - are code tests and carry
+no information about Stage 2.) The Stage-1 numbers that were looked at are listed in 11.10; where one of them was
+known before a choice was made, the choice says so. Each choice is marked **[within]** (within the
+pre-registration) or **[confirm]** (needs the user's confirmation). Units: 1e-4 nat per event unless written.
+
+Registered text (AUDIT 4.1): "pruning: drop the highest-degree coefficients whose removal costs < 0.2 by the
+diagonal Fisher information on training events, refit; accepted at equal NLL", seeds 0, 1. User's addition
+(PLAN 20): the short-event stratum must not be hurt; A11p is to determine systematically which parameters of A11
+can be removed without hurting the short events.
+
+### 11.1 Objects
+
+- `A11_s`, s = 0, 1: the fitted polynomial models of Stage 2 (10.2). With the user's content (A9 only) they have
+  104 constants: the 101 of A2s, the row `logit_dh` (degree 0) and the two scalars of the detector-frame halo.
+- Provider rows: raw_i(x) = sum_{k=0..d_i} c_ik x^k with x = (ln T - v0)/vs in [-1, 1] - the monomial basis in which
+  `PolyProvider` stores and trains the coefficients (`coef * mask`). In the A9 structure 14 rows have degree 3
+  (`zs, log_w1, log_ell, log_w2, kappa, log_sig, log_R, logit_1, logit_2, logit_sp, logit_tr, logit_far,
+  logit_end, logit_th`), 8 rows degree 2 (`s_sig, s_R, s_lam, s_1, s_2, sp_z, log_sp_sz, log_sp_sr`) and 22 rows
+  degree 0. **Candidates are the 58 coefficients with k >= 1** (14 x 3 + 8 x 2); the code must assert this count.
+- Objective: L(c) = (1/n) sum_e l_e(c) over the n = 69,783 training events, l_e the per-event NLL as trained (the
+  energy-weighted hit term plus the normalisation term), evaluated at fixed fold points with
+  `sfm.metric.test_nll(model, train, K=16, deterministic_sum=True)` (seed 12345, batch 128, inside
+  `deterministic()`) - the estimator `fisher_k_a6b` already uses. Per-event values are differenced and summed in
+  float64. L^S is the same mean over the short training events S_tr = {zb < 1221 mm}, n_S = 678,
+  f_tr = 678 / 69,783 = 0.009716; L = f_tr L^S + (1 - f_tr) L^L holds exactly.
+
+### 11.2 The Fisher quantity **[within]**
+
+For candidate j = (i, k) of the fitted model, with c the fitted coefficient vector and e_j the unit vector:
+
+    h_j   = max(0.1 |c_j|, 1e-3)
+    H_j   = [ L(c + h_j e_j) - 2 L(c) + L(c - h_j e_j) ] / h_j^2          (observed information per event)
+    g_j   = [ L(c + h_j e_j) - L(c - h_j e_j) ] / (2 h_j)                 (reported only)
+    Q_j   = (1/2) |H_j| c_j^2                                             (predicted cost of removal, nat per event)
+
+and H^S_j, Q^S_j by the same three evaluations restricted to S_tr (no further model evaluation is needed: the
+per-event arrays are summed over the stratum). One base evaluation and two per candidate: 117 passes over the
+training set per seed.
+
+Why the diagonal of the *observed* information, in the stored parametrisation:
+
+1. The registered criterion is a cost in NLL units ("removal costs < 0.2"). Setting c_j to zero with the other
+   coefficients fixed changes the objective by -g_j c_j + (1/2) H_j c_j^2 + O(c_j^3). The second-order term with the
+   diagonal curvature is the saliency of optimal-brain-damage pruning; it is what "cost by the diagonal Fisher
+   information" computes when the information is the curvature of the objective.
+2. The expected-information estimator by squared scores is not available here. The objective is an
+   energy-weighted pseudo-likelihood: under a rescaling of the hit weights by a, the curvature scales with a and the
+   mean squared score with a^2, so the information identity does not hold and (1/2) F_j c_j^2 would not be in the
+   units of the table. The campaign decided the same for the PySR audit (PLAN 17.1) and for A6b (ruling 15,
+   section 3).
+3. |H_j| instead of H_j: a curvature that is not positive gives no prediction; with the absolute value a
+   coefficient without effect (H_j near zero with either sign) passes and a coefficient in a direction of
+   resolved negative curvature does not. The sign of H_j is printed.
+4. The first-order term is left out of the decision (the fit is the last iterate of a stochastic optimiser, so
+   g_j is small but not zero); -g_j c_j is printed next to Q_j.
+
+Numerical resolution: the per-event values are float32 near 18 (spacing 1.9e-6); the rounding noise of Q_j is about
+0.5 (c_j/h_j)^2 x 9e-9 nat = 0.005 units on all events and 0.05 units on the short stratum at h_j = 0.1 |c_j| -
+small against the thresholds 0.2 and 10.3 below. A unit test must compare H_j with the exact second derivative by
+automatic differentiation on a fixed subset of events for at least three coefficients (agreement within 2 %).
+
+The quantity depends on the parametrisation (monomials in x, raw scale of each row, reference component of the
+logits). It is invariant under a rescaling of a coefficient, not under a change of basis. Because x^3 and x (and
+x^2 and 1) are correlated on [-1, 1], the cost at fixed lower coefficients is larger than the cost after the lower
+coefficients have adapted: the screen errs towards keeping coefficients. A profiled cost (Schur complement within a
+row) would not be the *diagonal* information and is not used.
+
+**Units of the threshold [within]:** every number of AUDIT 4.0 / 4.1 is in 1e-4 nat per event of the mean NLL, so
+"< 0.2" is Q_j < 0.2 x 1e-4 nat per training event. For the record, the other conceivable reading - 0.2 nat on the
+summed training NLL - would be 0.029 units, seven times stricter; it has no statistical meaning for an
+energy-weighted sum and is not adopted.
+
+### 11.3 "Highest-degree coefficients" **[within]**
+
+Per row, from the top: the leading coefficient c_{i,d_i} is dropped if it passes; then, and only then, the next
+lower one is examined; the row stops at the first coefficient that does not pass. The constant (k = 0) is never a
+candidate, so the 22 degree-0 rows (`logit_dh` among them) and the two halo scalars are never touched: **A11p lowers
+polynomial degrees in the momentum variable; it cannot remove a component or a parameter that does not depend on
+momentum.** A row whose coefficients all pass becomes a constant. Readings not adopted: only one coefficient per
+row (the registered text has the plural and no such limit); any coefficient regardless of order (polynomials with
+gaps; contradicts "highest-degree").
+
+### 11.4 One at a time, both seeds, one shot **[within]**
+
+- Each candidate is judged by its own Q_j, all evaluated once at the fitted A11 (no re-evaluation after a drop):
+  that is what the diagonal means. The accumulated cost is controlled by the registered sequel - refit and
+  acceptance - and not by a cap; a cap or a greedy budget would be a rule the registration does not contain.
+- The screen is run on `A11_s0` and on `A11_s1`. A coefficient passes only if it passes on **both** seeds. One
+  pruned structure results, with one number of constants, fitted on both seeds; a per-seed structure would give two
+  different models under one name. (Choice among readings; the stricter one is taken.)
+- One shot: one pruning set, one fit per seed, no second attempt with another set. If no coefficient passes, A11p
+  is recorded as "no coefficient passes the screen" and nothing is fitted.
+
+Reported with the set, deciding nothing: sum of Q_j over the dropped set per seed (the predicted accumulated cost
+under the diagonal approximation), and the realised joint cost before any refit on the training events,
+J = L(c with the dropped set at zero) - L(c), with J^S (one further pass per seed).
+
+### 11.5 The refit **[within]**, with the alternative named
+
+`A11p_s` (s = 0, 1) is the pruned structure fitted **by the procedure of A11 itself**: start = the fitted A2s of
+the same seed, coefficients copied by name up to the reduced degrees, T_A (4000 steps, k_train 16, the polynomial
+learning rate of record), seed s, comparator `A11_s`, step-0 row registered (`init_eval`). Reason: `A11p_s` and
+`A11_s` then differ in the structure alone - same start, same schedule, same seed, same minibatch sequence - and
+their paired difference contains no continued-training term. Stage 1 measured that term: -0.16 ± 0.12 on all
+events and about -12 on the short events (A2c - A2s), so it is of the size of the effects A11p is asked to resolve
+on the stratum. "Refit" in the row of A11p is read as in the row of A11 ("joint refit (poly, T_A)").
+
+Alternative, not adopted: continue from the fitted A11 with the dropped coefficients at zero. It is the more usual
+meaning of pruning, but the comparison with A11 then needs a matched control (A11 continued unchanged for T_A, two
+further fits, not registered) - **[confirm]** if the user prefers it.
+
+Implementation requirements: the factory refuses a `degrees` override for legacy rows; a new argument (for example
+`prune={row: degree}`) is needed. The call without it must build the A11 model bit for bit; the dropped
+coefficients are zero and stay zero (mask), `n_params()` = 104 - |Z|; `load_run` rebuilds the pruned structure
+from the stored arguments; tests for all four.
+
+### 11.6 Acceptance
+
+**Registered [within].** With d_e = nll_e(`A11p_s`) - nll_e(`A11_s`) on the registered validation arrays (K = 64,
+n = 14,950, machine of record, `provenance.paired_delta`), mean Δ_s and paired SE_s: A11p is **accepted at equal
+NLL** if on both seeds Δ_s <= +1 SE_s and Δ_s < +1 (AUDIT 4.0).
+
+**Short events [confirm] - the user's addition made mechanical.** One principle, stated once: *the short events may
+take at most half of each registered tolerance*. It enters in two places.
+
+(a) In the screen. A coefficient passes only if, on both seeds, also
+
+    f_tr Q^S_j < 0.1 x 1e-4 nat          (equivalently Q^S_j < 10.29 units per short training event)
+
+that is, its predicted cost on the short events, counted in the mean over all events, is below half the registered
+threshold. (The registered condition alone bounds this contribution only by the full 0.2.) The table states both
+sets: Z_0 by the registered condition alone and Z with the addition; Z_0 minus Z are the coefficients that the
+short events veto. A11p is fitted with Z. If Z differs from Z_0, the set Z_0 is recorded and not fitted unless the
+user asks for it (two further fits).
+
+(b) At acceptance, on the short validation events S = {zb < 1221 mm}, n_S = 166, f = 166 / 14,950 = 0.011104, with
+mean Δ^S_s and SE^S_s of d_e over S. On both seeds:
+
+    U1 (size):     Δ^S_s + 2 SE^S_s  <  M,     M = 0.5 / f = 45.03 units
+    U2 (breadth):  N_s = #{ e in S : d_e > 1 unit }  <=  95
+
+U1 is a non-inferiority test: the one-sided 97.5 % bound of the stratum mean must lie below the margin at which
+the short events alone would use half of the absolute bound (+1) of the equal-NLL rule. U2 is a sign test with a
+relevance threshold: under "no more than half of the short events are worse by more than 1e-4 nat", N_s is at most
+binomial(166, 1/2), and P(N > 95) = 0.026. U1 guards against a few events with large losses, U2 against a broad
+small shift; U2 does not depend on the tails, which matter on this stratum (11.8).
+
+Outcome: "accepted" = the registered condition; "accepted without hurting the short events" = registered and U1
+and U2 on both seeds. Only the second makes A11p a candidate for the finalist (10.4); the first alone is reported
+as "equal NLL overall, short events hurt".
+
+Why not "within 1 SE" on the stratum: the event-paired SE of 166 events describes the sampling of events for two
+given fits, not the variation between fits. Two fits of the same structure with different seeds differ there by
+five of these SE (11.10), so a 1-SE condition would be decided by the seed. A fixed margin and a requirement on
+both seeds do not have this defect; the same-seed pairing of 11.5 removes most of the fit-to-fit variation from d_e.
+
+What the margin means, for the user's decision: M = 45 is twice the degradation of the short events by the kept
+rung itself against the matched control (11.10) and four times the seed-to-seed difference. A smaller share is the
+user's choice - the principle has one number: at share x the screen threshold is x x 0.2 / f_tr and M = x / f
+(x = 1/2 proposed; x = 1/4 gives 5.1 and 22.5). The share 1/2 and both conditions were fixed before the
+illustration of 11.10 was computed; the relevance threshold of U2 (1 unit instead of 0) was fixed after the
+Stage-1 medians and sign counts of the stratum had been seen, and changes none of the Stage-1 verdicts shown there.
+
+### 11.7 What the worker delivers
+
+1. Per seed a table of the 58 candidates: row, k, c_j, h_j, H_j, Q_j, -g_j c_j, H^S_j, Q^S_j, f_tr Q^S_j, the
+   two pass flags; then the pass on both seeds, Z_0, Z, the resulting degree of every row, k = 104 - |Z|.
+2. Sum of Q_j, J and J^S per seed (11.4).
+3. The fits `A11p_s0`, `A11p_s1` (and their step-0 rows), their paired differences against `A11_s`, A2s, the
+   formula array and A2c of the same seed, on all events, on the registered secondary strata and on S; Δ_s, SE_s,
+   Δ^S_s, SE^S_s, N_s, and the three verdicts (registered, U1, U2) with the numbers they were decided on.
+4. The sentence that answers the user's question: "the coefficients of Z can be removed from A11 without hurting
+   the short events (within the margins of 11.6)" or "cannot", and the list Z_0 minus Z.
+
+For orientation, not a target: the "cleaner" clause by constants needs k <= 90 (10.4), that is |Z| >= 14. The
+screen does not know this number, and the set is not to be enlarged or reduced towards it.
+
+### 11.8 What A11p may and may not conclude about A9r and the short events
+
+- A9r differs from A9 by a removed component: the far halo, that is the row `logit_far` (four coefficients) and
+  two rows without momentum dependence, six constants (104 to 98; read from the two registered models). A11p
+  never removes a component (11.3); the most it can do to the far halo is to make its weight independent of
+  momentum (three coefficients). It therefore neither tests nor reproduces the change that A9r made.
+- The degradation of the short events by A9r is not a property of the stratum that A11p could confirm. PLAN 20
+  quotes +91.9 ± 67.2: that is A9r - A2s on seed 0; against A9 itself it is +83.9 ± 62.9. Of these 83.9 units
+  one event contributes 62; the median is -1.3, 74 of 166 events are worse
+  by more than one unit, and without the three largest |d_e| the mean is +12.2. Nothing is resolved about the
+  class; the "1.4 SE" is a statement about one event.
+- A11p may conclude: which momentum coefficients the short events do not need (Z), which they veto (Z_0 minus Z,
+  with Q^S_j), and whether the pruned model leaves the stratum within the margins of 11.6 relative to A11.
+- A11p may not conclude: that A9r's degradation is real or not; that the far halo is needed by the short events
+  (a large Q^S of the `logit_far` coefficients would be suggestive of momentum dependence of its weight, not of
+  the need for the component); that the short events are described well - every condition is relative to A11.
+
+### 11.9 Summary of the choices
+
+| Choice | Status |
+|---|---|
+| observed information (curvature of the training objective) on the diagonal, stored monomial parametrisation, central second difference at fixed fold points, K = 16, all training events | [within] |
+| cost Q_j = (1/2) abs(H_j) c_j^2; first-order term reported only | [within] |
+| threshold 0.2 = 0.2 x 1e-4 nat per training event | [within] |
+| candidates: coefficients with k >= 1; per row from the top, stop at the first failure; constants never | [within] |
+| each coefficient judged alone, once, at the fitted A11; no cap on the sum; one shot | [within] |
+| screen on `A11_s0` and `A11_s1`, pass on both; one structure for both seeds | [within] (choice among readings, the stricter) |
+| refit = the A11 procedure on the pruned structure (start A2s of the seed, T_A) | [within]; continuing from the fitted A11 with a matched control: [confirm] |
+| acceptance: equal NLL against `A11_s` on both seeds | [within] |
+| short events: screen condition f_tr Q^S_j < 0.1; U1 with M = 0.5 / f; U2 with N <= 95; share 1/2; failure of U1 or U2 removes A11p from the finalist candidates | [confirm] |
+| if Z differs from Z_0: Z is fitted, Z_0 recorded and not fitted | [confirm] |
+
+### 11.10 Stage-1 numbers looked at (machine of record, validation; none from Stage 2)
+
+From PLAN 19 / 20 and `RESULTS.md`: the Stage-1 table, the guard tables of A9 and the short-stratum rows. From the
+registered arrays (reviewer's computation; short stratum = 166 events):
+
+| Pair | All events | Short stratum | Median | Worse by > 1 unit | U1 | U2 |
+|---|---|---|---|---|---|---|
+| A2c - A2s, seed 0 / 1 | -0.16 ± 0.12 / -0.13 ± 0.12 | -12.14 ± 2.40 / -11.55 ± 2.33 | -7.4 (seed 0) | 53 (seed 0) | pass | pass |
+| A2s_s1 - A2s_s0 (same structure, other seed) | | -11.21 ± 2.32 | | | | |
+| A9_s1 - A9_s0 (same structure, other seed) | | -9.00 ± 2.47 | | | | |
+| A9 - A2s, seed 0 / 1 | -4.67 ± 0.88 / -4.66 ± 0.89 | +8.04 ± 7.24 / +10.25 ± 7.31 | +5.1 / +7.5 | 91 / 93 | pass | pass |
+| **A9 - A2c, seed 0 / 1** | | **+20.18 ± 7.73 / +21.80 ± 7.77** | +14.2 / +17.5 | 106 / 107 | pass | **fail** |
+| A7 - A2c, seed 0 | | +22.62 ± 7.13 | +5.9 | 92 | pass | pass |
+| A7 - A7s (nested pair, same start) | | +0.31 ± 1.22 | 0.0 | 71 | pass | pass |
+| A7l - A2c | | +0.99 ± 2.09 | +0.7 | 80 | pass | pass |
+| A8c - A2c | | -2.48 ± 1.20 | -0.5 | 64 | pass | pass |
+| A8 - A7 | | +1.57 ± 11.20 | -3.0 | 77 | pass | pass |
+| A78 - A7 | | +42.93 ± 14.49 | +2.2 | 87 | fail | pass |
+| A3x - A2c | | +46.54 ± 9.25 | +12.5 | 107 | fail | fail |
+| A9r - A9, seed 0 / 1 | | +83.86 ± 62.94 / +83.37 ± 62.52 | -1.3 / -0.8 | 74 / 75 | fail | pass |
+
+Also seen: A8 - A2c +24.20 ± 10.43, A7s - A2c +22.32 ± 7.40, A78 - A2c +65.56 ± 18.38, A12 - A2c -131.21 ± 50.83,
+A9r - A2c +104.04 ± 68.00 (short stratum, seed 0); A2s_s0 on the stratum: mean NLL 19.9155, sd 3.88.
+
+The last two columns apply the conditions of 11.6 to existing pairs, as an illustration of what they separate:
+nested pairs with the same start pass; structures with a resolved loss on the stratum fail one or both.
+
+**One of these numbers is a finding of its own, outside this specification** (for the user and Gate 1): against the
+matched control A2c - the base continued with the schedule the rungs have - the kept rung A9 is worse on the short
+events by +20.2 ± 7.7 and +21.8 ± 7.8 (2.6 and 2.8 SE; 106 and 107 of 166 events worse by more than one unit).
+The Stage-1 table shows +8.0 ± 7.2 against A2s because A2s itself is 12 units worse than A2c on this stratum. A7,
+A7s and A8 show the same +22 to +24. The conditions of 11.6 are relative to A11 and cannot repair this; whether it
+matters for the finalist is not for A11p to decide.
