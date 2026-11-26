@@ -1,6 +1,6 @@
 # Track A (M2A) - results on the machine of record
 
-Stage `m2a_dist`, machine `h200-g1056-97b197a7`, stream `g1056-s12345-b128-iid-val731a1997@h200-g1056-97b197a7`. Reference set `<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/refsets/g1056-s12345-b128-iid-val731a1997` (refset.json SHA-256 `3096aec62a128199...`). Validation only. Every delta: mean ± paired SE (n events), unit 1e-4 nat per event, through `sfm.provenance.paired_delta`. Report-metric tables (K = 64) and guard tables are separate. Nulls and negative results as measured.
+Stage `m2a_dist`, machine `h200-g1056-97b197a7`, stream `g1056-s12345-b128-iid-val731a1997@h200-g1056-97b197a7`, report code at commit `732039b80157ed9e8d788e660ffe42f1d8aa5dbb` (clean clone: True). Reference set `<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/refsets/g1056-s12345-b128-iid-val731a1997` (refset.json SHA-256 `3096aec62a128199...`). Validation only. Every delta: mean ± paired SE (n events), unit 1e-4 nat per event, through `sfm.provenance.paired_delta`. Report-metric tables (K = 64) and guard tables are separate. Nulls and negative results as measured.
 
 ## Harness
 
@@ -32,59 +32,67 @@ A2s seed scatter (sd of the validation means of the seeds): 0.11e-4
 
 A9 at step 0 (logit_dh = -5): A9_s0_init - A2s_s0 -0.58 ± 0.60 (n 14950); A9_s1_init - A2s_s1 -0.64 ± 0.60 (n 14950)
 
+## A2c - control (added by the user on 25 Nov 2026, exploratory, outside the six primaries)
+
+A2s continued unchanged from the fitted A2s of the same seed, with the schedule of the rungs that start from it (T_A, 4000 steps, the frozen lr_poly, the same seed). No pre-registered rule consumes it: keep, replication and equal NLL stay against A2s as registered. The column 'control: Δ vs A2c' below decides nothing.
+
+- A2c_s0 - A2s_s0: -0.16 ± 0.12 (n 14950)
+- A2c_s1 - A2s_s1: -0.13 ± 0.12 (n 14950)
+- Matched step-budget groups: **matched (A2c)**: component rungs that START FROM the fitted A2s of the same seed (copy by name, or init_shower_long on it): A4, A5, A7, A8, A9, A4t, A5h, A6i, A6l, A6b, A7s, A7l, A8c, A78, A9r, A3f, A3c, A3x, A12; T_A with 4000 steps, the frozen lr_poly, train seed = the rung's seed, fresh optimiser and cosine cycle; **not matched: mixtures**: A10, A10-2, A10-4, A10-5, A10g: 6000 steps and initialised by init_from_target on the MAP of A2s (function space, a new structure), not continued from its weights. Proposal (awaiting the user): 'A2c6k' = A2c with 6000 steps, seeds 0 and 1; **not matched: convergence reruns**: <rung>_s<seed>_x2: 8000 / 12000 steps from the original A2s; their comparator A2s_s<seed>_x2 is itself a rerun. Proposal (awaiting the user): 'A2c_x2' = A2c with doubled steps, only for seeds with a rerun; **not applicable**: network runs (fitted to their own polynomial run) and Stage 0
+
 ## Stage 1 - primaries, poly (pre-registered comparisons, vs A2s of the same seed; report metric)
 
 Multiplicity: these six rungs are the pre-registered primary comparisons of Track A; every other row of this report is exploratory and is not a test.
 
-| rung | k | pairs used by the rules (s0 / s1) | Δ seed 0 | keep s0 | Δ seed 1 | keep s1 | replicated (two-seed mean) | alternative - decides nothing: two-seed mean <= -2 SE | equal NLL (both) | Δ vs formula s0 | converged s0/s1 |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| A4 | 93 | original / rerun | +1.77 ± 0.57 (n 14950) | no | +1.44 ± 0.58 (n 14950) | no | no (+1.61 ± 0.57 (n 14950)) | no | no | +4.26 ± 0.97 (n 14950) | yes/yes |
-| A4 s1 original - not converged, NOT used by the rules | 93 | A4_s1 vs A2s_s1 |  |  | +1.76 ± 0.57 (n 14950) | no | | | | | no |
-| A5 | 101 | original / rerun | +6.32 ± 1.24 (n 14950) | no | +5.93 ± 1.18 (n 14950) | no | no (+6.13 ± 1.21 (n 14950)) | no | no | +8.81 ± 1.50 (n 14950) | yes/yes |
-| A5 s1 original - not converged, NOT used by the rules | 101 | A5_s1 vs A2s_s1 |  |  | +6.26 ± 1.25 (n 14950) | no | | | | | no |
-| A7 | 103 | original / original | -0.51 ± 0.27 (n 14950) | no | -0.46 ± 0.28 (n 14950) | no | no (-0.48 ± 0.27 (n 14950)) | no | yes | +1.98 ± 0.88 (n 14950) | yes/yes |
-| A8 | 102 | original / original | -0.06 ± 0.29 (n 14950) | no | -0.04 ± 0.29 (n 14950) | no | no (-0.05 ± 0.29 (n 14950)) | no | yes | +2.42 ± 0.84 (n 14950) | yes/yes |
-| A9 | 104 | original / original | -4.67 ± 0.88 (n 14950) | yes | -4.66 ± 0.89 (n 14950) | yes | yes (-4.66 ± 0.89 (n 14950)) | yes | yes | -2.18 ± 1.26 (n 14950) | yes/yes |
-| A10 | 74 | rerun / original | +78.79 ± 4.79 (n 14950) | no | +87.49 ± 4.99 (n 14950) | no | no (+83.14 ± 4.85 (n 14950)) | no | no | +81.48 ± 4.92 (n 14950) | no/yes |
-| A10 s0 original - not converged, NOT used by the rules | 74 | A10_s0 vs A2s_s0 | +87.31 ± 4.99 (n 14950) | no |  |  | | | | | no |
+| rung | k | pairs used by the rules (s0 / s1) | Δ seed 0 | keep s0 | Δ seed 1 | keep s1 | replicated (two-seed mean) | replicated under the alternative reading (literal conditions AND two-seed mean <= -2 SE; alternative - decides nothing) | equal NLL (both) | Δ vs formula s0 | converged s0/s1 | control: Δ vs A2c s0 / s1 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| A4 | 93 | original / rerun | +1.77 ± 0.57 (n 14950) | no | +1.44 ± 0.58 (n 14950) | no | no (+1.61 ± 0.57 (n 14950)) | no | no | +4.26 ± 0.97 (n 14950) | yes/yes | +1.93 ± 0.57 (n 14950) / not matched (doubled-step rerun) |
+| A4 s1 original - not converged, NOT used by the rules | 93 | A4_s1 vs A2s_s1 |  |  | +1.76 ± 0.57 (n 14950) | no | | | | | no | - |
+| A5 | 101 | original / rerun | +6.32 ± 1.24 (n 14950) | no | +5.93 ± 1.18 (n 14950) | no | no (+6.13 ± 1.21 (n 14950)) | no | no | +8.81 ± 1.50 (n 14950) | yes/yes | +6.48 ± 1.23 (n 14950) / not matched (doubled-step rerun) |
+| A5 s1 original - not converged, NOT used by the rules | 101 | A5_s1 vs A2s_s1 |  |  | +6.26 ± 1.25 (n 14950) | no | | | | | no | - |
+| A7 | 103 | original / original | -0.51 ± 0.27 (n 14950) | no | -0.46 ± 0.28 (n 14950) | no | no (-0.48 ± 0.27 (n 14950)) | no | yes | +1.98 ± 0.88 (n 14950) | yes/yes | -0.35 ± 0.25 (n 14950) / -0.32 ± 0.26 (n 14950) |
+| A8 | 102 | original / original | -0.06 ± 0.29 (n 14950) | no | -0.04 ± 0.29 (n 14950) | no | no (-0.05 ± 0.29 (n 14950)) | no | yes | +2.42 ± 0.84 (n 14950) | yes/yes | +0.10 ± 0.28 (n 14950) / +0.09 ± 0.28 (n 14950) |
+| A9 | 104 | original / original | -4.67 ± 0.88 (n 14950) | yes | -4.66 ± 0.89 (n 14950) | yes | yes (-4.66 ± 0.89 (n 14950)) | yes | yes | -2.18 ± 1.26 (n 14950) | yes/yes | -4.51 ± 0.88 (n 14950) / -4.52 ± 0.89 (n 14950) |
+| A10 | 74 | rerun / original | +78.79 ± 4.79 (n 14950) | no | +87.49 ± 4.99 (n 14950) | no | no (+83.14 ± 4.85 (n 14950)) | no | no | +81.48 ± 4.92 (n 14950) | no/yes | not matched (6000 steps, init_from_target) / not matched (6000 steps, init_from_target) |
+| A10 s0 original - not converged, NOT used by the rules | 74 | A10_s0 vs A2s_s0 | +87.31 ± 4.99 (n 14950) | no |  |  | | | | | no | - |
 
-Rules use the rerun pair (`<rung>_s<seed>_x2` vs `A2s_s<seed>_x2`) of a seed whenever it exists (AUDIT 4.0, convergence rule); seeds may then mix an original and a rerun, each paired with its own comparator. Kept = keep rule on seed 0 and replication by seed 1 (rule applied in seed order): a rung that passes keep on seed 1 only is not kept; the table shows both keep flags.
-Reading aid (review B6; decides nothing): every rung that starts at the fitted A2s also carries a common 'continued training' term; convergence movement of the base over its last window: A2s_s0 0.12e-4, A2s_s1 0.41e-4. Differences between rungs that share the start (paired) are free of that term.
+Rules use the rerun pair (`<rung>_s<seed>_x2` vs `A2s_s<seed>_x2`) of a seed whenever it exists (AUDIT 4.0, convergence rule); seeds may then mix an original and a rerun, each paired with its own comparator. Kept = keep rule on seed 0 and replication by seed 1 (rule applied in seed order): a rung that passes keep on seed 1 only is not kept; the table shows both keep flags. A primary run that diverged is shown as 'diverged - awaiting diagnosis'; no rule marks it failed before an independent diagnosis (PLAN 17.11).
+Reading aid (review B6; decides nothing): every rung that starts at the fitted A2s also carries a common 'continued training' term, measured by the A2c column; convergence movement of the base over its last window: A2s_s0 0.12e-4, A2s_s1 0.41e-4. Differences between rungs that share the start (paired) are free of that term.
 
 
-## Stage 1 - net column (exploratory; vs A2n seed 0)
+## Stage 1 - net column (exploratory; vs A2n seed 0, or its warm-start re-run)
 
 | run | k | Δ | keep | equal NLL (seed 0) | converged |
 |---|---|---|---|---|---|
-| A4n | 665 | +0.55 ± 0.98 (n 14950) | no | yes | no |
-| A5n | 699 | +3.10 ± 1.13 (n 14950) | no | no | no |
-| A7n | 701 | +0.12 ± 0.35 (n 14950) | no | yes | no |
-| A8n | 700 | -0.34 ± 0.29 (n 14950) | no | yes | no |
-| A9n | 718 | -5.15 ± 1.00 (n 14950) | yes | yes | no |
-| A10n | 599 | +52.76 ± 4.16 (n 14950) | no | no | no |
+| A4n_s0 vs A2n_s0 | 665 | +0.55 ± 0.98 (n 14950) | no | yes | no |
+| A5n_s0 vs A2n_s0 | 699 | +3.10 ± 1.13 (n 14950) | no | no | no |
+| A7n_s0 vs A2n_s0 | 701 | +0.12 ± 0.35 (n 14950) | no | yes | no |
+| A8n_s0 vs A2n_s0 | 700 | -0.34 ± 0.29 (n 14950) | no | yes | no |
+| A9n_s0 vs A2n_s0 | 718 | -5.15 ± 1.00 (n 14950) | yes | yes | no |
+| A10n_s0 vs A2n_s0 | 599 | +52.76 ± 4.16 (n 14950) | no | no | no |
 
 ## Stage 1 - exploratory (vs A2s of the same seed)
 
-| rung | k | Δ seed 0 | keep s0 | equal s0 | Δ seed 1 | replicated | alternative - decides nothing: two-seed mean <= -2 SE | equal NLL (both) | cleaner (gain / constants) |
-|---|---|---|---|---|---|---|---|---|---|
-| A4t | 89 | +19.54 ± 4.13 (n 14950) | no | no | - | - | - | - | no / no |
-| A5h | 97 | +5.04 ± 1.87 (n 14950) | no | no | - | - | - | - | no / no |
-| A6i | 97 | +6.42 ± 1.31 (n 14950) | no | no | - | - | - | - | no / no |
-| A6l | 97 | +9.66 ± 1.49 (n 14950) | no | no | - | - | - | - | no / no |
-| A6b | 98 | +1.07 ± 2.21 (n 14950) | no | no | - | - | - | - | no / no |
-| A7s | 102 | -0.52 ± 0.27 (n 14950) | no | yes | -0.47 ± 0.27 (n 14950) | no | no | yes | no / no |
-| A7l | 102 | -0.20 ± 0.14 (n 14950) | no | yes | -0.18 ± 0.14 (n 14950) | no | no | yes | no / no |
-| A8c | 102 | -0.23 ± 0.14 (n 14950) | no | yes | -0.20 ± 0.14 (n 14950) | no | no | yes | no / no |
-| A78 | 104 | -0.50 ± 0.47 (n 14950) | no | yes | -0.47 ± 0.47 (n 14950) | no | no | yes | no / no |
-| A9r | 98 | -4.63 ± 1.24 (n 14950) | yes | yes | -4.64 ± 1.24 (n 14950) | yes | yes | yes | no / no |
-| A3f | 101 | +8.04 ± 1.04 (n 14950) | no | no | - | - | - | - | no / no |
-| A3c (template note Q1/Q2) | 101 | +6.23 ± 0.95 (n 14950) | no | no | - | - | - | - | no / no |
-| A3x (template note Q1/Q2) | 101 | +0.37 ± 0.47 (n 14950) | no | yes | +0.39 ± 0.47 (n 14950) | no | no | yes | no / no |
-| A10-2 | 48 | +115.67 ± 5.26 (n 14950) | no | no | - | - | - | - | no / no |
-| A10-4 | 100 | +44.49 ± 4.02 (n 14950) | no | no | - | - | - | - | no / no |
-| A10-5 | 126 | +20.27 ± 3.06 (n 14950) | no | no | - | - | - | - | no / no |
-| A10g | 98 | +32.45 ± 3.93 (n 14950) | no | no | - | - | - | - | no / no |
-| A12 | 102 | -1.15 ± 0.82 (n 14950) | no | yes | -1.13 ± 0.83 (n 14950) | no | no | yes | no / no |
+| rung | k | Δ seed 0 | keep s0 | equal s0 | Δ seed 1 | replicated | replicated under the alternative reading (literal conditions AND two-seed mean <= -2 SE; alternative - decides nothing) | equal NLL (both) | cleaner (gain / constants) | control: Δ vs A2c s0 / s1 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| A4t | 89 | +19.54 ± 4.13 (n 14950) | no | no | - | - | - | - | no / no | +19.70 ± 4.12 (n 14950) / - |
+| A5h | 97 | +5.04 ± 1.87 (n 14950) | no | no | - | - | - | - | no / no | +5.20 ± 1.86 (n 14950) / - |
+| A6i | 97 | +6.42 ± 1.31 (n 14950) | no | no | - | - | - | - | no / no | +6.58 ± 1.30 (n 14950) / - |
+| A6l | 97 | +9.66 ± 1.49 (n 14950) | no | no | - | - | - | - | no / no | +9.82 ± 1.47 (n 14950) / - |
+| A6b | 98 | +1.07 ± 2.21 (n 14950) | no | no | - | - | - | - | no / no | +1.23 ± 2.21 (n 14950) / - |
+| A7s | 102 | -0.52 ± 0.27 (n 14950) | no | yes | -0.47 ± 0.27 (n 14950) | no | no | yes | no / no | -0.36 ± 0.25 (n 14950) / -0.34 ± 0.25 (n 14950) |
+| A7l | 102 | -0.20 ± 0.14 (n 14950) | no | yes | -0.18 ± 0.14 (n 14950) | no | no | yes | no / no | -0.04 ± 0.06 (n 14950) / -0.04 ± 0.06 (n 14950) |
+| A8c | 102 | -0.23 ± 0.14 (n 14950) | no | yes | -0.20 ± 0.14 (n 14950) | no | no | yes | no / no | -0.07 ± 0.07 (n 14950) / -0.07 ± 0.06 (n 14950) |
+| A78 | 104 | -0.50 ± 0.47 (n 14950) | no | yes | -0.47 ± 0.47 (n 14950) | no | no | yes | no / no | -0.34 ± 0.47 (n 14950) / -0.33 ± 0.48 (n 14950) |
+| A9r | 98 | -4.63 ± 1.24 (n 14950) | yes | yes | -4.64 ± 1.24 (n 14950) | yes | yes | yes | no / no | -4.47 ± 1.25 (n 14950) / -4.51 ± 1.25 (n 14950) |
+| A3f | 101 | +8.04 ± 1.04 (n 14950) | no | no | - | - | - | - | no / no | +8.20 ± 1.04 (n 14950) / - |
+| A3c (template notes Q1, Q2) | 101 | +6.23 ± 0.95 (n 14950) | no | no | - | - | - | - | no / no | +6.39 ± 0.95 (n 14950) / - |
+| A3x (template note Q1) | 101 | +0.37 ± 0.47 (n 14950) | no | yes | +0.39 ± 0.47 (n 14950) | no | no | yes | no / no | +0.53 ± 0.46 (n 14950) / +0.53 ± 0.46 (n 14950) |
+| A10-2 | 48 | +115.67 ± 5.26 (n 14950) | no | no | - | - | - | - | no / no | not matched (6000 steps, init_from_target) / - |
+| A10-4 | 100 | +44.49 ± 4.02 (n 14950) | no | no | - | - | - | - | no / no | not matched (6000 steps, init_from_target) / - |
+| A10-5 | 126 | +20.27 ± 3.06 (n 14950) | no | no | - | - | - | - | no / no | not matched (6000 steps, init_from_target) / - |
+| A10g | 98 | +32.45 ± 3.93 (n 14950) | no | no | - | - | - | - | no / no | not matched (6000 steps, init_from_target) / - |
+| A12 | 102 | -1.15 ± 0.82 (n 14950) | no | yes | -1.13 ± 0.83 (n 14950) | no | no | yes | no / no | -0.99 ± 0.81 (n 14950) / -0.99 ± 0.81 (n 14950) |
 
 **Template limitations (A3c / A3x; review rulings Q1 and Q2, runs as registered):**
 
@@ -166,7 +174,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) -0.63 ± 0.26 (n 
 | normalisation term (own row) | +0.22 ± 0.01 (n 14950) |
 
 flagged share of the gain -0.407; margin flagged - 0.5 main +0.46 ± 0.12 (n 14950) -> passed yes, resolved yes; decomposition residual 1.5e-05
-*alternative - decides nothing:* flagged share of the hit-term total -0.282; margin flagged - 0.5 hit term +0.57 ± 0.12 (n 14950) -> would pass yes
+*alternative - decides nothing:* flagged share of the hit-term total -0.282; margin flagged - 0.5 hit term +0.57 ± 0.12 (n 14950) -> would pass yes (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -200,7 +208,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) -0.20 ± 0.27 (n 
 | normalisation term (own row) | -0.04 ± 0.00 (n 14950) |
 
 flagged share of the gain 0.142; margin flagged - 0.5 main +0.02 ± 0.13 (n 14950) -> passed yes, resolved no; decomposition residual 1.3e-05
-*alternative - decides nothing:* flagged share of the hit-term total 0.344; margin flagged - 0.5 hit term +0.00 ± 0.13 (n 14950) -> would pass yes
+*alternative - decides nothing:* flagged share of the hit-term total 0.344; margin flagged - 0.5 hit term +0.00 ± 0.13 (n 14950) -> would pass yes (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -234,7 +242,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) -4.81 ± 0.89 (n 
 | normalisation term (own row) | -0.04 ± 0.02 (n 14950) |
 
 flagged share of the gain 0.709; margin flagged - 0.5 main -0.98 ± 0.37 (n 14950) -> passed no, resolved yes; decomposition residual 1.4e-05
-*alternative - decides nothing:* flagged share of the hit-term total 0.715; margin flagged - 0.5 hit term -0.99 ± 0.37 (n 14950) -> would pass no
+*alternative - decides nothing:* flagged share of the hit-term total 0.715; margin flagged - 0.5 hit term -0.99 ± 0.37 (n 14950) -> would pass no (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -268,7 +276,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) -0.58 ± 0.27 (n 
 | normalisation term (own row) | +0.23 ± 0.01 (n 14950) |
 
 flagged share of the gain -0.395; margin flagged - 0.5 main +0.41 ± 0.13 (n 14950) -> passed yes, resolved yes; decomposition residual 1.6e-05
-*alternative - decides nothing:* flagged share of the hit-term total -0.264; margin flagged - 0.5 hit term +0.53 ± 0.13 (n 14950) -> would pass yes
+*alternative - decides nothing:* flagged share of the hit-term total -0.264; margin flagged - 0.5 hit term +0.53 ± 0.13 (n 14950) -> would pass yes (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -302,7 +310,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) -0.20 ± 0.27 (n 
 | normalisation term (own row) | -0.04 ± 0.00 (n 14950) |
 
 flagged share of the gain -0.11; margin flagged - 0.5 main +0.03 ± 0.13 (n 14950) -> passed yes, resolved no; decomposition residual 1.4e-05
-*alternative - decides nothing:* flagged share of the hit-term total -1.042; margin flagged - 0.5 hit term +0.01 ± 0.13 (n 14950) -> would pass yes
+*alternative - decides nothing:* flagged share of the hit-term total -1.042; margin flagged - 0.5 hit term +0.01 ± 0.13 (n 14950) -> would pass yes (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -336,7 +344,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) -4.82 ± 0.90 (n 
 | normalisation term (own row) | -0.04 ± 0.02 (n 14950) |
 
 flagged share of the gain 0.715; margin flagged - 0.5 main -1.00 ± 0.38 (n 14950) -> passed no, resolved yes; decomposition residual 1.5e-05
-*alternative - decides nothing:* flagged share of the hit-term total 0.721; margin flagged - 0.5 hit term -1.02 ± 0.38 (n 14950) -> would pass no
+*alternative - decides nothing:* flagged share of the hit-term total 0.721; margin flagged - 0.5 hit term -1.02 ± 0.38 (n 14950) -> would pass no (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -370,7 +378,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) +0.30 ± 0.97 (n 
 | normalisation term (own row) | -0.37 ± 0.05 (n 14950) |
 
 flagged share of the gain 0.276; margin flagged - 0.5 main -0.12 ± 0.47 (n 14950) -> passed no, resolved no; decomposition residual 1.6e-05
-*alternative - decides nothing:* flagged share of the hit-term total 0.166; margin flagged - 0.5 hit term -0.31 ± 0.47 (n 14950) -> would pass no
+*alternative - decides nothing:* flagged share of the hit-term total 0.166; margin flagged - 0.5 hit term -0.31 ± 0.47 (n 14950) -> would pass no (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -404,7 +412,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) -0.20 ± 0.34 (n 
 | normalisation term (own row) | +0.14 ± 0.01 (n 14950) |
 
 flagged share of the gain 2.679; margin flagged - 0.5 main +0.26 ± 0.16 (n 14950) -> passed no, resolved no; decomposition residual 1.4e-05
-*alternative - decides nothing:* flagged share of the hit-term total -19.542; margin flagged - 0.5 hit term +0.33 ± 0.16 (n 14950) -> would pass yes
+*alternative - decides nothing:* flagged share of the hit-term total -19.542; margin flagged - 0.5 hit term +0.33 ± 0.16 (n 14950) -> would pass no (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -438,7 +446,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) -0.89 ± 0.26 (n 
 | normalisation term (own row) | -0.13 ± 0.01 (n 14950) |
 
 flagged share of the gain -0.289; margin flagged - 0.5 main +0.27 ± 0.13 (n 14950) -> passed yes, resolved yes; decomposition residual 1.6e-05
-*alternative - decides nothing:* flagged share of the hit-term total -0.471; margin flagged - 0.5 hit term +0.20 ± 0.13 (n 14950) -> would pass yes
+*alternative - decides nothing:* flagged share of the hit-term total -0.471; margin flagged - 0.5 hit term +0.20 ± 0.13 (n 14950) -> would pass yes (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -472,7 +480,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) -5.43 ± 1.00 (n 
 | normalisation term (own row) | +0.04 ± 0.02 (n 14950) |
 
 flagged share of the gain 0.591; margin flagged - 0.5 main -0.47 ± 0.41 (n 14950) -> passed no, resolved no; decomposition residual 1.4e-05
-*alternative - decides nothing:* flagged share of the hit-term total 0.587; margin flagged - 0.5 hit term -0.45 ± 0.41 (n 14950) -> would pass no
+*alternative - decides nothing:* flagged share of the hit-term total 0.587; margin flagged - 0.5 hit term -0.45 ± 0.41 (n 14950) -> would pass no (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -506,7 +514,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) -0.64 ± 0.26 (n 
 | normalisation term (own row) | +0.23 ± 0.01 (n 14950) |
 
 flagged share of the gain -0.396; margin flagged - 0.5 main +0.46 ± 0.12 (n 14950) -> passed yes, resolved yes; decomposition residual 1.6e-05
-*alternative - decides nothing:* flagged share of the hit-term total -0.276; margin flagged - 0.5 hit term +0.58 ± 0.12 (n 14950) -> would pass yes
+*alternative - decides nothing:* flagged share of the hit-term total -0.276; margin flagged - 0.5 hit term +0.58 ± 0.12 (n 14950) -> would pass yes (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -540,7 +548,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) -0.60 ± 0.26 (n 
 | normalisation term (own row) | +0.23 ± 0.01 (n 14950) |
 
 flagged share of the gain -0.41; margin flagged - 0.5 main +0.43 ± 0.12 (n 14950) -> passed yes, resolved yes; decomposition residual 1.6e-05
-*alternative - decides nothing:* flagged share of the hit-term total -0.276; margin flagged - 0.5 hit term +0.55 ± 0.12 (n 14950) -> would pass yes
+*alternative - decides nothing:* flagged share of the hit-term total -0.276; margin flagged - 0.5 hit term +0.55 ± 0.12 (n 14950) -> would pass yes (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -574,7 +582,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) -0.08 ± 0.13 (n 
 | normalisation term (own row) | +0.17 ± 0.00 (n 14950) |
 
 flagged share of the gain -0.593; margin flagged - 0.5 main +0.22 ± 0.06 (n 14950) -> passed yes, resolved yes; decomposition residual 1.6e-05
-*alternative - decides nothing:* flagged share of the hit-term total -0.321; margin flagged - 0.5 hit term +0.31 ± 0.06 (n 14950) -> would pass yes
+*alternative - decides nothing:* flagged share of the hit-term total -0.321; margin flagged - 0.5 hit term +0.31 ± 0.06 (n 14950) -> would pass yes (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -608,7 +616,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) -0.06 ± 0.13 (n 
 | normalisation term (own row) | +0.17 ± 0.00 (n 14950) |
 
 flagged share of the gain -0.661; margin flagged - 0.5 main +0.20 ± 0.06 (n 14950) -> passed yes, resolved yes; decomposition residual 1.3e-05
-*alternative - decides nothing:* flagged share of the hit-term total -0.338; margin flagged - 0.5 hit term +0.29 ± 0.06 (n 14950) -> would pass yes
+*alternative - decides nothing:* flagged share of the hit-term total -0.338; margin flagged - 0.5 hit term +0.29 ± 0.06 (n 14950) -> would pass yes (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -642,7 +650,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) -0.07 ± 0.14 (n 
 | normalisation term (own row) | +0.13 ± 0.00 (n 14950) |
 
 flagged share of the gain -0.395; margin flagged - 0.5 main +0.21 ± 0.07 (n 14950) -> passed yes, resolved yes; decomposition residual 1.4e-05
-*alternative - decides nothing:* flagged share of the hit-term total -0.249; margin flagged - 0.5 hit term +0.27 ± 0.07 (n 14950) -> would pass yes
+*alternative - decides nothing:* flagged share of the hit-term total -0.249; margin flagged - 0.5 hit term +0.27 ± 0.07 (n 14950) -> would pass yes (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -676,7 +684,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) -0.05 ± 0.14 (n 
 | normalisation term (own row) | +0.13 ± 0.00 (n 14950) |
 
 flagged share of the gain -0.449; margin flagged - 0.5 main +0.19 ± 0.07 (n 14950) -> passed yes, resolved yes; decomposition residual 1.4e-05
-*alternative - decides nothing:* flagged share of the hit-term total -0.271; margin flagged - 0.5 hit term +0.26 ± 0.07 (n 14950) -> would pass yes
+*alternative - decides nothing:* flagged share of the hit-term total -0.271; margin flagged - 0.5 hit term +0.26 ± 0.07 (n 14950) -> would pass yes (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -710,7 +718,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) -1.11 ± 0.43 (n 
 | normalisation term (own row) | +0.01 ± 0.01 (n 14950) |
 
 flagged share of the gain -0.101; margin flagged - 0.5 main +0.30 ± 0.21 (n 14950) -> passed yes, resolved no; decomposition residual 1.5e-05
-*alternative - decides nothing:* flagged share of the hit-term total -0.098; margin flagged - 0.5 hit term +0.31 ± 0.21 (n 14950) -> would pass yes
+*alternative - decides nothing:* flagged share of the hit-term total -0.098; margin flagged - 0.5 hit term +0.31 ± 0.21 (n 14950) -> would pass yes (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -744,7 +752,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) -1.09 ± 0.43 (n 
 | normalisation term (own row) | +0.02 ± 0.01 (n 14950) |
 
 flagged share of the gain -0.114; margin flagged - 0.5 main +0.29 ± 0.21 (n 14950) -> passed yes, resolved no; decomposition residual 1.5e-05
-*alternative - decides nothing:* flagged share of the hit-term total -0.11; margin flagged - 0.5 hit term +0.30 ± 0.21 (n 14950) -> would pass yes
+*alternative - decides nothing:* flagged share of the hit-term total -0.11; margin flagged - 0.5 hit term +0.30 ± 0.21 (n 14950) -> would pass yes (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -778,7 +786,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) -5.72 ± 1.00 (n 
 | normalisation term (own row) | +0.46 ± 0.02 (n 14950) |
 
 flagged share of the gain 0.354; margin flagged - 0.5 main +0.68 ± 0.57 (n 14950) -> passed yes, resolved no; decomposition residual 1.4e-05
-*alternative - decides nothing:* flagged share of the hit-term total 0.322; margin flagged - 0.5 hit term +0.91 ± 0.57 (n 14950) -> would pass yes
+*alternative - decides nothing:* flagged share of the hit-term total 0.322; margin flagged - 0.5 hit term +0.91 ± 0.57 (n 14950) -> would pass yes (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -812,7 +820,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) -5.75 ± 1.01 (n 
 | normalisation term (own row) | +0.46 ± 0.02 (n 14950) |
 
 flagged share of the gain 0.357; margin flagged - 0.5 main +0.66 ± 0.57 (n 14950) -> passed yes, resolved no; decomposition residual 1.5e-05
-*alternative - decides nothing:* flagged share of the hit-term total 0.325; margin flagged - 0.5 hit term +0.89 ± 0.57 (n 14950) -> would pass yes
+*alternative - decides nothing:* flagged share of the hit-term total 0.325; margin flagged - 0.5 hit term +0.89 ± 0.57 (n 14950) -> would pass yes (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -846,7 +854,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) -0.02 ± 0.46 (n 
 | normalisation term (own row) | -6.94 ± 0.05 (n 14950) |
 
 flagged share of the gain -14.757; margin flagged - 0.5 main -5.60 ± 0.28 (n 14950) -> passed no, resolved yes; decomposition residual 1.7e-05
-*alternative - decides nothing:* flagged share of the hit-term total -0.741; margin flagged - 0.5 hit term -9.07 ± 0.28 (n 14950) -> would pass no
+*alternative - decides nothing:* flagged share of the hit-term total -0.741; margin flagged - 0.5 hit term -9.07 ± 0.28 (n 14950) -> would pass no (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -880,7 +888,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) +0.01 ± 0.46 (n 
 | normalisation term (own row) | -7.00 ± 0.05 (n 14950) |
 
 flagged share of the gain -13.726; margin flagged - 0.5 main -5.59 ± 0.28 (n 14950) -> passed no, resolved yes; decomposition residual 1.4e-05
-*alternative - decides nothing:* flagged share of the hit-term total -0.73; margin flagged - 0.5 hit term -9.09 ± 0.28 (n 14950) -> would pass no
+*alternative - decides nothing:* flagged share of the hit-term total -0.73; margin flagged - 0.5 hit term -9.09 ± 0.28 (n 14950) -> would pass no (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -914,7 +922,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) +0.44 ± 0.59 (n 
 | normalisation term (own row) | +0.31 ± 0.00 (n 14950) |
 
 flagged share of the gain 6.118; margin flagged - 0.5 main -6.48 ± 0.44 (n 14950) -> passed no, resolved yes; decomposition residual 1.4e-05
-*alternative - decides nothing:* flagged share of the hit-term total 4.835; margin flagged - 0.5 hit term -6.32 ± 0.44 (n 14950) -> would pass no
+*alternative - decides nothing:* flagged share of the hit-term total 4.835; margin flagged - 0.5 hit term -6.32 ± 0.44 (n 14950) -> would pass no (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -948,7 +956,7 @@ Report metric on the strata (own rows): zb>=1221 (bulk events) +0.46 ± 0.59 (n 
 | normalisation term (own row) | +0.31 ± 0.00 (n 14950) |
 
 flagged share of the gain 6.286; margin flagged - 0.5 main -6.53 ± 0.44 (n 14950) -> passed no, resolved yes; decomposition residual 1.6e-05
-*alternative - decides nothing:* flagged share of the hit-term total 4.942; margin flagged - 0.5 hit term -6.38 ± 0.44 (n 14950) -> would pass no
+*alternative - decides nothing:* flagged share of the hit-term total 4.942; margin flagged - 0.5 hit term -6.38 ± 0.44 (n 14950) -> would pass no (requires a gain in the total as well)
 
 | G-mass monitor | run mean | comparator mean | Δ (paired, ×1e-4) |
 |---|---|---|---|
@@ -964,6 +972,13 @@ flagged share of the gain 6.286; margin flagged - 0.5 main -6.53 ± 0.44 (n 1495
 ## A6b: Fisher information of k
 
 Observed information of the raw coefficient of `sh_rk` on the training events: 1343 (SE of the coefficient 0.02728552554283298).
+
+## Diverged and blocked runs (user decision of 25 Nov 2026, PLAN 17.11)
+
+Definition: A run is 'diverged' iff (i) a validation mean in its fit history is not finite, or (ii) the registry evaluation of the finished fit finds a non-finite per-event NLL (FloatingPointError), or (iii) 'frozen': in the last evaluation window at least 50 % of the training batches were skipped by sfm.train.fit for a non-finite loss or gradient, or (iv) 'blow-up': the last validation mean exceeds the reference by more than 1 nat per event (10,000 in table units), the reference being the lowest of: the validation means of the fit history, the step-0 validation mean of a network warm start, and the registered validation mean of the run's comparator. Isolated skipped batches of a fit that ends finite are NOT a divergence (they are reported with the run).
+
+None.
+
 
 ## Convergence (|val(last) - val(last - window)| < 0.5e-4)
 
@@ -983,6 +998,8 @@ Observed information of the raw coefficient of `sh_rk` on the training events: 1
 | A12_s1 | yes | 0.41e-4 |
 | A1_s0 | no | 1.27e-4 |
 | A1_s1 | no | 0.61e-4 |
+| A2c_s0 | yes | 0.13e-4 |
+| A2c_s1 | yes | 0.40e-4 |
 | A2e_s0 | yes | 0.11e-4 |
 | A2e_s1 | yes | 0.40e-4 |
 | A2n_s0 | no | 1.40e-4 |
@@ -1038,76 +1055,78 @@ Observed information of the raw coefficient of `sh_rk` on the training events: 1
 
 ## Initialisation (review B2; kl_map in nat against the start / initialisation / fit_to target)
 
-Net runs with kl_map > 0.0001 nat are flagged: warm start degraded - net column not interpretable for this run (reference: the pre-registered warm start of A1 gives 5.5e-6 nat). Target columns of a net warm start with a relative spread between the 2^-20 floor and 0.01 are listed (reporting only; fit_to is unchanged).
+Net runs with kl_map > 0.0001 nat are flagged: warm start degraded - net column not interpretable for this run (reference: the pre-registered warm start of A1 gives 5.5e-6 nat). 'step-0 parity' = paired difference on validation between the network at step 0 and its source polynomial run (user decision of 25 Nov 2026; for runs made before fit_to version 3 it refers to the warm start rebuilt by warmstart-check). 'rms_max / std' is the worst column's rms error divided by that column's spread (review R5). Target columns with a relative spread between the 2^-20 floor and 0.01 and columns below the scale floor (std < 1e-2, fit_to version 3) are listed.
 
-| run | provider | kl_map | reference | claim | net: rms_max (column) / L-BFGS stopped | flag | nearly-constant target columns |
-|---|---|---|---|---|---|---|---|
-| A0_s0 | poly | 0.00e+00 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |
-| A0_s1 | poly | 0.00e+00 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |
-| A10-2_s0 | poly | 6.21e-02 | m2a_dist/A2s_s0 |  |  |  |  |
-| A10-4_s0 | poly | 3.22e-02 | m2a_dist/A2s_s0 |  |  |  |  |
-| A10-5_s0 | poly | 1.39e-02 | m2a_dist/A2s_s0 |  |  |  |  |
-| A10_s0 | poly | 3.17e-02 | m2a_dist/A2s_s0 |  |  |  |  |
-| A10_s0_x2 | poly | 3.17e-02 | m2a_dist/A2s_s0 |  |  |  |  |
-| A10_s1 | poly | 3.19e-02 | m2a_dist/A2s_s1 |  |  |  |  |
-| A10g_s0 | poly | 2.28e-02 | m2a_dist/A2s_s0 |  |  |  |  |
-| A10n_s0 | net | 2.26e-05 | m2a_dist/A10_s0 |  | 1.41e-02 (c0_rsig) / no | ok | none |
-| A12_s0 | poly | -2.22e-09 | m2a_dist/A2s_s0 | exactly A2s: yes |  |  |  |
-| A12_s1 | poly | 1.60e-09 | m2a_dist/A2s_s1 | exactly A2s: yes |  |  |  |
-| A1_s0 | net | 7.36e-06 | legacy formula (legacy_centre, legacy coefficients, stored template) |  | 4.55e-01 (zs) / no | ok | none |
-| A1_s1 | net | 3.03e-06 | legacy formula (legacy_centre, legacy coefficients, stored template) |  | 2.76e-01 (zs) / no | ok | none |
-| A2e_s0 | poly | 6.75e-03 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |
-| A2e_s1 | poly | 6.75e-03 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |
-| A2n_s0 | net | 6.99e-06 | m2a_dist/A2s_s0 |  | 3.43e-01 (zs) / no | ok | none |
-| A2n_s1 | net | 2.71e-06 | m2a_dist/A2s_s1 |  | 3.54e-01 (zs) / no | ok | none |
-| A2n_s2 | net | 2.36e-06 | m2a_dist/A2s_s2 |  | 3.54e-01 (zs) / no | ok | none |
-| A2s_s0 | poly | 7.20e-03 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |
-| A2s_s0_x2 | poly | 7.20e-03 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |
-| A2s_s1 | poly | 7.20e-03 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |
-| A2s_s1_x2 | poly | 7.20e-03 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |
-| A2s_s2 | poly | 7.20e-03 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |
-| A3c_s0 | poly | 1.39e-03 | m2a_dist/A2s_s0 |  |  |  |  |
-| A3f_s0 | poly | 1.51e-03 | m2a_dist/A2s_s0 |  |  |  |  |
-| A3x_s0 | poly | 9.13e-04 | m2a_dist/A2s_s0 |  |  |  |  |
-| A3x_s1 | poly | 9.16e-04 | m2a_dist/A2s_s1 |  |  |  |  |
-| A4_s0 | poly | 1.24e-04 | m2a_dist/A2s_s0 |  |  |  |  |
-| A4_s1 | poly | 1.25e-04 | m2a_dist/A2s_s1 |  |  |  |  |
-| A4_s1_x2 | poly | 1.25e-04 | m2a_dist/A2s_s1 |  |  |  |  |
-| A4n_s0 | net | 1.70e-06 | m2a_dist/A4_s0 |  | 7.08e-03 (logit_end) / no | ok | none |
-| A4t_s0 | poly | 9.82e-03 | m2a_dist/A2s_s0 |  |  |  |  |
-| A5_s0 | poly | 6.22e-04 | m2a_dist/A2s_s0 |  |  |  |  |
-| A5_s1 | poly | 6.19e-04 | m2a_dist/A2s_s1 |  |  |  |  |
-| A5_s1_x2 | poly | 6.19e-04 | m2a_dist/A2s_s1 |  |  |  |  |
-| A5h_s0 | poly | 2.65e-03 | m2a_dist/A2s_s0 |  |  |  |  |
-| A5n_s0 | net | 3.96e-06 | m2a_dist/A5_s0 |  | 8.64e-03 (sh_rdelta) / no | ok | none |
-| A6b_s0 | poly | 1.82e-03 | m2a_dist/A2s_s0 |  |  |  |  |
-| A6i_s0 | poly | 6.06e-04 | m2a_dist/A2s_s0 |  |  |  |  |
-| A6l_s0 | poly | 9.82e-04 | m2a_dist/A2s_s0 |  |  |  |  |
-| A78_s0 | poly | -2.63e-08 | m2a_dist/A2s_s0 | exactly A2s: yes |  |  |  |
-| A78_s1 | poly | -2.12e-08 | m2a_dist/A2s_s1 | exactly A2s: yes |  |  |  |
-| A7_s0 | poly | -2.89e-08 | m2a_dist/A2s_s0 | exactly A2s: yes |  |  |  |
-| A7_s1 | poly | -1.17e-08 | m2a_dist/A2s_s1 | exactly A2s: yes |  |  |  |
-| A7l_s0 | poly | 5.30e-06 | m2a_dist/A2s_s0 |  |  |  |  |
-| A7l_s1 | poly | 5.32e-06 | m2a_dist/A2s_s1 |  |  |  |  |
-| A7n_s0 | net | 1.11e-05 | m2a_dist/A7_s0 |  | 3.91e-01 (zs) / no | ok | none |
-| A7s_s0 | poly | -2.89e-08 | m2a_dist/A2s_s0 | exactly A2s: yes |  |  |  |
-| A7s_s1 | poly | -1.17e-08 | m2a_dist/A2s_s1 | exactly A2s: yes |  |  |  |
-| A8_s0 | poly | -4.52e-09 | m2a_dist/A2s_s0 | exactly A2s: yes |  |  |  |
-| A8_s1 | poly | -1.75e-08 | m2a_dist/A2s_s1 | exactly A2s: yes |  |  |  |
-| A8c_s0 | poly | -3.29e-08 | m2a_dist/A2s_s0 | exactly A2s: yes |  |  |  |
-| A8c_s1 | poly | 1.87e-08 | m2a_dist/A2s_s1 | exactly A2s: yes |  |  |  |
-| A8n_s0 | net | 6.45e-06 | m2a_dist/A8_s0 |  | 4.13e-01 (zs) / no | ok | none |
-| A9_s0 | poly | 2.15e-04 | m2a_dist/A2s_s0 |  |  |  |  |
-| A9_s1 | poly | 2.15e-04 | m2a_dist/A2s_s1 |  |  |  |  |
-| A9n_s0 | net | 1.42e-05 | m2a_dist/A9_s0 |  | 4.67e-01 (zs) / no | ok | none |
-| A9r_s0 | poly | 7.93e-04 | m2a_dist/A2s_s0 |  |  |  |  |
-| A9r_s1 | poly | 7.94e-04 | m2a_dist/A2s_s1 |  |  |  |  |
-| plr_A2n_lr0.001 | net | 6.99e-06 | m2a_dist/A2s_s0 |  | 3.43e-01 (zs) / no | ok | none |
-| plr_A2n_lr0.003 | net | 6.99e-06 | m2a_dist/A2s_s0 |  | 3.43e-01 (zs) / no | ok | none |
-| plr_A2n_lr0.01 | net | 6.99e-06 | m2a_dist/A2s_s0 |  | 3.43e-01 (zs) / no | ok | none |
-| plr_A2s_lr0.003 | poly | 7.20e-03 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |
-| plr_A2s_lr0.01 | poly | 7.20e-03 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |
-| plr_A2s_lr0.03 | poly | 7.20e-03 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |
+| run | provider | kl_map | reference | claim | net: fit_to version / rms_max / std (column) / L-BFGS stopped | step-0 parity Δ(step 0 - source) | flag | nearly-constant / below-floor target columns |
+|---|---|---|---|---|---|---|---|---|
+| A0_s0 | poly | 0.00e+00 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |  |
+| A0_s1 | poly | 0.00e+00 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |  |
+| A10-2_s0 | poly | 6.21e-02 | m2a_dist/A2s_s0 |  |  |  |  |  |
+| A10-4_s0 | poly | 3.22e-02 | m2a_dist/A2s_s0 |  |  |  |  |  |
+| A10-5_s0 | poly | 1.39e-02 | m2a_dist/A2s_s0 |  |  |  |  |  |
+| A10_s0 | poly | 3.17e-02 | m2a_dist/A2s_s0 |  |  |  |  |  |
+| A10_s0_x2 | poly | 3.17e-02 | m2a_dist/A2s_s0 |  |  |  |  |  |
+| A10_s1 | poly | 3.19e-02 | m2a_dist/A2s_s1 |  |  |  |  |  |
+| A10g_s0 | poly | 2.28e-02 | m2a_dist/A2s_s0 |  |  |  |  |  |
+| A10n_s0 | net | 2.26e-05 | m2a_dist/A10_s0 |  | v2 / 0.27 % (c0_rsig) / no | -0.17 ± 0.04 (n 14950) vs A10_s0, max 1.1e-02 (rebuilt) | ok | none |
+| A12_s0 | poly | -2.22e-09 | m2a_dist/A2s_s0 | exactly A2s: yes |  |  |  |  |
+| A12_s1 | poly | 1.60e-09 | m2a_dist/A2s_s1 | exactly A2s: yes |  |  |  |  |
+| A1_s0 | net | 7.36e-06 | legacy formula (legacy_centre, legacy coefficients, stored template) |  | v2 / 1.40 % (zs) / no | +0.18 ± 0.08 (n 14950) vs A0_init, max 3.3e-02 (rebuilt) | ok | none |
+| A1_s1 | net | 3.03e-06 | legacy formula (legacy_centre, legacy coefficients, stored template) |  | v2 / 0.85 % (zs) / no | +0.10 ± 0.06 (n 14950) vs A0_init, max 1.8e-02 (rebuilt) | ok | none |
+| A2c_s0 | poly | 0.00e+00 | m2a_dist/A2s_s0 |  |  |  |  |  |
+| A2c_s1 | poly | 0.00e+00 | m2a_dist/A2s_s1 |  |  |  |  |  |
+| A2e_s0 | poly | 6.75e-03 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |  |
+| A2e_s1 | poly | 6.75e-03 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |  |
+| A2n_s0 | net | 6.99e-06 | m2a_dist/A2s_s0 |  | v2 / 1.04 % (zs) / no | +0.07 ± 0.06 (n 14950) vs A2s_s0, max 2.4e-02 (rebuilt) | ok | none |
+| A2n_s1 | net | 2.71e-06 | m2a_dist/A2s_s1 |  | v2 / 1.08 % (zs) / no | +0.02 ± 0.06 (n 14950) vs A2s_s1, max 1.0e-02 (rebuilt) | ok | none |
+| A2n_s2 | net | 2.36e-06 | m2a_dist/A2s_s2 |  | v2 / 1.08 % (zs) / no | +0.02 ± 0.06 (n 14950) vs A2s_s2, max 1.1e-02 (rebuilt) | ok | none |
+| A2s_s0 | poly | 7.20e-03 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |  |
+| A2s_s0_x2 | poly | 7.20e-03 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |  |
+| A2s_s1 | poly | 7.20e-03 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |  |
+| A2s_s1_x2 | poly | 7.20e-03 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |  |
+| A2s_s2 | poly | 7.20e-03 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |  |
+| A3c_s0 | poly | 1.39e-03 | m2a_dist/A2s_s0 |  |  |  |  |  |
+| A3f_s0 | poly | 1.51e-03 | m2a_dist/A2s_s0 |  |  |  |  |  |
+| A3x_s0 | poly | 9.13e-04 | m2a_dist/A2s_s0 |  |  |  |  |  |
+| A3x_s1 | poly | 9.16e-04 | m2a_dist/A2s_s1 |  |  |  |  |  |
+| A4_s0 | poly | 1.24e-04 | m2a_dist/A2s_s0 |  |  |  |  |  |
+| A4_s1 | poly | 1.25e-04 | m2a_dist/A2s_s1 |  |  |  |  |  |
+| A4_s1_x2 | poly | 1.25e-04 | m2a_dist/A2s_s1 |  |  |  |  |  |
+| A4n_s0 | net | 1.70e-06 | m2a_dist/A4_s0 |  | v2 / 0.19 % (logit_end) / no | +0.05 ± 0.03 (n 14950) vs A4_s0, max 8.8e-03 (rebuilt) | ok | none |
+| A4t_s0 | poly | 9.82e-03 | m2a_dist/A2s_s0 |  |  |  |  |  |
+| A5_s0 | poly | 6.22e-04 | m2a_dist/A2s_s0 |  |  |  |  |  |
+| A5_s1 | poly | 6.19e-04 | m2a_dist/A2s_s1 |  |  |  |  |  |
+| A5_s1_x2 | poly | 6.19e-04 | m2a_dist/A2s_s1 |  |  |  |  |  |
+| A5h_s0 | poly | 2.65e-03 | m2a_dist/A2s_s0 |  |  |  |  |  |
+| A5n_s0 | net | 3.96e-06 | m2a_dist/A5_s0 |  | v2 / 0.23 % (sh_rdelta) / no | +0.02 ± 0.04 (n 14950) vs A5_s0, max 7.9e-03 (rebuilt) | ok | none |
+| A6b_s0 | poly | 1.82e-03 | m2a_dist/A2s_s0 |  |  |  |  |  |
+| A6i_s0 | poly | 6.06e-04 | m2a_dist/A2s_s0 |  |  |  |  |  |
+| A6l_s0 | poly | 9.82e-04 | m2a_dist/A2s_s0 |  |  |  |  |  |
+| A78_s0 | poly | -2.63e-08 | m2a_dist/A2s_s0 | exactly A2s: yes |  |  |  |  |
+| A78_s1 | poly | -2.12e-08 | m2a_dist/A2s_s1 | exactly A2s: yes |  |  |  |  |
+| A7_s0 | poly | -2.89e-08 | m2a_dist/A2s_s0 | exactly A2s: yes |  |  |  |  |
+| A7_s1 | poly | -1.17e-08 | m2a_dist/A2s_s1 | exactly A2s: yes |  |  |  |  |
+| A7l_s0 | poly | 5.30e-06 | m2a_dist/A2s_s0 |  |  |  |  |  |
+| A7l_s1 | poly | 5.32e-06 | m2a_dist/A2s_s1 |  |  |  |  |  |
+| A7n_s0 | net | 1.11e-05 | m2a_dist/A7_s0 |  | v2 / 1.19 % (zs) / no | +0.00 ± 0.07 (n 14950) vs A7_s0, max 2.1e-02 (rebuilt) | ok | none |
+| A7s_s0 | poly | -2.89e-08 | m2a_dist/A2s_s0 | exactly A2s: yes |  |  |  |  |
+| A7s_s1 | poly | -1.17e-08 | m2a_dist/A2s_s1 | exactly A2s: yes |  |  |  |  |
+| A8_s0 | poly | -4.52e-09 | m2a_dist/A2s_s0 | exactly A2s: yes |  |  |  |  |
+| A8_s1 | poly | -1.75e-08 | m2a_dist/A2s_s1 | exactly A2s: yes |  |  |  |  |
+| A8c_s0 | poly | -3.29e-08 | m2a_dist/A2s_s0 | exactly A2s: yes |  |  |  |  |
+| A8c_s1 | poly | 1.87e-08 | m2a_dist/A2s_s1 | exactly A2s: yes |  |  |  |  |
+| A8n_s0 | net | 6.45e-06 | m2a_dist/A8_s0 |  | v2 / 1.25 % (zs) / no | +0.02 ± 0.06 (n 14950) vs A8_s0, max 1.3e-02 (rebuilt) | ok | none |
+| A9_s0 | poly | 2.15e-04 | m2a_dist/A2s_s0 |  |  |  |  |  |
+| A9_s1 | poly | 2.15e-04 | m2a_dist/A2s_s1 |  |  |  |  |  |
+| A9n_s0 | net | 1.42e-05 | m2a_dist/A9_s0 |  | v2 / 1.42 % (zs) / no | +0.06 ± 0.09 (n 14950) vs A9_s0, max 3.6e-02 (rebuilt) | ok | none |
+| A9r_s0 | poly | 7.93e-04 | m2a_dist/A2s_s0 |  |  |  |  |  |
+| A9r_s1 | poly | 7.94e-04 | m2a_dist/A2s_s1 |  |  |  |  |  |
+| plr_A2n_lr0.001 | net | 6.99e-06 | m2a_dist/A2s_s0 |  | v2 / 1.04 % (zs) / no | +0.07 ± 0.06 (n 14950) vs A2s_s0, max 2.4e-02 (rebuilt) | ok | none |
+| plr_A2n_lr0.003 | net | 6.99e-06 | m2a_dist/A2s_s0 |  | v2 / 1.04 % (zs) / no | +0.07 ± 0.06 (n 14950) vs A2s_s0, max 2.4e-02 (rebuilt) | ok | none |
+| plr_A2n_lr0.01 | net | 6.99e-06 | m2a_dist/A2s_s0 |  | v2 / 1.04 % (zs) / no | +0.07 ± 0.06 (n 14950) vs A2s_s0, max 2.4e-02 (rebuilt) | ok | none |
+| plr_A2s_lr0.003 | poly | 7.20e-03 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |  |
+| plr_A2s_lr0.01 | poly | 7.20e-03 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |  |
+| plr_A2s_lr0.03 | poly | 7.20e-03 | legacy formula (legacy_centre, legacy coefficients, stored template) |  |  |  |  |  |
 
 Nearly-constant target columns in a net warm start: none.
 
@@ -1116,5 +1135,5 @@ Nearly-constant target columns in a net warm start: none.
 
 - primaries: A4: no, A5: no, A7: no, A8: no, A9: yes, A10: no
 - exploratory: A4t: no, A5h: no, A6i: no, A6l: no, A6b: no, A7s: no, A7l: no, A8c: no, A78: no, A9r: yes, A3f: no, A3c: no, A3x: no, A10-2: no, A10-4: no, A10-5: no, A10g: no, A12: no
-- *alternative - decides nothing* (two-seed mean also <= -2 SE): A4: no, A5: no, A7: no, A8: no, A9: yes, A10: no, A4t: no, A5h: no, A6i: no, A6l: no, A6b: no, A7s: no, A7l: no, A8c: no, A78: no, A9r: yes, A3f: no, A3c: no, A3x: no, A10-2: no, A10-4: no, A10-5: no, A10g: no, A12: no
+- *alternative - decides nothing* (literal conditions AND two-seed mean <= -2 SE): A4: no, A5: no, A7: no, A8: no, A9: yes, A10: no, A4t: no, A5h: no, A6i: no, A6l: no, A6b: no, A7s: no, A7l: no, A8c: no, A78: no, A9r: yes, A3f: no, A3c: no, A3x: no, A10-2: no, A10-4: no, A10-5: no, A10g: no, A12: no
 
