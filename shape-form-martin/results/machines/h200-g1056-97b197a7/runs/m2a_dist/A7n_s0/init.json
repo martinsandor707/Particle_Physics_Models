@@ -1,0 +1,108 @@
+{
+ "init_info": {
+  "provider": "net",
+  "start": null,
+  "init": "none",
+  "net_from": "m2a_dist/A7_s0",
+  "fit_to": {
+   "loss": 0.0003136125160381198,
+   "rms_max": 0.3909462094306946,
+   "rms_max_name": "zs",
+   "constant_columns": [
+    "q_sig",
+    "log_lam",
+    "q_1",
+    "q_2",
+    "log_R1",
+    "k_R",
+    "R0",
+    "log_wR",
+    "kap",
+    "zt0",
+    "log_st",
+    "log_d1",
+    "log_latt",
+    "log_Lf",
+    "log_Rf",
+    "log_sez",
+    "log_ser",
+    "log_lh",
+    "q_bk",
+    "log_cms",
+    "ms_pow",
+    "lat1_rc",
+    "lat1_rk"
+   ],
+   "near_floor_columns": {},
+   "scale_floor_rel": 9.5367431640625e-07,
+   "lbfgs_stopped": null,
+   "fit_to": "sfm.models.paramnet.ParamNet.fit_to (scale floor; no replica)"
+  },
+  "kl_ref": "m2a_dist/A7_s0",
+  "kl_map": 1.1078773241024464e-05
+ },
+ "build_seconds": 3.5140492916107178,
+ "n_params": 701,
+ "spec": {
+  "name": "A7n_s0",
+  "rung": "A7",
+  "factory": "component",
+  "kwargs": {
+   "provider": "net",
+   "net_from": "m2a_dist/A7_s0"
+  },
+  "seed": 0,
+  "provider": "net",
+  "cls": "primary-net",
+  "comparator": "A2n_s0",
+  "steps": 4000,
+  "lr": null,
+  "k_train": 16,
+  "init_eval": false,
+  "notes": ""
+ },
+ "build_kwargs": {
+  "provider": "net",
+  "net_from": "m2a_dist/A7_s0"
+ },
+ "sources_verified": {
+  "net_from": {
+   "run": "m2a_dist/A7_s0",
+   "model_sha256": "ca29c9077f1c0760e44f8428a1e8f6792b312b323a462716acc5b15b884841f8",
+   "weights_sha256": "805f22c1aaf033061af7175e3b0d22d3def8b14b3935d5418d3b6e99896dc780",
+   "machine_id": "h200-g1056-97b197a7",
+   "trained_on": {
+    "machine_id": "h200-g1056-97b197a7",
+    "source": "trained in this job"
+   },
+   "row": {
+    "stage": "m2a_dist",
+    "name": "A7_s0",
+    "timestamp": "2026-11-25T20:59:54+00:00",
+    "stream_id": "g1056-s12345-b128-iid-val731a1997@h200-g1056-97b197a7",
+    "val_nll_sha256": "1fd459ed8a6fe444f46f9095b335de5a7cc74e3a500a1d76abb4951ccc596ad2",
+    "checkpoint_sha256": "ca29c9077f1c0760e44f8428a1e8f6792b312b323a462716acc5b15b884841f8"
+   }
+  }
+ },
+ "machine_id": "h200-g1056-97b197a7",
+ "machine_tag": {
+  "id": "h200-g1056-97b197a7",
+  "fields": {
+   "cublas_workspace_config": null,
+   "cuda": "13.0",
+   "cudnn": 92400,
+   "deterministic": true,
+   "draw": "native",
+   "gpu_name": "NVIDIA H200",
+   "launch_grid": 1056,
+   "max_threads_per_sm": 2048,
+   "python": "3.13.12",
+   "sm_count": 132,
+   "tf32_cudnn": false,
+   "tf32_matmul": false,
+   "torch": "2.14.0+cu130"
+  },
+  "settings_sha8": "f03f136f"
+ }
+}

@@ -1,0 +1,292 @@
+{
+ "name": "A10n_s0",
+ "stage": "m2a_dist",
+ "smoke": false,
+ "spec": {
+  "name": "A10n_s0",
+  "rung": "A10",
+  "factory": "mixture",
+  "kwargs": {
+   "provider": "net",
+   "net_from": "m2a_dist/A10_s0"
+  },
+  "seed": 0,
+  "provider": "net",
+  "cls": "primary-net",
+  "comparator": "A2n_s0",
+  "steps": 6000,
+  "lr": null,
+  "k_train": 16,
+  "init_eval": false,
+  "notes": ""
+ },
+ "build_kwargs": {
+  "provider": "net",
+  "net_from": "m2a_dist/A10_s0"
+ },
+ "fit_config": {
+  "steps": 6000,
+  "lr": 0.001,
+  "lr_end": 6.666666666666667e-05,
+  "batch": 256,
+  "k_train": 16,
+  "fold": "iid",
+  "k_val": 64,
+  "eval_every": 500,
+  "selection": "last",
+  "ema_decay": null,
+  "smooth": 0.0,
+  "weight_decay": 0.0001,
+  "seed": 0,
+  "name": "A10n_s0",
+  "clip": 5.0,
+  "val_seed": 12345,
+  "val_batch": 128,
+  "fold_rng": "dedicated",
+  "deterministic": false
+ },
+ "fit": {
+  "name": "A10n_s0",
+  "config_hash": "72980c9791000fd0",
+  "step": 6000,
+  "skipped_loss": 0,
+  "skipped_grad": 0,
+  "selection": "last",
+  "selected_step": 6000,
+  "selected_val": 18.1261427257372,
+  "final_val": 18.1261427257372,
+  "final_val_ema": null,
+  "best_val": 18.1261427257372,
+  "best_step": 6000,
+  "has_ema": false,
+  "resumed_from": null,
+  "seconds": 72.99177694320679,
+  "out_dir": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2a_dist/A10n_s0",
+  "model_path": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2a_dist/A10n_s0/model.pt"
+ },
+ "history": [
+  {
+   "step": 500,
+   "lr": 0.0009841618985650929,
+   "train_nll": 18.125061923980713,
+   "n_train_steps": 500,
+   "val": 18.128859804784973,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 6.041361570358276
+  },
+  {
+   "step": 1000,
+   "lr": 0.0009376006394087501,
+   "train_nll": 18.129206562042235,
+   "n_train_steps": 500,
+   "val": 18.127764241846908,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 12.131696701049805
+  },
+  {
+   "step": 1500,
+   "lr": 0.0008634892314266825,
+   "train_nll": 18.124000095367432,
+   "n_train_steps": 500,
+   "val": 18.127953758175956,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 18.22083020210266
+  },
+  {
+   "step": 2000,
+   "lr": 0.0007668782445979717,
+   "train_nll": 18.12363433456421,
+   "n_train_steps": 500,
+   "val": 18.12719729886007,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 24.319475173950195
+  },
+  {
+   "step": 2500,
+   "lr": 0.0006543515580177892,
+   "train_nll": 18.123464778900146,
+   "n_train_steps": 500,
+   "val": 18.12704702900405,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 30.41356635093689
+  },
+  {
+   "step": 3000,
+   "lr": 0.0005335776794174299,
+   "train_nll": 18.122680656433104,
+   "n_train_steps": 500,
+   "val": 18.127083922485046,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 36.49271321296692
+  },
+  {
+   "step": 3500,
+   "lr": 0.00041278714903522987,
+   "train_nll": 18.124886054992675,
+   "n_train_steps": 500,
+   "val": 18.126446187328735,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 42.62395358085632
+  },
+  {
+   "step": 4000,
+   "lr": 0.00030021164190096043,
+   "train_nll": 18.123958755493163,
+   "n_train_steps": 500,
+   "val": 18.12628826319972,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 48.70711302757263
+  },
+  {
+   "step": 4500,
+   "lr": 0.00020352299278600795,
+   "train_nll": 18.121204723358154,
+   "n_train_steps": 500,
+   "val": 18.126295794101065,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 54.72346782684326
+  },
+  {
+   "step": 5000,
+   "lr": 0.00012931037334199333,
+   "train_nll": 18.123937870025635,
+   "n_train_steps": 500,
+   "val": 18.12624441657178,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 60.75984811782837
+  },
+  {
+   "step": 5500,
+   "lr": 8.263125094187496e-05,
+   "train_nll": 18.121873050689697,
+   "n_train_steps": 500,
+   "val": 18.126294251445145,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 66.80157423019409
+  },
+  {
+   "step": 6000,
+   "lr": 6.666673063632335e-05,
+   "train_nll": 18.12350580215454,
+   "n_train_steps": 500,
+   "val": 18.1261427257372,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 72.98670887947083
+  }
+ ],
+ "val_mean": 18.1261427257372,
+ "k": 599,
+ "kl_map": 2.2638461814494804e-05,
+ "checkpoint_sha256": "f50674ea5b030b129701d4c1073054462fde6374af66c05f5966708d89e62b76",
+ "val_nll_sha256": "e1aa43fb98ce56446e895d42818e7545c197abea498565f7394de70f81665fe2",
+ "build_seconds": 3.4779345989227295,
+ "job_seconds": 77.1589834690094,
+ "sources_verified": {
+  "net_from": {
+   "run": "m2a_dist/A10_s0",
+   "model_sha256": "f1a9064e0ae1d63125b79f7a8bc9de3d90c0db0e4ab077cc83d3448d2c5be1ae",
+   "weights_sha256": "7856cf1be0c3df95e1914292ec2aaf5c24b974c61d016644b6113965f69ab6c4",
+   "machine_id": "h200-g1056-97b197a7",
+   "trained_on": {
+    "machine_id": "h200-g1056-97b197a7",
+    "source": "trained in this job"
+   },
+   "row": {
+    "stage": "m2a_dist",
+    "name": "A10_s0",
+    "timestamp": "2026-11-25T21:03:28+00:00",
+    "stream_id": "g1056-s12345-b128-iid-val731a1997@h200-g1056-97b197a7",
+    "val_nll_sha256": "30a300cc6b4e21ddc03a1c6e334f24e9b046b3de2653a633d695dc3711f90e65",
+    "checkpoint_sha256": "f1a9064e0ae1d63125b79f7a8bc9de3d90c0db0e4ab077cc83d3448d2c5be1ae"
+   }
+  }
+ },
+ "machine_id": "h200-g1056-97b197a7",
+ "machine_tag": {
+  "id": "h200-g1056-97b197a7",
+  "fields": {
+   "cublas_workspace_config": null,
+   "cuda": "13.0",
+   "cudnn": 92400,
+   "deterministic": true,
+   "draw": "native",
+   "gpu_name": "NVIDIA H200",
+   "launch_grid": 1056,
+   "max_threads_per_sm": 2048,
+   "python": "3.13.12",
+   "sm_count": 132,
+   "tf32_cudnn": false,
+   "tf32_matmul": false,
+   "torch": "2.14.0+cu130"
+  },
+  "settings_sha8": "f03f136f"
+ },
+ "stream_id": "g1056-s12345-b128-iid-val731a1997@h200-g1056-97b197a7",
+ "batch": {
+  "what": "run_m2a",
+  "machine_id": "h200-g1056-97b197a7",
+  "startup_tag": {
+   "id": "h200-g1056-97b197a7",
+   "fields": {
+    "cublas_workspace_config": null,
+    "cuda": "13.0",
+    "cudnn": 92400,
+    "deterministic": true,
+    "draw": "native",
+    "gpu_name": "NVIDIA H200",
+    "launch_grid": 1056,
+    "max_threads_per_sm": 2048,
+    "python": "3.13.12",
+    "sm_count": 132,
+    "tf32_cudnn": false,
+    "tf32_matmul": false,
+    "torch": "2.14.0+cu130"
+   },
+   "settings_sha8": "f03f136f"
+  },
+  "host_id": "d9e68da0aed7",
+  "caps": {
+   "gpu_mem_cap_gb": 10.0,
+   "cpu_threads": 4,
+   "device_total_gb": 139.80242919921875,
+   "gpu_mem_fraction": 0.07152951531156858
+  },
+  "git": {
+   "commit": "5ddfd9f422f9c4470b940b5d2736d1726d937937",
+   "clean": true,
+   "n_changed": 0,
+   "upstream": "5ddfd9f422f9c4470b940b5d2736d1726d937937",
+   "head_equals_upstream": true
+  },
+  "pristine_mode": true,
+  "stage": "m2a_dist",
+  "smoke": false,
+  "out": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2a_dist",
+  "file_access_guard_active": true
+ },
+ "finished_utc": "2026-11-25T21:17:15+00:00"
+}

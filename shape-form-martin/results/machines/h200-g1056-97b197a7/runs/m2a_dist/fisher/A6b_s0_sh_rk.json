@@ -1,0 +1,15 @@
+{
+ "run": "A6b_s0",
+ "row": "sh_rk",
+ "coefficient": 3.6810402870178223,
+ "h": 0.01,
+ "sum_nll": {
+  "-1": 1264396.2687511444,
+  "0": 1264396.263144493,
+  "1": 1264396.3918561935
+ },
+ "observed_information": 1343.1835174560547,
+ "se_coefficient": 0.02728552554283298,
+ "n_train_events": 69783,
+ "definition": "Observed Fisher information of the Burr-in-depth shape k of A6b (raw row sh_rk, degree 0: one coefficient) on\nthe TRAINING events: I = d^2/dc^2 sum_e nll_e at fixed fold points (K = 16, seed 12345, batch 128, inside\ndeterministic()), central second difference with h = 0.01 in the raw coefficient; SE(c) = 1/sqrt(I)."
+}

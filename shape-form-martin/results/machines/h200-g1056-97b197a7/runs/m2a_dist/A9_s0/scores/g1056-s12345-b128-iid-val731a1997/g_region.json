@@ -1,0 +1,65 @@
+{
+ "name": "A9_s0",
+ "arrays": {
+  "deep": {
+   "path": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2a_dist/A9_s0/scores/g1056-s12345-b128-iid-val731a1997/g_region_deep.npy",
+   "sha256": "dc13e54e39f081ef792316b7e42cba09e8a5abb10d07f6f63502a54647d174be"
+  },
+  "border_ring": {
+   "path": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2a_dist/A9_s0/scores/g1056-s12345-b128-iid-val731a1997/g_region_border_ring.npy",
+   "sha256": "8e533ea6419ffb1e918b55b4b821ca195f5f1619b6195332a5bb8c08cb0667b9"
+  },
+  "border_zbin": {
+   "path": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2a_dist/A9_s0/scores/g1056-s12345-b128-iid-val731a1997/g_region_border_zbin.npy",
+   "sha256": "2c92251bab47e89ea4cd174fd14790e0d5ec4e88710a00efd3fe9fe273888f57"
+  },
+  "low_abar": {
+   "path": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2a_dist/A9_s0/scores/g1056-s12345-b128-iid-val731a1997/g_region_low_abar.npy",
+   "sha256": "cf4989916fd88491dc8fe9eca76484e72a84e8e8fc01b9108065c771a7808852"
+  },
+  "flagged": {
+   "path": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2a_dist/A9_s0/scores/g1056-s12345-b128-iid-val731a1997/g_region_flagged.npy",
+   "sha256": "fe4919bf9fd3028edcb42becf80de42bf9cb9cee826e5e8e2e847e7d88ea66af"
+  },
+  "inner": {
+   "path": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2a_dist/A9_s0/scores/g1056-s12345-b128-iid-val731a1997/g_region_inner.npy",
+   "sha256": "70c402167bacf65f1dfdf22604403ec8c3ea735a643358f0a1abb7fd12c2aeb1"
+  },
+  "normalisation": {
+   "path": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2a_dist/A9_s0/scores/g1056-s12345-b128-iid-val731a1997/g_region_normalisation.npy",
+   "sha256": "b0c6de2294592946c99f72400b5ab2b0b8d0e898a5b286cd9e9252252a264ff3"
+  }
+ },
+ "n_hits": 4168192,
+ "identity_check": {
+  "parts_nll_vs_parts_sum_max_abs": 1.0589556712403692e-05,
+  "parts_nll_vs_registered_k64": {
+   "comparable": true,
+   "n": 14950,
+   "max_abs": 0.0,
+   "rms": 0.0,
+   "mean_values": 18.120189144555543,
+   "mean_target": 18.120189144555543,
+   "mean_diff": 0.0,
+   "n_above": {
+    "1e-06": 0,
+    "1e-05": 0,
+    "3e-05": 0,
+    "5e-05": 0,
+    "0.0001": 0,
+    "0.001": 0
+   },
+   "bit_identical": true,
+   "largest": [],
+   "strict_pass": true,
+   "relaxed_pass": true,
+   "p3_flag_events_above_5e-5": 0,
+   "tolerances": {
+    "event": 0.0001,
+    "mean": 1e-06,
+    "p3_flag": 5e-05,
+    "relaxed": "<= 3 events > 1e-4, none > 1e-3, rms <= 1e-5, means within 1e-6"
+   }
+  }
+ }
+}

@@ -1,0 +1,227 @@
+{
+ "name": "A2e_s0",
+ "stage": "m2a_dist",
+ "smoke": false,
+ "spec": {
+  "name": "A2e_s0",
+  "rung": "A2e",
+  "factory": "component",
+  "kwargs": {
+   "variant": "legacy_exact"
+  },
+  "seed": 0,
+  "provider": "poly",
+  "cls": "exploratory",
+  "comparator": "A0_s0",
+  "steps": 4000,
+  "lr": null,
+  "k_train": 16,
+  "init_eval": false,
+  "notes": ""
+ },
+ "build_kwargs": {
+  "variant": "legacy_exact"
+ },
+ "fit_config": {
+  "steps": 4000,
+  "lr": 0.003,
+  "lr_end": 0.0002,
+  "batch": 256,
+  "k_train": 16,
+  "fold": "iid",
+  "k_val": 64,
+  "eval_every": 500,
+  "selection": "last",
+  "ema_decay": null,
+  "smooth": 0.0,
+  "weight_decay": 0.0,
+  "seed": 0,
+  "name": "A2e_s0",
+  "clip": 5.0,
+  "val_seed": 12345,
+  "val_batch": 128,
+  "fold_rng": "dedicated",
+  "deterministic": false
+ },
+ "fit": {
+  "name": "A2e_s0",
+  "config_hash": "b866a549f5be2926",
+  "step": 4000,
+  "skipped_loss": 0,
+  "skipped_grad": 0,
+  "selection": "last",
+  "selected_step": 4000,
+  "selected_val": 18.12054304346193,
+  "final_val": 18.12054304346193,
+  "final_val_ema": null,
+  "best_val": 18.120532193199846,
+  "best_step": 3000,
+  "has_ema": false,
+  "resumed_from": null,
+  "seconds": 52.912750005722046,
+  "out_dir": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2a_dist/A2e_s0",
+  "model_path": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2a_dist/A2e_s0/model.pt"
+ },
+ "history": [
+  {
+   "step": 500,
+   "lr": 0.00289385172895674,
+   "train_nll": 18.117343208312988,
+   "n_train_steps": 500,
+   "val": 18.120572885047633,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 6.560150861740112
+  },
+  {
+   "step": 1000,
+   "lr": 0.0025907266927701145,
+   "train_nll": 18.12211237335205,
+   "n_train_steps": 500,
+   "val": 18.120619242231182,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 13.118388891220093
+  },
+  {
+   "step": 1500,
+   "lr": 0.0021367724985690705,
+   "train_nll": 18.117096393585204,
+   "n_train_steps": 500,
+   "val": 18.120719940415196,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 19.708426475524902
+  },
+  {
+   "step": 2000,
+   "lr": 0.001601099557315693,
+   "train_nll": 18.11704354095459,
+   "n_train_steps": 500,
+   "val": 18.120710624452418,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 26.29886817932129
+  },
+  {
+   "step": 2500,
+   "lr": 0.0010652592184285344,
+   "train_nll": 18.117326168060302,
+   "n_train_steps": 500,
+   "val": 18.120551329328862,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 32.94436502456665
+  },
+  {
+   "step": 3000,
+   "lr": 0.0006108283160983712,
+   "train_nll": 18.11675034713745,
+   "n_train_steps": 500,
+   "val": 18.120532193199846,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 39.59571313858032
+  },
+  {
+   "step": 3500,
+   "lr": 0.00030698983577858027,
+   "train_nll": 18.119185585021974,
+   "n_train_steps": 500,
+   "val": 18.120571953636347,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 46.25400733947754
+  },
+  {
+   "step": 4000,
+   "lr": 0.00020000043179517035,
+   "train_nll": 18.11838244628906,
+   "n_train_steps": 500,
+   "val": 18.12054304346193,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 52.909069299697876
+  }
+ ],
+ "val_mean": 18.12054304346193,
+ "k": 101,
+ "kl_map": 0.006753522902727127,
+ "checkpoint_sha256": "a4b1388bf3ceea5c040ce0c88e67c38546b65ea11a1bcd029d2b6a199f2a72ef",
+ "val_nll_sha256": "8b7484e28651ad6924c4da121704b0c27b0f7942177b50928326c8cb9fdb706a",
+ "build_seconds": 0.013164281845092773,
+ "job_seconds": 53.71623182296753,
+ "sources_verified": {},
+ "machine_id": "h200-g1056-97b197a7",
+ "machine_tag": {
+  "id": "h200-g1056-97b197a7",
+  "fields": {
+   "cublas_workspace_config": null,
+   "cuda": "13.0",
+   "cudnn": 92400,
+   "deterministic": true,
+   "draw": "native",
+   "gpu_name": "NVIDIA H200",
+   "launch_grid": 1056,
+   "max_threads_per_sm": 2048,
+   "python": "3.13.12",
+   "sm_count": 132,
+   "tf32_cudnn": false,
+   "tf32_matmul": false,
+   "torch": "2.14.0+cu130"
+  },
+  "settings_sha8": "f03f136f"
+ },
+ "stream_id": "g1056-s12345-b128-iid-val731a1997@h200-g1056-97b197a7",
+ "batch": {
+  "what": "run_m2a",
+  "machine_id": "h200-g1056-97b197a7",
+  "startup_tag": {
+   "id": "h200-g1056-97b197a7",
+   "fields": {
+    "cublas_workspace_config": null,
+    "cuda": "13.0",
+    "cudnn": 92400,
+    "deterministic": true,
+    "draw": "native",
+    "gpu_name": "NVIDIA H200",
+    "launch_grid": 1056,
+    "max_threads_per_sm": 2048,
+    "python": "3.13.12",
+    "sm_count": 132,
+    "tf32_cudnn": false,
+    "tf32_matmul": false,
+    "torch": "2.14.0+cu130"
+   },
+   "settings_sha8": "f03f136f"
+  },
+  "host_id": "d9e68da0aed7",
+  "caps": {
+   "gpu_mem_cap_gb": 10.0,
+   "cpu_threads": 4,
+   "device_total_gb": 139.80242919921875,
+   "gpu_mem_fraction": 0.07152951531156858
+  },
+  "git": {
+   "commit": "5ddfd9f422f9c4470b940b5d2736d1726d937937",
+   "clean": true,
+   "n_changed": 0,
+   "upstream": "5ddfd9f422f9c4470b940b5d2736d1726d937937",
+   "head_equals_upstream": true
+  },
+  "pristine_mode": true,
+  "stage": "m2a_dist",
+  "smoke": false,
+  "out": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2a_dist",
+  "file_access_guard_active": true
+ },
+ "finished_utc": "2026-11-25T20:50:49+00:00"
+}

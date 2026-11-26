@@ -1,0 +1,228 @@
+{
+ "name": "plr_A2n_lr0.001",
+ "stage": "m2a_dist",
+ "smoke": false,
+ "spec": {
+  "name": "plr_A2n_lr0.001",
+  "rung": "plr",
+  "factory": "component",
+  "kwargs": {
+   "variant": "survival_exact",
+   "provider": "net",
+   "net_from": "m2a_dist/A2s_s0"
+  },
+  "seed": 0,
+  "provider": "net",
+  "cls": "pilot",
+  "comparator": null,
+  "steps": 3000,
+  "lr": 0.001,
+  "k_train": 16,
+  "init_eval": false,
+  "notes": "learning-rate pilot P-lr (not a comparison); ParamNet fit_to A2s_s0"
+ },
+ "build_kwargs": {
+  "variant": "survival_exact",
+  "provider": "net",
+  "net_from": "m2a_dist/A2s_s0"
+ },
+ "fit_config": {
+  "steps": 3000,
+  "lr": 0.001,
+  "lr_end": 6.666666666666667e-05,
+  "batch": 256,
+  "k_train": 16,
+  "fold": "iid",
+  "k_val": 64,
+  "eval_every": 500,
+  "selection": "last",
+  "ema_decay": null,
+  "smooth": 0.0,
+  "weight_decay": 0.0001,
+  "seed": 0,
+  "name": "plr_A2n_lr0.001",
+  "clip": 5.0,
+  "val_seed": 12345,
+  "val_batch": 128,
+  "fold_rng": "dedicated",
+  "deterministic": false
+ },
+ "fit": {
+  "name": "plr_A2n_lr0.001",
+  "config_hash": "633dee6755eaa807",
+  "step": 3000,
+  "skipped_loss": 0,
+  "skipped_grad": 0,
+  "selection": "last",
+  "selected_step": 3000,
+  "selected_val": 18.120800391551246,
+  "final_val": 18.120800391551246,
+  "final_val_ema": null,
+  "best_val": 18.12076505794972,
+  "best_step": 1000,
+  "has_ema": false,
+  "resumed_from": null,
+  "seconds": 43.62156534194946,
+  "out_dir": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2a_dist/plr_A2n_lr0.001",
+  "model_path": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2a_dist/plr_A2n_lr0.001/model.pt"
+ },
+ "history": [
+  {
+   "step": 500,
+   "lr": 0.0009377226462193005,
+   "train_nll": 18.11754998397827,
+   "n_train_steps": 500,
+   "val": 18.12099102996265,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 7.274974822998047
+  },
+  {
+   "step": 1000,
+   "lr": 0.0007670897585016513,
+   "train_nll": 18.12228352355957,
+   "n_train_steps": 500,
+   "val": 18.12076505794972,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 14.506417036056519
+  },
+  {
+   "step": 1500,
+   "lr": 0.0005338220254345624,
+   "train_nll": 18.117264987945557,
+   "n_train_steps": 500,
+   "val": 18.120778906895563,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 21.753886699676514
+  },
+  {
+   "step": 2000,
+   "lr": 0.00030042334771359345,
+   "train_nll": 18.117140747070312,
+   "n_train_steps": 500,
+   "val": 18.12089193873581,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 29.041539430618286
+  },
+  {
+   "step": 2500,
+   "lr": 0.00012943271254858764,
+   "train_nll": 18.11741563796997,
+   "n_train_steps": 500,
+   "val": 18.12082574557301,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 36.278279066085815
+  },
+  {
+   "step": 3000,
+   "lr": 6.666692254527589e-05,
+   "train_nll": 18.116816440582276,
+   "n_train_steps": 500,
+   "val": 18.120800391551246,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 43.61429238319397
+  }
+ ],
+ "val_mean": 18.120800391551246,
+ "k": 699,
+ "kl_map": 6.985948857618496e-06,
+ "checkpoint_sha256": "229ca48ce852bbe3c60c3f9d2c6cc213da4a3fa215d2721502a68f3a2e92c7e2",
+ "val_nll_sha256": "55864e6a3b9a01016222038cf0f16da2a770bcc57f228d0e403f05b111c21503",
+ "build_seconds": 3.445490598678589,
+ "job_seconds": 47.88538861274719,
+ "sources_verified": {
+  "net_from": {
+   "run": "m2a_dist/A2s_s0",
+   "model_sha256": "e814e6b472531d8ba1f77c97dcbe612120fb78b97a638f73fefa721fb09197c4",
+   "weights_sha256": "a1fd53dac1ad217688e3c8302e0471e08f85463a071acd20cee1b15d8a502ba6",
+   "machine_id": "h200-g1056-97b197a7",
+   "trained_on": {
+    "machine_id": "h200-g1056-97b197a7",
+    "source": "trained in this job"
+   },
+   "row": {
+    "stage": "m2a_dist",
+    "name": "A2s_s0",
+    "timestamp": "2026-11-25T20:44:27+00:00",
+    "stream_id": "g1056-s12345-b128-iid-val731a1997@h200-g1056-97b197a7",
+    "val_nll_sha256": "d12dcd0181f8b33c91aac977479c48c15f572b7da5000396eebbfae94be7aae7",
+    "checkpoint_sha256": "e814e6b472531d8ba1f77c97dcbe612120fb78b97a638f73fefa721fb09197c4"
+   }
+  }
+ },
+ "machine_id": "h200-g1056-97b197a7",
+ "machine_tag": {
+  "id": "h200-g1056-97b197a7",
+  "fields": {
+   "cublas_workspace_config": null,
+   "cuda": "13.0",
+   "cudnn": 92400,
+   "deterministic": true,
+   "draw": "native",
+   "gpu_name": "NVIDIA H200",
+   "launch_grid": 1056,
+   "max_threads_per_sm": 2048,
+   "python": "3.13.12",
+   "sm_count": 132,
+   "tf32_cudnn": false,
+   "tf32_matmul": false,
+   "torch": "2.14.0+cu130"
+  },
+  "settings_sha8": "f03f136f"
+ },
+ "stream_id": "g1056-s12345-b128-iid-val731a1997@h200-g1056-97b197a7",
+ "batch": {
+  "what": "run_m2a",
+  "machine_id": "h200-g1056-97b197a7",
+  "startup_tag": {
+   "id": "h200-g1056-97b197a7",
+   "fields": {
+    "cublas_workspace_config": null,
+    "cuda": "13.0",
+    "cudnn": 92400,
+    "deterministic": true,
+    "draw": "native",
+    "gpu_name": "NVIDIA H200",
+    "launch_grid": 1056,
+    "max_threads_per_sm": 2048,
+    "python": "3.13.12",
+    "sm_count": 132,
+    "tf32_cudnn": false,
+    "tf32_matmul": false,
+    "torch": "2.14.0+cu130"
+   },
+   "settings_sha8": "f03f136f"
+  },
+  "host_id": "d9e68da0aed7",
+  "caps": {
+   "gpu_mem_cap_gb": 10.0,
+   "cpu_threads": 4,
+   "device_total_gb": 139.80242919921875,
+   "gpu_mem_fraction": 0.07152951531156858
+  },
+  "git": {
+   "commit": "5ddfd9f422f9c4470b940b5d2736d1726d937937",
+   "clean": true,
+   "n_changed": 0,
+   "upstream": "5ddfd9f422f9c4470b940b5d2736d1726d937937",
+   "head_equals_upstream": true
+  },
+  "pristine_mode": true,
+  "stage": "m2a_dist",
+  "smoke": false,
+  "out": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2a_dist",
+  "file_access_guard_active": true
+ },
+ "finished_utc": "2026-11-25T20:45:15+00:00"
+}

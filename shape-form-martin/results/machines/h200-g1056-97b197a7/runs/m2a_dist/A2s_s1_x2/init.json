@@ -1,0 +1,54 @@
+{
+ "init_info": {
+  "provider": "poly",
+  "start": null,
+  "init": "none",
+  "template": "stored",
+  "coef_shift": null,
+  "kl_ref": "legacy formula (legacy_centre, legacy coefficients, stored template)",
+  "kl_map": 0.007196558173745871
+ },
+ "build_seconds": 0.013599634170532227,
+ "n_params": 101,
+ "spec": {
+  "name": "A2s_s1_x2",
+  "rung": "A2s",
+  "factory": "component",
+  "kwargs": {
+   "variant": "survival_exact"
+  },
+  "seed": 1,
+  "provider": "poly",
+  "cls": "rerun",
+  "comparator": "A2e_s1",
+  "steps": 8000,
+  "lr": null,
+  "k_train": 16,
+  "init_eval": false,
+  "notes": "comparator rerun with doubled steps for A4_s1"
+ },
+ "build_kwargs": {
+  "variant": "survival_exact"
+ },
+ "sources_verified": {},
+ "machine_id": "h200-g1056-97b197a7",
+ "machine_tag": {
+  "id": "h200-g1056-97b197a7",
+  "fields": {
+   "cublas_workspace_config": null,
+   "cuda": "13.0",
+   "cudnn": 92400,
+   "deterministic": true,
+   "draw": "native",
+   "gpu_name": "NVIDIA H200",
+   "launch_grid": 1056,
+   "max_threads_per_sm": 2048,
+   "python": "3.13.12",
+   "sm_count": 132,
+   "tf32_cudnn": false,
+   "tf32_matmul": false,
+   "torch": "2.14.0+cu130"
+  },
+  "settings_sha8": "f03f136f"
+ }
+}

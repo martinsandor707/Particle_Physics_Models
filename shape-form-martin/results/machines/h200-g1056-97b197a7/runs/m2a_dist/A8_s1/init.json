@@ -1,0 +1,87 @@
+{
+ "init_info": {
+  "provider": "poly",
+  "start": "m2a_dist/A2s_s1",
+  "init": "none",
+  "template": "stored",
+  "copied": 43,
+  "not_copied": [
+   "lat2_rb"
+  ],
+  "coef_shift": null,
+  "kl_ref": "m2a_dist/A2s_s1",
+  "kl_map": -1.7491023740490164e-08
+ },
+ "build_seconds": 0.01926445960998535,
+ "n_params": 102,
+ "spec": {
+  "name": "A8_s1",
+  "rung": "A8",
+  "factory": "component",
+  "kwargs": {
+   "shower_lat": [
+    "gauss",
+    "cauchy",
+    "weibull"
+   ],
+   "start": "m2a_dist/A2s_s1"
+  },
+  "seed": 1,
+  "provider": "poly",
+  "cls": "primary",
+  "comparator": "A2s_s1",
+  "steps": 4000,
+  "lr": null,
+  "k_train": 16,
+  "init_eval": false,
+  "notes": ""
+ },
+ "build_kwargs": {
+  "shower_lat": [
+   "gauss",
+   "cauchy",
+   "weibull"
+  ],
+  "start": "m2a_dist/A2s_s1"
+ },
+ "sources_verified": {
+  "start": {
+   "run": "m2a_dist/A2s_s1",
+   "model_sha256": "a116556106a290a01465e451cd14bf08e5b441a953f96834319fec59ab9b1f40",
+   "weights_sha256": "1b6a797555bff3346c242a7938e7ec2e84e96d7ac24d6161ba10758744123cf4",
+   "machine_id": "h200-g1056-97b197a7",
+   "trained_on": {
+    "machine_id": "h200-g1056-97b197a7",
+    "source": "trained in this job"
+   },
+   "row": {
+    "stage": "m2a_dist",
+    "name": "A2s_s1",
+    "timestamp": "2026-11-25T20:52:36+00:00",
+    "stream_id": "g1056-s12345-b128-iid-val731a1997@h200-g1056-97b197a7",
+    "val_nll_sha256": "68abf6ffa28ac4ad88b61471b905bc23f96bc0d6b229c2ac24d022308eef60e8",
+    "checkpoint_sha256": "a116556106a290a01465e451cd14bf08e5b441a953f96834319fec59ab9b1f40"
+   }
+  }
+ },
+ "machine_id": "h200-g1056-97b197a7",
+ "machine_tag": {
+  "id": "h200-g1056-97b197a7",
+  "fields": {
+   "cublas_workspace_config": null,
+   "cuda": "13.0",
+   "cudnn": 92400,
+   "deterministic": true,
+   "draw": "native",
+   "gpu_name": "NVIDIA H200",
+   "launch_grid": 1056,
+   "max_threads_per_sm": 2048,
+   "python": "3.13.12",
+   "sm_count": 132,
+   "tf32_cudnn": false,
+   "tf32_matmul": false,
+   "torch": "2.14.0+cu130"
+  },
+  "settings_sha8": "f03f136f"
+ }
+}

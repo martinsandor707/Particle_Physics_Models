@@ -1,0 +1,338 @@
+{
+ "name": "A4_s1_x2",
+ "stage": "m2a_dist",
+ "smoke": false,
+ "spec": {
+  "name": "A4_s1_x2",
+  "rung": "A4",
+  "factory": "component",
+  "kwargs": {
+   "shower_long": "emg",
+   "start": "m2a_dist/A2s_s1",
+   "init": "shower_long"
+  },
+  "seed": 1,
+  "provider": "poly",
+  "cls": "rerun",
+  "comparator": "A2s_s1_x2",
+  "steps": 8000,
+  "lr": null,
+  "k_train": 16,
+  "init_eval": false,
+  "notes": "convergence rerun of A4_s1 with doubled steps"
+ },
+ "build_kwargs": {
+  "shower_long": "emg",
+  "start": "m2a_dist/A2s_s1",
+  "init": "shower_long"
+ },
+ "fit_config": {
+  "steps": 8000,
+  "lr": 0.003,
+  "lr_end": 0.0002,
+  "batch": 256,
+  "k_train": 16,
+  "fold": "iid",
+  "k_val": 64,
+  "eval_every": 500,
+  "selection": "last",
+  "ema_decay": null,
+  "smooth": 0.0,
+  "weight_decay": 0.0,
+  "seed": 1,
+  "name": "A4_s1_x2",
+  "clip": 5.0,
+  "val_seed": 12345,
+  "val_batch": 128,
+  "fold_rng": "dedicated",
+  "deterministic": false
+ },
+ "fit": {
+  "name": "A4_s1_x2",
+  "config_hash": "eb25762ad7ca9ba6",
+  "step": 8000,
+  "skipped_loss": 0,
+  "skipped_grad": 0,
+  "selection": "last",
+  "selected_step": 8000,
+  "selected_val": 18.120796348992798,
+  "final_val": 18.120796348992798,
+  "final_val_ema": null,
+  "best_val": 18.120785029420883,
+  "best_step": 6500,
+  "has_ema": false,
+  "resumed_from": null,
+  "seconds": 120.05710434913635,
+  "out_dir": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2a_dist/A4_s1_x2",
+  "model_path": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2a_dist/A4_s1_x2/model.pt"
+ },
+ "history": [
+  {
+   "step": 500,
+   "lr": 0.002973206543193599,
+   "train_nll": 18.11706594467163,
+   "n_train_steps": 500,
+   "val": 18.120958876083527,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 9.034601211547852
+  },
+  {
+   "step": 1000,
+   "lr": 0.002893641636984171,
+   "train_nll": 18.12212861251831,
+   "n_train_steps": 500,
+   "val": 18.120812531665816,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 16.539564847946167
+  },
+  {
+   "step": 1500,
+   "lr": 0.002764362808148032,
+   "train_nll": 18.118439876556398,
+   "n_train_steps": 500,
+   "val": 18.122006526998053,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 23.989503383636475
+  },
+  {
+   "step": 2000,
+   "lr": 0.0025903381695769447,
+   "train_nll": 18.116964714050294,
+   "n_train_steps": 500,
+   "val": 18.120910202013608,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 31.558788061141968
+  },
+  {
+   "step": 2500,
+   "lr": 0.0023782553905370625,
+   "train_nll": 18.118589958190917,
+   "n_train_steps": 500,
+   "val": 18.120984144497875,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 39.04805397987366
+  },
+  {
+   "step": 3000,
+   "lr": 0.002136264693289486,
+   "train_nll": 18.117523460388185,
+   "n_train_steps": 500,
+   "val": 18.120963951480828,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 46.4494092464447
+  },
+  {
+   "step": 3500,
+   "lr": 0.0018736656446194703,
+   "train_nll": 18.118010810852052,
+   "n_train_steps": 500,
+   "val": 18.121126201017244,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 53.862926721572876
+  },
+  {
+   "step": 4000,
+   "lr": 0.001600549778700225,
+   "train_nll": 18.118316604614257,
+   "n_train_steps": 500,
+   "val": 18.120819465611692,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 61.247917890548706
+  },
+  {
+   "step": 4500,
+   "lr": 0.0013274127850938485,
+   "train_nll": 18.118546031951904,
+   "n_train_steps": 500,
+   "val": 18.12090374471352,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 68.59763407707214
+  },
+  {
+   "step": 5000,
+   "lr": 0.0010647511652876556,
+   "train_nll": 18.11668129348755,
+   "n_train_steps": 500,
+   "val": 18.120958946955245,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 75.93937921524048
+  },
+  {
+   "step": 5500,
+   "lr": 0.0008226588580284476,
+   "train_nll": 18.120948539733888,
+   "n_train_steps": 500,
+   "val": 18.120812524138486,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 83.3076753616333
+  },
+  {
+   "step": 6000,
+   "lr": 0.0006104393349172653,
+   "train_nll": 18.117246562957764,
+   "n_train_steps": 500,
+   "val": 18.12086377740305,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 90.7125461101532
+  },
+  {
+   "step": 6500,
+   "lr": 0.0004362480732132009,
+   "train_nll": 18.11714009094238,
+   "n_train_steps": 500,
+   "val": 18.120785029420883,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 98.06045603752136
+  },
+  {
+   "step": 7000,
+   "lr": 0.0003067791454159411,
+   "train_nll": 18.11474911880493,
+   "n_train_steps": 500,
+   "val": 18.12080702242644,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 105.41747546195984
+  },
+  {
+   "step": 7500,
+   "lr": 0.0002270079698137389,
+   "train_nll": 18.12308581161499,
+   "n_train_steps": 500,
+   "val": 18.12084030916858,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 112.77349853515625
+  },
+  {
+   "step": 8000,
+   "lr": 0.0002000001079487967,
+   "train_nll": 18.11636926269531,
+   "n_train_steps": 500,
+   "val": 18.120796348992798,
+   "val_ema": null,
+   "skipped_loss": 0,
+   "skipped_grad": 0,
+   "seconds": 120.05337905883789
+  }
+ ],
+ "val_mean": 18.120796348992798,
+ "k": 93,
+ "kl_map": 0.00012462030281312764,
+ "checkpoint_sha256": "ffb50ede3d2e2f5aac6078a6b64990a48f5a07e236965dcdcada0e5a14c68035",
+ "val_nll_sha256": "5640b9dc212d3a5e2c5a9702e6d58298382d5d041275ae2156311ea06338d1c8",
+ "build_seconds": 7.016095399856567,
+ "job_seconds": 127.87578439712524,
+ "sources_verified": {
+  "start": {
+   "run": "m2a_dist/A2s_s1",
+   "model_sha256": "a116556106a290a01465e451cd14bf08e5b441a953f96834319fec59ab9b1f40",
+   "weights_sha256": "1b6a797555bff3346c242a7938e7ec2e84e96d7ac24d6161ba10758744123cf4",
+   "machine_id": "h200-g1056-97b197a7",
+   "trained_on": {
+    "machine_id": "h200-g1056-97b197a7",
+    "source": "trained in this job"
+   },
+   "row": {
+    "stage": "m2a_dist",
+    "name": "A2s_s1",
+    "timestamp": "2026-11-25T20:52:36+00:00",
+    "stream_id": "g1056-s12345-b128-iid-val731a1997@h200-g1056-97b197a7",
+    "val_nll_sha256": "68abf6ffa28ac4ad88b61471b905bc23f96bc0d6b229c2ac24d022308eef60e8",
+    "checkpoint_sha256": "a116556106a290a01465e451cd14bf08e5b441a953f96834319fec59ab9b1f40"
+   }
+  }
+ },
+ "machine_id": "h200-g1056-97b197a7",
+ "machine_tag": {
+  "id": "h200-g1056-97b197a7",
+  "fields": {
+   "cublas_workspace_config": null,
+   "cuda": "13.0",
+   "cudnn": 92400,
+   "deterministic": true,
+   "draw": "native",
+   "gpu_name": "NVIDIA H200",
+   "launch_grid": 1056,
+   "max_threads_per_sm": 2048,
+   "python": "3.13.12",
+   "sm_count": 132,
+   "tf32_cudnn": false,
+   "tf32_matmul": false,
+   "torch": "2.14.0+cu130"
+  },
+  "settings_sha8": "f03f136f"
+ },
+ "stream_id": "g1056-s12345-b128-iid-val731a1997@h200-g1056-97b197a7",
+ "batch": {
+  "what": "run_m2a",
+  "machine_id": "h200-g1056-97b197a7",
+  "startup_tag": {
+   "id": "h200-g1056-97b197a7",
+   "fields": {
+    "cublas_workspace_config": null,
+    "cuda": "13.0",
+    "cudnn": 92400,
+    "deterministic": true,
+    "draw": "native",
+    "gpu_name": "NVIDIA H200",
+    "launch_grid": 1056,
+    "max_threads_per_sm": 2048,
+    "python": "3.13.12",
+    "sm_count": 132,
+    "tf32_cudnn": false,
+    "tf32_matmul": false,
+    "torch": "2.14.0+cu130"
+   },
+   "settings_sha8": "f03f136f"
+  },
+  "host_id": "d9e68da0aed7",
+  "caps": {
+   "gpu_mem_cap_gb": 10.0,
+   "cpu_threads": 4,
+   "device_total_gb": 139.80242919921875,
+   "gpu_mem_fraction": 0.07152951531156858
+  },
+  "git": {
+   "commit": "5ddfd9f422f9c4470b940b5d2736d1726d937937",
+   "clean": true,
+   "n_changed": 0,
+   "upstream": "5ddfd9f422f9c4470b940b5d2736d1726d937937",
+   "head_equals_upstream": true
+  },
+  "pristine_mode": true,
+  "stage": "m2a_dist",
+  "smoke": false,
+  "out": "<out>/shape-form-martin/results/machines/h200-g1056-97b197a7/runs/m2a_dist",
+  "file_access_guard_active": true
+ },
+ "finished_utc": "2026-11-25T21:25:54+00:00"
+}

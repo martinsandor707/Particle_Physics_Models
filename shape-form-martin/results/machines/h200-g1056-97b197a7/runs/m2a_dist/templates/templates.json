@@ -1,0 +1,95 @@
+{
+ "definition": {
+  "back_corrected": "mean_e A_front&back / mean_e 1[z' < zb_e]",
+  "full_box": "mean_e A_front&back&side / mean_e 1[z' < zb_e]"
+ },
+ "events": "training split (sfm.data.load_sets('train')), 69783 events",
+ "code": "sfm.models.dist_factory.compute_templates / acceptances (port of results/m1_audit/checks/c_side.py::acceptances, ::exit_depth)",
+ "geometry": {
+  "X_E_mm": 2624.4,
+  "z_back_mm": 4882.15,
+  "layer_mm": 20.5,
+  "nsub": 2,
+  "nphi": 24
+ },
+ "fb_vs_stored_abar": {
+  "max_abs": 0.1463146209716797,
+  "mean_abs": 0.0007615587220584038
+ },
+ "front_vs_abar_front": {
+  "max_abs": 0.1463146209716797,
+  "mean_abs": 0.0006340863675908817
+ },
+ "ranges": {
+  "front": {
+   "min": 0.0,
+   "max": 1.0,
+   "mean": 0.8828939238059124
+  },
+  "fb": {
+   "min": 0.0,
+   "max": 1.0,
+   "mean": 0.8091574788866216
+  },
+  "side": {
+   "min": 0.7147630943338977,
+   "max": 0.9998965543200953,
+   "mean": 0.8852098649831227
+  },
+  "all": {
+   "min": 0.0,
+   "max": 0.9973772862633608,
+   "mean": 0.7039723541583065
+  },
+  "front_side": {
+   "min": 0.0,
+   "max": 0.9973772862633608,
+   "mean": 0.7730444266734171
+  },
+  "below_zb": {
+   "min": 0.1864637519166559,
+   "max": 1.0,
+   "mean": 0.937764155936976
+  },
+  "back_corrected": {
+   "min": 0.0,
+   "max": 1.80855015436413,
+   "mean": 0.8719406319625402
+  },
+  "full_box": {
+   "min": 0.0,
+   "max": 0.9973772862633608,
+   "mean": 0.732739581667845
+  }
+ },
+ "cells_above_1": {
+  "back_corrected": 906,
+  "full_box": 0
+ },
+ "sha256": {
+  "back_corrected": "d547ad01194772a35ba7b69e3bfd5baaa2086468f870f394be7505ec3230f39f",
+  "full_box": "d91146541ce4a6e63687340d3decfa57b9ee85227ab1a4fa59a3add8c71fd04c"
+ },
+ "train_theta_sha256": "b25e72b267b9d6771d4087f3f92d08d157cb97704231fb16ae9b7e0994c93b74",
+ "machine_id": "h200-g1056-97b197a7",
+ "machine_tag": {
+  "id": "h200-g1056-97b197a7",
+  "fields": {
+   "cublas_workspace_config": null,
+   "cuda": "13.0",
+   "cudnn": 92400,
+   "deterministic": true,
+   "draw": "native",
+   "gpu_name": "NVIDIA H200",
+   "launch_grid": 1056,
+   "max_threads_per_sm": 2048,
+   "python": "3.13.12",
+   "sm_count": 132,
+   "tf32_cudnn": false,
+   "tf32_matmul": false,
+   "torch": "2.14.0+cu130"
+  },
+  "settings_sha8": "f03f136f"
+ },
+ "seconds": 3.196765184402466
+}

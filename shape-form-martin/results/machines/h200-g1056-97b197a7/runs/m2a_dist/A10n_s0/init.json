@@ -1,0 +1,92 @@
+{
+ "init_info": {
+  "provider": "net",
+  "init": "target",
+  "init_ref": null,
+  "template": "stored",
+  "net_from": "m2a_dist/A10_s0",
+  "fit_to": {
+   "loss": 4.64701879536733e-05,
+   "rms_max": 0.014101341366767883,
+   "rms_max_name": "c0_rsig",
+   "constant_columns": [
+    "c0_lat_rc",
+    "c0_lat_rk",
+    "c1_lat_rc",
+    "c1_lat_rk",
+    "c2_lat_rc",
+    "c2_lat_rk"
+   ],
+   "near_floor_columns": {},
+   "scale_floor_rel": 9.5367431640625e-07,
+   "lbfgs_stopped": null,
+   "fit_to": "sfm.models.paramnet.ParamNet.fit_to (scale floor; no replica)"
+  },
+  "kl_ref": "m2a_dist/A10_s0",
+  "kl_map": 2.2638461814494804e-05
+ },
+ "build_seconds": 3.4779345989227295,
+ "n_params": 599,
+ "spec": {
+  "name": "A10n_s0",
+  "rung": "A10",
+  "factory": "mixture",
+  "kwargs": {
+   "provider": "net",
+   "net_from": "m2a_dist/A10_s0"
+  },
+  "seed": 0,
+  "provider": "net",
+  "cls": "primary-net",
+  "comparator": "A2n_s0",
+  "steps": 6000,
+  "lr": null,
+  "k_train": 16,
+  "init_eval": false,
+  "notes": ""
+ },
+ "build_kwargs": {
+  "provider": "net",
+  "net_from": "m2a_dist/A10_s0"
+ },
+ "sources_verified": {
+  "net_from": {
+   "run": "m2a_dist/A10_s0",
+   "model_sha256": "f1a9064e0ae1d63125b79f7a8bc9de3d90c0db0e4ab077cc83d3448d2c5be1ae",
+   "weights_sha256": "7856cf1be0c3df95e1914292ec2aaf5c24b974c61d016644b6113965f69ab6c4",
+   "machine_id": "h200-g1056-97b197a7",
+   "trained_on": {
+    "machine_id": "h200-g1056-97b197a7",
+    "source": "trained in this job"
+   },
+   "row": {
+    "stage": "m2a_dist",
+    "name": "A10_s0",
+    "timestamp": "2026-11-25T21:03:28+00:00",
+    "stream_id": "g1056-s12345-b128-iid-val731a1997@h200-g1056-97b197a7",
+    "val_nll_sha256": "30a300cc6b4e21ddc03a1c6e334f24e9b046b3de2653a633d695dc3711f90e65",
+    "checkpoint_sha256": "f1a9064e0ae1d63125b79f7a8bc9de3d90c0db0e4ab077cc83d3448d2c5be1ae"
+   }
+  }
+ },
+ "machine_id": "h200-g1056-97b197a7",
+ "machine_tag": {
+  "id": "h200-g1056-97b197a7",
+  "fields": {
+   "cublas_workspace_config": null,
+   "cuda": "13.0",
+   "cudnn": 92400,
+   "deterministic": true,
+   "draw": "native",
+   "gpu_name": "NVIDIA H200",
+   "launch_grid": 1056,
+   "max_threads_per_sm": 2048,
+   "python": "3.13.12",
+   "sm_count": 132,
+   "tf32_cudnn": false,
+   "tf32_matmul": false,
+   "torch": "2.14.0+cu130"
+  },
+  "settings_sha8": "f03f136f"
+ }
+}
